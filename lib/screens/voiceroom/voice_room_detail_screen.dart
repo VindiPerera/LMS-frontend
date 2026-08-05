@@ -69,14 +69,6 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                               borderRadius: BorderRadius.circular(14),
                             ),
                           ),
-                          Positioned(
-                            left: 10,
-                            bottom: 10,
-                            child: _SubtitlesButton(
-                              enabled: _subtitlesOn,
-                              onTap: () => setState(() => _subtitlesOn = !_subtitlesOn),
-                            ),
-                          ),
                           const Positioned(
                             right: 10,
                             bottom: 10,
@@ -184,11 +176,22 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                   const SizedBox(height: 4),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(12, 2, 12, 2),
-                    child: Column(
-                      children: boardComments
-                          .take(1)
-                          .map((c) => _CommentLine(comment: c))
-                          .toList(),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            children: boardComments
+                                .take(1)
+                                .map((c) => _CommentLine(comment: c))
+                                .toList(),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        _SubtitlesButton(
+                          enabled: _subtitlesOn,
+                          onTap: () => setState(() => _subtitlesOn = !_subtitlesOn),
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -227,30 +230,18 @@ class _SubtitlesButton extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: enabled ? Colors.white : Colors.black.withValues(alpha: 0.55),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.4), width: 1),
+          color: enabled ? Colors.white : Colors.black,
+          borderRadius: BorderRadius.circular(4),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.subtitles_rounded,
-              size: 15,
-              color: enabled ? Colors.black : Colors.white,
-            ),
-            const SizedBox(width: 5),
-            Text(
-              'Subtitles',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-                color: enabled ? Colors.black : Colors.white,
-              ),
-            ),
-          ],
+        child: Text(
+          'Subtitles',
+          style: TextStyle(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w800,
+            color: enabled ? Colors.black : Colors.white,
+          ),
         ),
       ),
     );
@@ -277,12 +268,12 @@ class _CommentLine extends StatelessWidget {
               text: TextSpan(
                 children: [
                   TextSpan(
-                    text: '${comment.sender}  ',
-                    style: const TextStyle(fontSize: 12, color: Colors.white54, fontWeight: FontWeight.w700),
+                    text: '${comment.sender}  ·  ',
+                    style: const TextStyle(fontSize: 12, color: Colors.white54, fontWeight: FontWeight.w600),
                   ),
                   TextSpan(
                     text: comment.text,
-                    style: const TextStyle(fontSize: 12.5, color: Colors.white, fontWeight: FontWeight.w600),
+                    style: const TextStyle(fontSize: 12.5, color: Colors.white, fontWeight: FontWeight.w800),
                   ),
                 ],
               ),
