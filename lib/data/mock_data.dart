@@ -86,8 +86,8 @@ const mockUsers = [
     tags: ['Free to Chat', 'New'],
   ),
   AppUser(
-    name: 'HelloTalk Assistant',
-    handle: 'hellotalk_team_helper',
+    name: 'FaceTalk Assistant',
+    handle: 'FaceTalk_team_helper',
     avatarUrl: 'H',
     countryFlag: '🌐',
     nativeLang: 'English',
@@ -95,7 +95,7 @@ const mockUsers = [
     isOnline: true,
     age: 0,
     gender: 'female',
-    bio: 'Official HelloTalk team helper account.',
+    bio: 'Official FaceTalk team helper account.',
     activeLabel: 'Active now',
     tags: ['Official'],
   ),
@@ -147,7 +147,7 @@ Color avatarColorFor(String seed) {
 final List<ChatPreview> mockChats = [
   ChatPreview(
     user: mockUsers[4],
-    lastMessage: 'Welcome to HelloTalk! Tap here to get started 🎉',
+    lastMessage: 'Welcome to FaceTalk! Tap here to get started 🎉',
     time: '12:26 PM',
     unreadCount: 2,
   ),

@@ -11,7 +11,7 @@ class ChatListScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('HelloTalk', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 20)),
+        title: const Text('FaceTalk', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 20)),
         actions: [
           IconButton(icon: const Icon(Icons.search_rounded), onPressed: () {}),
           IconButton(icon: const Icon(Icons.add_circle_outline_rounded), onPressed: () {}),

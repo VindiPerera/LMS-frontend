@@ -1,11 +1,11 @@
 {
-    "name": "hellotalk_clone",
-    "short_name": "hellotalk_clone",
+    "name": "FaceTalk",
+    "short_name": "FaceTalk",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#F7F7FA",
+    "theme_color": "#7B68F4",
+    "description": "FaceTalk connects students and teachers to talk, learn, and practice languages together.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

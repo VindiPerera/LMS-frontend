@@ -1,4 +1,4 @@
-package com.jaan.hellotalk_clone
+package com.jaan.FaceTalk_clone
 
 import io.flutter.embedding.android.FlutterActivity
 

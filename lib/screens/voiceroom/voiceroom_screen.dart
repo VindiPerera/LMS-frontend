@@ -210,7 +210,7 @@ class _WorldCupBanner extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           const Text(
-            'HelloTalk World Cup',
+            'FaceTalk World Cup',
             style: TextStyle(
               color: Colors.white,
               fontSize: 20,

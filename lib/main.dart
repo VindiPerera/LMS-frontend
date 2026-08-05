@@ -1,22 +1,22 @@
 import 'package:flutter/material.dart';
-import 'screens/main_shell.dart';
+import 'screens/auth/splash_screen.dart';
 import 'theme/app_theme.dart';
 
 void main() {
-  runApp(const HelloTalkCloneApp());
+  runApp(const FaceTalkApp());
 }
 
-class HelloTalkCloneApp extends StatelessWidget {
-  const HelloTalkCloneApp({super.key});
+class FaceTalkApp extends StatelessWidget {
+  const FaceTalkApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'HelloTalk Clone UI',
+      title: 'FaceTalk',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
       themeMode: ThemeMode.light,
-      home: const MainShell(),
+      home: const SplashScreen(),
     );
   }
 }

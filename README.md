@@ -1,4 +1,4 @@
-# hellotalk_clone
+# FaceTalk_clone
 
 A new Flutter project.
 

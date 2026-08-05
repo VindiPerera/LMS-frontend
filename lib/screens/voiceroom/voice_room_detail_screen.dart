@@ -15,6 +15,7 @@ class VoiceRoomDetailScreen extends StatefulWidget {
 
 class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
   final _controller = TextEditingController();
+  bool _subtitlesOn = false;
 
   static const bg = Color(0xFF1B1B3A);
   static const bubble = Color(0xFF272753);
@@ -66,6 +67,14 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                             decoration: BoxDecoration(
                               color: Colors.white.withValues(alpha: 0.08),
                               borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                          Positioned(
+                            left: 10,
+                            bottom: 10,
+                            child: _SubtitlesButton(
+                              enabled: _subtitlesOn,
+                              onTap: () => setState(() => _subtitlesOn = !_subtitlesOn),
                             ),
                           ),
                           const Positioned(
@@ -172,11 +181,14 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 4),
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+                    padding: const EdgeInsets.fromLTRB(12, 2, 12, 2),
                     child: Column(
-                      children: boardComments.map((c) => _CommentLine(comment: c)).toList(),
+                      children: boardComments
+                          .take(1)
+                          .map((c) => _CommentLine(comment: c))
+                          .toList(),
                     ),
                   ),
                 ],
@@ -205,6 +217,46 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
   }
 }
 
+class _SubtitlesButton extends StatelessWidget {
+  final bool enabled;
+  final VoidCallback onTap;
+  const _SubtitlesButton({required this.enabled, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: enabled ? Colors.white : Colors.black.withValues(alpha: 0.55),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.4), width: 1),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.subtitles_rounded,
+              size: 15,
+              color: enabled ? Colors.black : Colors.white,
+            ),
+            const SizedBox(width: 5),
+            Text(
+              'Subtitles',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                color: enabled ? Colors.black : Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _CommentLine extends StatelessWidget {
   final BoardComment comment;
   const _CommentLine({required this.comment});
@@ -212,22 +264,28 @@ class _CommentLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
+      padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          AppAvatar(seed: comment.sender, size: 26),
-          const SizedBox(width: 8),
+          AppAvatar(seed: comment.sender, size: 18),
+          const SizedBox(width: 6),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(comment.sender, style: const TextStyle(fontSize: 10.5, color: Colors.white38)),
-                Text(
-                  comment.text,
-                  style: const TextStyle(fontSize: 13.5, color: Colors.white, fontWeight: FontWeight.w600, height: 1.3),
-                ),
-              ],
+            child: RichText(
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              text: TextSpan(
+                children: [
+                  TextSpan(
+                    text: '${comment.sender}  ',
+                    style: const TextStyle(fontSize: 12, color: Colors.white54, fontWeight: FontWeight.w700),
+                  ),
+                  TextSpan(
+                    text: comment.text,
+                    style: const TextStyle(fontSize: 12.5, color: Colors.white, fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -243,38 +301,41 @@ class _Composer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(10, 8, 10, 12),
+      padding: const EdgeInsets.fromLTRB(10, 6, 10, 10),
       child: Row(
         children: [
           Expanded(
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(color: _VoiceRoomDetailScreenState.bubble, borderRadius: BorderRadius.circular(20)),
-              child: TextField(
-                controller: controller,
-                style: const TextStyle(fontSize: 14, color: Colors.white),
-                decoration: const InputDecoration(
-                  hintText: 'Comments...',
-                  hintStyle: TextStyle(color: Colors.white38),
-                  border: InputBorder.none,
-                  isDense: true,
+              height: 36,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(color: _VoiceRoomDetailScreenState.bubble, borderRadius: BorderRadius.circular(18)),
+              child: Center(
+                child: TextField(
+                  controller: controller,
+                  style: const TextStyle(fontSize: 12.5, color: Colors.white),
+                  decoration: const InputDecoration(
+                    hintText: 'Comments...',
+                    hintStyle: TextStyle(color: Colors.white38, fontSize: 12.5),
+                    border: InputBorder.none,
+                    isDense: true,
+                  ),
                 ),
               ),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 6),
           Container(
-            width: 46,
-            height: 46,
+            width: 36,
+            height: 36,
             decoration: const BoxDecoration(color: Color(0xFF4FA8FF), shape: BoxShape.circle),
-            child: const Icon(Icons.mic_off_rounded, size: 24, color: Colors.white),
+            child: const Icon(Icons.mic_off_rounded, size: 18, color: Colors.white),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 6),
           Container(
-            width: 46,
-            height: 46,
+            width: 36,
+            height: 36,
             decoration: const BoxDecoration(color: Color(0xFF7B68F4), shape: BoxShape.circle),
-            child: const Icon(Icons.front_hand_rounded, size: 24, color: Colors.white),
+            child: const Icon(Icons.front_hand_rounded, size: 18, color: Colors.white),
           ),
         ],
       ),

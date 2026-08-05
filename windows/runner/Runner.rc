@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.jaan" "\0"
-            VALUE "FileDescription", "hellotalk_clone" "\0"
+            VALUE "FileDescription", "FaceTalk" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "hellotalk_clone" "\0"
+            VALUE "InternalName", "FaceTalk" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 com.jaan. All rights reserved." "\0"
-            VALUE "OriginalFilename", "hellotalk_clone.exe" "\0"
-            VALUE "ProductName", "hellotalk_clone" "\0"
+            VALUE "OriginalFilename", "FaceTalk.exe" "\0"
+            VALUE "ProductName", "FaceTalk" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

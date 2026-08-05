@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Color palette matching HelloTalk's light UI with purple accents.
+/// Color palette matching FaceTalk's light UI with purple accents.
 class AppColors {
   AppColors._();
 
