@@ -4,6 +4,8 @@ import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
 import 'chat_detail_screen.dart';
 
+import 'add_contact_screen.dart';
+
 class ChatListScreen extends StatelessWidget {
   const ChatListScreen({super.key});
 
@@ -14,7 +16,10 @@ class ChatListScreen extends StatelessWidget {
         title: const Text('FaceTalk', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 20)),
         actions: [
           IconButton(icon: const Icon(Icons.search_rounded), onPressed: () {}),
-          IconButton(icon: const Icon(Icons.add_circle_outline_rounded), onPressed: () {}),
+          IconButton(
+            icon: const Icon(Icons.add_circle_outline_rounded),
+            onPressed: () => AddContactScreen.show(context),
+          ),
         ],
       ),
       body: ListView.separated(
