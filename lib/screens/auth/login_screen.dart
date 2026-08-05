@@ -46,14 +46,14 @@ class _LoginScreenState extends State<LoginScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Center(child: AppLogo(size: 64)),
-              const SizedBox(height: 18),
+              const Center(child: AppLogo(height: 110)),
+              const SizedBox(height: 4),
               const Text(
                 'Welcome back',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: AppColors.textPrimary),
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: AppColors.textPrimary),
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 8),
               const Text(
                 'Log in to keep talking and learning with\nstudents and teachers worldwide.',
                 textAlign: TextAlign.center,

@@ -23,7 +23,7 @@ class SplashScreen extends StatelessWidget {
           child: Column(
             children: [
               const Spacer(flex: 3),
-              const AppLogo(size: 108, showLabel: true),
+              const AppLogo(height: 70),
               const SizedBox(height: 14),
               const Text(
                 'Talk, learn and grow together',

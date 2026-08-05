@@ -1,57 +1,55 @@
 import 'package:flutter/material.dart';
-import '../theme/app_colors.dart';
 
-/// FaceTalk brand mark: a rounded gradient tile with a speech-bubble glyph.
-/// Used on the splash screen and auth screens so the branding stays
-/// consistent without depending on an external image asset.
+/// FaceTalk official brand logo widget (stacked vertical layout matching design).
 class AppLogo extends StatelessWidget {
-  final double size;
-  final bool showLabel;
+  final double height;
+  final bool isHorizontal;
 
-  const AppLogo({super.key, this.size = 88, this.showLabel = false});
+  const AppLogo({
+    super.key,
+    double? height,
+    double? size,
+    bool showLabel = false,
+    this.isHorizontal = false,
+  }) : height = height ?? size ?? 110.0;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: size,
-          height: size,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(size * 0.28),
-            gradient: const LinearGradient(
-              colors: [AppColors.primaryPurple, AppColors.primaryPurpleDark],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: AppColors.primaryPurple.withValues(alpha: 0.35),
-                blurRadius: size * 0.25,
-                offset: Offset(0, size * 0.08),
+    final assetPath = isHorizontal
+        ? 'assets/images/facetalk_logo.png'
+        : 'assets/images/facetalk_logo_vertical.png';
+
+    return Image.asset(
+      assetPath,
+      height: height,
+      fit: BoxFit.contain,
+      errorBuilder: (context, error, stackTrace) {
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: const BoxDecoration(
+                color: Color(0xFF3B7AC5),
+                shape: BoxShape.circle,
               ),
-            ],
-          ),
-          child: Icon(
-            Icons.forum_rounded,
-            color: Colors.white,
-            size: size * 0.52,
-          ),
-        ),
-        if (showLabel) ...[
-          SizedBox(height: size * 0.22),
-          Text(
-            'FaceTalk',
-            style: TextStyle(
-              fontSize: size * 0.3,
-              fontWeight: FontWeight.w800,
-              color: AppColors.textPrimary,
-              letterSpacing: 0.2,
+              child: const Icon(Icons.person_rounded, color: Colors.white, size: 38),
             ),
-          ),
-        ],
-      ],
+            const SizedBox(height: 6),
+            RichText(
+              textAlign: TextAlign.center,
+              text: const TextSpan(
+                style: TextStyle(fontSize: 32, fontWeight: FontWeight.w900, letterSpacing: -0.5),
+                children: [
+                  TextSpan(text: 'Face', style: TextStyle(color: Color(0xFF3B7AC5))),
+                  TextSpan(text: 'Talk', style: TextStyle(color: Color(0xFF98489A))),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

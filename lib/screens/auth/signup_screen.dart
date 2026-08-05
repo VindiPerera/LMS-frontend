@@ -53,14 +53,14 @@ class _SignupScreenState extends State<SignupScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Center(child: AppLogo(size: 60)),
-              const SizedBox(height: 16),
+              const Center(child: AppLogo(height: 100)),
+              const SizedBox(height: 4),
               const Text(
                 'Create your account',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: AppColors.textPrimary),
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: AppColors.textPrimary),
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 8),
               const Text(
                 'Join FaceTalk as a student or a teacher and\nstart real conversations today.',
                 textAlign: TextAlign.center,
