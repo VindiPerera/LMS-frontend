@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import '../../services/api_client.dart';
+import '../../services/auth_service.dart';
+import '../../services/google_auth.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_logo.dart';
 import '../../widgets/auth_widgets.dart';
@@ -15,32 +18,87 @@ class SignupScreen extends StatefulWidget {
 }
 
 class _SignupScreenState extends State<SignupScreen> {
-  final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmController = TextEditingController();
   bool _obscurePassword = true;
   bool _loading = false;
+  bool _googleLoading = false;
   FaceTalkRole _role = FaceTalkRole.student;
 
   @override
   void dispose() {
-    _nameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     _confirmController.dispose();
     super.dispose();
   }
 
-  void _continue() {
+  void _showError(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message), backgroundColor: AppColors.badgeRed));
+  }
+
+  void _goToCreateProfile() {
+    if (!mounted) return;
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => CreateProfileScreen(role: _role)),
+    );
+  }
+
+  Future<void> _continue() async {
+    final email = _emailController.text.trim();
+    final password = _passwordController.text;
+    final confirm = _confirmController.text;
+
+    if (email.isEmpty || password.isEmpty) {
+      _showError('Fill in your email and password.');
+      return;
+    }
+    if (password != confirm) {
+      _showError('Passwords do not match.');
+      return;
+    }
+
     setState(() => _loading = true);
-    Future.delayed(const Duration(milliseconds: 500), () {
-      if (!mounted) return;
-      setState(() => _loading = false);
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => CreateProfileScreen(role: _role)),
+    try {
+      await AuthService.instance.register(
+        email: email,
+        password: password,
+        passwordConfirmation: confirm,
+        role: _role == FaceTalkRole.teacher ? 'teacher' : 'student',
       );
-    });
+      _goToCreateProfile();
+    } on ApiException catch (e) {
+      _showError(e.message);
+    } catch (_) {
+      _showError('Could not reach the server. Is the backend running?');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _continueWithGoogle() async {
+    setState(() => _googleLoading = true);
+    try {
+      final idToken = await GoogleAuth.signInIdToken();
+      if (idToken == null) return; // user cancelled the account picker
+
+      await AuthService.instance.loginWithGoogle(
+        idToken: idToken,
+        role: _role == FaceTalkRole.teacher ? 'teacher' : 'student',
+      );
+      _goToCreateProfile();
+    } on ApiException catch (e) {
+      _showError(e.message);
+    } on StateError catch (e) {
+      _showError(e.message);
+    } catch (_) {
+      _showError('Google sign-in failed. Please try again.');
+    } finally {
+      if (mounted) setState(() => _googleLoading = false);
+    }
   }
 
   @override
@@ -71,13 +129,6 @@ class _SignupScreenState extends State<SignupScreen> {
               const SizedBox(height: 10),
               _RoleSelector(role: _role, onChanged: (r) => setState(() => _role = r)),
               const SizedBox(height: 20),
-              AuthTextField(
-                label: 'Full Name',
-                hint: 'Your name',
-                icon: Icons.person_outline_rounded,
-                controller: _nameController,
-              ),
-              const SizedBox(height: 16),
               AuthTextField(
                 label: 'Email',
                 hint: 'you@example.com',
@@ -114,7 +165,7 @@ class _SignupScreenState extends State<SignupScreen> {
               const SizedBox(height: 18),
               const AuthOrDivider(),
               const SizedBox(height: 18),
-              GoogleAuthButton(onPressed: _continue, label: 'Sign up with Google'),
+              GoogleAuthButton(onPressed: _continueWithGoogle, label: 'Sign up with Google', loading: _googleLoading),
               const SizedBox(height: 28),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,

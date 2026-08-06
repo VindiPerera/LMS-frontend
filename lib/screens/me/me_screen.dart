@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import '../../data/mock_data.dart';
+import '../../services/auth_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
+import '../auth/splash_screen.dart';
 
 class MeScreen extends StatelessWidget {
   const MeScreen({super.key});
@@ -414,7 +416,19 @@ class _SettingsList extends StatelessWidget {
     ('Blocked Users', Icons.block_rounded),
     ('Invite Friends', Icons.person_add_alt_rounded),
     ('Help & Feedback', Icons.help_outline_rounded),
+    ('Log Out', Icons.logout_rounded),
   ];
+
+  Future<void> _handleTap(BuildContext context, String label) async {
+    if (label != 'Log Out') return;
+
+    await AuthService.instance.logout();
+    if (!context.mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const SplashScreen()),
+      (route) => false,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -425,13 +439,14 @@ class _SettingsList extends StatelessWidget {
       child: Column(
         children: List.generate(_items.length, (i) {
           final (label, icon) = _items[i];
+          final isLogout = label == 'Log Out';
           return Column(
             children: [
               ListTile(
-                leading: Icon(icon, color: AppColors.textSecondary, size: 20),
-                title: Text(label, style: const TextStyle(fontSize: 14)),
-                trailing: const Icon(Icons.chevron_right_rounded, color: AppColors.textTertiary),
-                onTap: () {},
+                leading: Icon(icon, color: isLogout ? AppColors.badgeRed : AppColors.textSecondary, size: 20),
+                title: Text(label, style: TextStyle(fontSize: 14, color: isLogout ? AppColors.badgeRed : null)),
+                trailing: isLogout ? null : const Icon(Icons.chevron_right_rounded, color: AppColors.textTertiary),
+                onTap: () => _handleTap(context, label),
               ),
               if (i != _items.length - 1) const Divider(height: 1, indent: 52, color: AppColors.divider),
             ],

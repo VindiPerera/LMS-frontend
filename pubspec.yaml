@@ -35,6 +35,13 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
 
+  # Talks to the Laravel backend (hello-backend).
+  http: ^1.2.2
+  # Persists the Sanctum API token across app restarts.
+  shared_preferences: ^2.3.3
+  # "Continue with Google" (Google Identity Services on web).
+  google_sign_in: ^6.2.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

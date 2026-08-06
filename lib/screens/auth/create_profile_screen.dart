@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../services/api_client.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
 import '../../widgets/auth_widgets.dart';
@@ -34,15 +35,36 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
 
   bool get _isTeacher => widget.role == FaceTalkRole.teacher;
 
-  void _finish() {
+  Future<void> _finish() async {
     setState(() => _loading = true);
-    Future.delayed(const Duration(milliseconds: 500), () {
+    try {
+      // Persists profile_completed = true server-side, so a restored
+      // session (see splash_screen.dart) goes straight into the app next
+      // time instead of looping back here.
+      await ApiClient.instance.put('/profile', {
+        if (_nameController.text.trim().isNotEmpty) 'name': _nameController.text.trim(),
+        'bio': _bioController.text.trim(),
+        'detail': _detailController.text.trim(),
+        'native_lang': _nativeLang,
+        'learning_lang': _learningLang,
+      });
+    } on ApiException catch (e) {
       if (!mounted) return;
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const MainShell()),
-        (route) => false,
-      );
-    });
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(e.message), backgroundColor: AppColors.badgeRed));
+      return;
+    } catch (_) {
+      // Backend unreachable — still let the user into the app locally
+      // rather than blocking them; profile just won't be saved yet.
+    }
+
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const MainShell()),
+      (route) => false,
+    );
   }
 
   @override
@@ -104,13 +126,17 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
                 icon: Icons.edit_note_rounded,
                 controller: _bioController,
               ),
-              const SizedBox(height: 16),
-              AuthTextField(
-                label: _isTeacher ? 'Subject you teach' : 'Interests / Grade',
-                hint: _isTeacher ? 'e.g. English Conversation' : 'e.g. High School English',
-                icon: _isTeacher ? Icons.menu_book_outlined : Icons.school_outlined,
-                controller: _detailController,
-              ),
+              // Teachers still list their subject; students no longer have
+              // an "Interests / Grade" field here.
+              if (_isTeacher) ...[
+                const SizedBox(height: 16),
+                AuthTextField(
+                  label: 'Subject you teach',
+                  hint: 'e.g. English Conversation',
+                  icon: Icons.menu_book_outlined,
+                  controller: _detailController,
+                ),
+              ],
               const SizedBox(height: 16),
               Row(
                 children: [

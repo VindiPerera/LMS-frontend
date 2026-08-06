@@ -102,34 +102,46 @@ class AuthPrimaryButton extends StatelessWidget {
   }
 }
 
-/// "Continue with Google" button. UI-only stub: this project has no backend
-/// or Firebase project wired up, so it simulates success and moves the flow
-/// forward rather than performing a real OAuth round-trip.
+/// "Continue with Google" button. [onPressed] is expected to run the real
+/// Google Identity Services flow (see lib/services/google_auth.dart) and
+/// exchange the resulting ID token with the backend's POST /api/auth/google.
 class GoogleAuthButton extends StatelessWidget {
   final VoidCallback onPressed;
   final String label;
+  final bool loading;
 
-  const GoogleAuthButton({super.key, required this.onPressed, this.label = 'Continue with Google'});
+  const GoogleAuthButton({
+    super.key,
+    required this.onPressed,
+    this.label = 'Continue with Google',
+    this.loading = false,
+  });
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
       width: double.infinity,
       child: OutlinedButton(
-        onPressed: onPressed,
+        onPressed: loading ? null : onPressed,
         style: OutlinedButton.styleFrom(
           padding: const EdgeInsets.symmetric(vertical: 14),
           side: const BorderSide(color: AppColors.divider),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
         ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const _GoogleG(),
-            const SizedBox(width: 10),
-            Text(label, style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w600, fontSize: 14.5)),
-          ],
-        ),
+        child: loading
+            ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2.4, color: AppColors.primaryPurple),
+              )
+            : Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const _GoogleG(),
+                  const SizedBox(width: 10),
+                  Text(label, style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w600, fontSize: 14.5)),
+                ],
+              ),
       ),
     );
   }

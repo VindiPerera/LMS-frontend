@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
-import '../../data/mock_data.dart';
 import '../../models/user.dart';
+import '../../services/api_client.dart';
+import '../../services/partner_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
 
@@ -16,10 +17,29 @@ class _ConnectScreenState extends State<ConnectScreen> with SingleTickerProvider
   final _filters = const ['Recommended', 'Nearby', 'New Users', 'Same City'];
   int _filterIndex = 0;
 
+  List<AppUser>? _partners;
+  String? _error;
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    _loadPartners();
+  }
+
+  Future<void> _loadPartners() async {
+    setState(() => _error = null);
+    try {
+      final partners = await PartnerService.fetchPartners();
+      if (!mounted) return;
+      setState(() => _partners = partners);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _error = e.message);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _error = 'Could not reach the server. Is the backend running?');
+    }
   }
 
   @override
@@ -67,7 +87,14 @@ class _ConnectScreenState extends State<ConnectScreen> with SingleTickerProvider
       body: TabBarView(
         controller: _tabController,
         children: [
-          _PartnersTab(filters: _filters, filterIndex: _filterIndex, onFilter: (i) => setState(() => _filterIndex = i)),
+          _PartnersTab(
+            filters: _filters,
+            filterIndex: _filterIndex,
+            onFilter: (i) => setState(() => _filterIndex = i),
+            partners: _partners,
+            error: _error,
+            onRetry: _loadPartners,
+          ),
           const _EmptyTab(icon: Icons.groups_rounded, label: 'No groups yet'),
           const _EmptyTab(icon: Icons.school_rounded, label: 'No teachers yet'),
         ],
@@ -80,8 +107,18 @@ class _PartnersTab extends StatelessWidget {
   final List<String> filters;
   final int filterIndex;
   final ValueChanged<int> onFilter;
+  final List<AppUser>? partners;
+  final String? error;
+  final VoidCallback onRetry;
 
-  const _PartnersTab({required this.filters, required this.filterIndex, required this.onFilter});
+  const _PartnersTab({
+    required this.filters,
+    required this.filterIndex,
+    required this.onFilter,
+    required this.partners,
+    required this.error,
+    required this.onRetry,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -114,15 +151,49 @@ class _PartnersTab extends StatelessWidget {
             },
           ),
         ),
-        Expanded(
-          child: ListView.separated(
-            padding: const EdgeInsets.fromLTRB(14, 6, 14, 16),
-            itemCount: mockUsers.length,
-            separatorBuilder: (context, i) => const Divider(height: 1, color: AppColors.divider),
-            itemBuilder: (context, i) => _PartnerListTile(user: mockUsers[i]),
-          ),
-        ),
+        Expanded(child: _buildBody()),
       ],
+    );
+  }
+
+  Widget _buildBody() {
+    if (error != null) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.cloud_off_rounded, size: 42, color: AppColors.textTertiary),
+            const SizedBox(height: 10),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Text(error!, textAlign: TextAlign.center, style: const TextStyle(color: AppColors.textTertiary)),
+            ),
+            const SizedBox(height: 12),
+            TextButton(onPressed: onRetry, child: const Text('Retry')),
+          ],
+        ),
+      );
+    }
+
+    final users = partners;
+    if (users == null) {
+      return const Center(child: CircularProgressIndicator(strokeWidth: 2.4, color: AppColors.primaryPurple));
+    }
+
+    if (users.isEmpty) {
+      return const Center(
+        child: Text('No partners yet — check back soon!', style: TextStyle(color: AppColors.textTertiary)),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: () async => onRetry(),
+      child: ListView.separated(
+        padding: const EdgeInsets.fromLTRB(14, 6, 14, 16),
+        itemCount: users.length,
+        separatorBuilder: (context, i) => const Divider(height: 1, color: AppColors.divider),
+        itemBuilder: (context, i) => _PartnerListTile(user: users[i]),
+      ),
     );
   }
 }

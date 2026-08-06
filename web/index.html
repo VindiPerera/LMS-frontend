@@ -29,6 +29,16 @@
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
+  <!--
+    "Continue with Google" (Google Identity Services). The Flutter app also
+    passes this same client ID at runtime via --dart-define=GOOGLE_CLIENT_ID
+    (see lib/config/env.dart) — that's what actually drives google_sign_in,
+    this meta tag is only a fallback some versions of the JS SDK read.
+    hello-backend/.env's GOOGLE_CLIENT_ID must match.
+  -->
+  <meta name="google-signin-client_id" content="">
+
+
   <title>FaceTalk</title>
   <link rel="manifest" href="manifest.json">
 </head>
