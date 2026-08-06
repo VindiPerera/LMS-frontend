@@ -71,3 +71,14 @@ class AppUser {
     return int.tryParse('$value') ?? 0;
   }
 }
+
+extension LanguageCode on String {
+  /// First two letters, upper-cased, for a language "chip" (e.g. "English"
+  /// -> "EN"). Backend users can have an empty nativeLang/learningLang
+  /// (profile not finished yet), where plain `substring(0, 2)` would throw
+  /// a RangeError, so this falls back to "??" instead.
+  String get languageCode {
+    if (isEmpty) return '??';
+    return substring(0, length < 2 ? length : 2).toUpperCase();
+  }
+}

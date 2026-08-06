@@ -264,11 +264,11 @@ class _PartnerListTile extends StatelessWidget {
                 const SizedBox(height: 4),
                 Row(
                   children: [
-                    _langPill(user.nativeLang.substring(0, 2).toUpperCase(), AppColors.perfectGreen),
+                    _langPill(user.nativeLang.languageCode, AppColors.perfectGreen),
                     const SizedBox(width: 6),
                     const Icon(Icons.sync_alt_rounded, size: 13, color: AppColors.textTertiary),
                     const SizedBox(width: 6),
-                    _langPill(user.learningLang.substring(0, 2).toUpperCase(), AppColors.primaryPurple, dotted: true),
+                    _langPill(user.learningLang.languageCode, AppColors.primaryPurple, dotted: true),
                   ],
                 ),
                 if (user.bio.isNotEmpty) ...[
