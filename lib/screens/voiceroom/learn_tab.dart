@@ -42,7 +42,9 @@ class _LearnTabState extends State<LearnTab> {
                 backgroundColor: AppColors.surfaceLight,
                 selectedColor: Colors.white,
                 side: BorderSide.none,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
               );
             },
           ),
@@ -79,10 +81,18 @@ class _WordsSubTab extends StatelessWidget {
             itemCount: 4,
             separatorBuilder: (context, i) => const SizedBox(width: 8),
             itemBuilder: (context, i) {
-              const labels = ['English (American)', 'English (British)', 'Korean', 'Japanese'];
+              const labels = [
+                'English (American)',
+                'English (British)',
+                'Korean',
+                'Japanese',
+              ];
               final selected = i == 0;
               return Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: selected ? Colors.white : Colors.transparent,
                   borderRadius: BorderRadius.circular(16),
@@ -118,26 +128,47 @@ class _WordsSubTab extends StatelessWidget {
                 Container(
                   width: 46,
                   height: 46,
-                  decoration: const BoxDecoration(color: AppColors.surfaceLight, shape: BoxShape.circle),
+                  decoration: const BoxDecoration(
+                    color: AppColors.surfaceLight,
+                    shape: BoxShape.circle,
+                  ),
                   alignment: Alignment.center,
-                  child: Text(lang['flag']!, style: const TextStyle(fontSize: 22)),
+                  child: Text(
+                    lang['flag']!,
+                    style: const TextStyle(fontSize: 22),
+                  ),
                 ),
                 const SizedBox(height: 6),
-                Text(lang['name']!, style: const TextStyle(fontSize: 10.5, color: AppColors.textSecondary)),
+                Text(
+                  lang['name']!,
+                  style: const TextStyle(
+                    fontSize: 10.5,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
               ],
             );
           },
         ),
         const SizedBox(height: 8),
-        const Text('Latest Additions', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+        const Text(
+          'Latest Additions',
+          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+        ),
         const SizedBox(height: 10),
         _WordPackRow(packs: latestWordPacks),
         const SizedBox(height: 22),
-        const Text('Recommended for you', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+        const Text(
+          'Recommended for you',
+          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+        ),
         const SizedBox(height: 10),
         _WordPackRow(packs: recommendedWordPacks),
         const SizedBox(height: 22),
-        const Text('Basic words', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+        const Text(
+          'Basic words',
+          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+        ),
         const SizedBox(height: 10),
         _WordPackRow(packs: basicWordPacks),
       ],
@@ -149,7 +180,11 @@ class _WordPackRow extends StatelessWidget {
   final List<WordPack> packs;
   const _WordPackRow({required this.packs});
 
-  static const _colors = [Color(0xFF2E7D5B), Color(0xFF2C5A8C), Color(0xFFB0783A)];
+  static const _colors = [
+    Color(0xFF2E7D5B),
+    Color(0xFF2C5A8C),
+    Color(0xFFB0783A),
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -182,7 +217,9 @@ class _WordPackRow extends StatelessWidget {
                         width: double.infinity,
                         alignment: Alignment.center,
                         child: Icon(
-                          pack.locked ? Icons.lock_rounded : Icons.auto_awesome_rounded,
+                          pack.locked
+                              ? Icons.lock_rounded
+                              : Icons.auto_awesome_rounded,
                           color: Colors.white70,
                           size: 26,
                         ),
@@ -192,25 +229,54 @@ class _WordPackRow extends StatelessWidget {
                           top: 4,
                           right: 4,
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
                             decoration: BoxDecoration(
                               color: AppColors.primaryPurple,
                               borderRadius: BorderRadius.circular(8),
                             ),
-                            child: Text(pack.badge, style: const TextStyle(fontSize: 8.5, color: Colors.white, fontWeight: FontWeight.w700)),
+                            child: Text(
+                              pack.badge,
+                              style: const TextStyle(
+                                fontSize: 8.5,
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
                           ),
                         ),
                     ],
                   ),
                 ),
                 const SizedBox(height: 6),
-                Text(pack.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+                Text(
+                  pack.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
                 const SizedBox(height: 2),
                 Row(
                   children: [
-                    if (pack.locked) const Icon(Icons.lock_rounded, size: 10, color: AppColors.textTertiary),
+                    if (pack.locked)
+                      const Icon(
+                        Icons.lock_rounded,
+                        size: 10,
+                        color: AppColors.textTertiary,
+                      ),
                     if (pack.locked) const SizedBox(width: 3),
-                    Text(pack.progress, style: const TextStyle(fontSize: 10.5, color: AppColors.textTertiary)),
+                    Text(
+                      pack.progress,
+                      style: const TextStyle(
+                        fontSize: 10.5,
+                        color: AppColors.textTertiary,
+                      ),
+                    ),
                   ],
                 ),
               ],
@@ -273,17 +339,33 @@ class _ClassesSubTab extends StatelessWidget {
                         color: cat['color'] as Color,
                         borderRadius: BorderRadius.circular(16),
                       ),
-                      child: Icon(cat['icon'] as IconData, color: Colors.white, size: 24),
+                      child: Icon(
+                        cat['icon'] as IconData,
+                        color: Colors.white,
+                        size: 24,
+                      ),
                     ),
                     if ((cat['badge'] as String).isNotEmpty)
                       Positioned(
                         right: -6,
                         top: -6,
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                          decoration: BoxDecoration(color: AppColors.badgeRed, borderRadius: BorderRadius.circular(6)),
-                          child: Text(cat['badge'] as String,
-                              style: const TextStyle(fontSize: 7.5, fontWeight: FontWeight.w800, color: Colors.white)),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 5,
+                            vertical: 1,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.badgeRed,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            cat['badge'] as String,
+                            style: const TextStyle(
+                              fontSize: 7.5,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.white,
+                            ),
+                          ),
                         ),
                       ),
                   ],
@@ -294,7 +376,10 @@ class _ClassesSubTab extends StatelessWidget {
                   textAlign: TextAlign.center,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 10.5, color: AppColors.textSecondary),
+                  style: const TextStyle(
+                    fontSize: 10.5,
+                    color: AppColors.textSecondary,
+                  ),
                 ),
               ],
             );
@@ -304,36 +389,61 @@ class _ClassesSubTab extends StatelessWidget {
         Row(
           children: [
             const Expanded(
-              child: Text('Pro Partner', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+              child: Text(
+                'Pro Partner',
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+              ),
             ),
-            Text('15,105', style: TextStyle(color: AppColors.textTertiary, fontSize: 12)),
+            Text(
+              '15,105',
+              style: TextStyle(color: AppColors.textTertiary, fontSize: 12),
+            ),
           ],
         ),
         const SizedBox(height: 2),
-        const Text('15 minutes of daily practice with a Pro Partner',
-            style: TextStyle(color: AppColors.textTertiary, fontSize: 12)),
+        const Text(
+          '15 minutes of daily practice with a Pro Partner',
+          style: TextStyle(color: AppColors.textTertiary, fontSize: 12),
+        ),
         const SizedBox(height: 10),
         const _SectionCard(
           title: '',
           subtitle: '',
           gradient: [Color(0xFFE8A23C), Color(0xFFE87A3C)],
           heading: 'English Pro Partner',
-          caption: 'Abundant topics to choose from\nChat freely with native partners',
+          caption:
+              'Abundant topics to choose from\nChat freely with native partners',
           ctaLabel: 'Book now',
         ),
         const SizedBox(height: 20),
         Row(
           children: [
             const Expanded(
-              child: Text('Speaking', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+              child: Text(
+                'Speaking',
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+              ),
             ),
-            const Text('More', style: TextStyle(color: AppColors.primaryPurple, fontSize: 12.5, fontWeight: FontWeight.w600)),
-            const Icon(Icons.chevron_right_rounded, size: 16, color: AppColors.primaryPurple),
+            const Text(
+              'More',
+              style: TextStyle(
+                color: AppColors.primaryPurple,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const Icon(
+              Icons.chevron_right_rounded,
+              size: 16,
+              color: AppColors.primaryPurple,
+            ),
           ],
         ),
         const SizedBox(height: 2),
-        const Text('Free Mode: unlimited languages and language partners',
-            style: TextStyle(color: AppColors.textTertiary, fontSize: 12)),
+        const Text(
+          'Free Mode: unlimited languages and language partners',
+          style: TextStyle(color: AppColors.textTertiary, fontSize: 12),
+        ),
         const SizedBox(height: 12),
         GridView.builder(
           shrinkWrap: true,
@@ -360,24 +470,49 @@ class _TutorCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: AppColors.card, borderRadius: BorderRadius.circular(14)),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(14),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              AppAvatar(seed: tutor.name, size: 40, showFlag: true, flag: tutor.flag),
+              AppAvatar(
+                seed: tutor.name,
+                size: 40,
+                showFlag: true,
+                flag: tutor.flag,
+              ),
               const Spacer(),
-              const Icon(Icons.volume_up_rounded, size: 16, color: AppColors.textTertiary),
+              const Icon(
+                Icons.volume_up_rounded,
+                size: 16,
+                color: AppColors.textTertiary,
+              ),
             ],
           ),
           const SizedBox(height: 8),
-          Text(tutor.name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14), overflow: TextOverflow.ellipsis),
+          Text(
+            tutor.name,
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+            overflow: TextOverflow.ellipsis,
+          ),
           const SizedBox(height: 3),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(color: AppColors.surfaceLight, borderRadius: BorderRadius.circular(6)),
-            child: Text(tutor.languages, style: const TextStyle(fontSize: 10, color: AppColors.textSecondary)),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceLight,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(
+              tutor.languages,
+              style: const TextStyle(
+                fontSize: 10,
+                color: AppColors.textSecondary,
+              ),
+            ),
           ),
           const SizedBox(height: 6),
           Text(
@@ -386,7 +521,9 @@ class _TutorCard extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontSize: 11.5,
-              color: tutor.isPro ? const Color(0xFFE8A23C) : AppColors.textSecondary,
+              color: tutor.isPro
+                  ? const Color(0xFFE8A23C)
+                  : AppColors.textSecondary,
               fontWeight: tutor.isPro ? FontWeight.w700 : FontWeight.w400,
             ),
           ),
@@ -400,9 +537,14 @@ class _TutorCard extends StatelessWidget {
                 foregroundColor: const Color(0xFFD9722E),
                 elevation: 0,
                 padding: const EdgeInsets.symmetric(vertical: 8),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                ),
               ),
-              child: const Text('Book tutor', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+              child: const Text(
+                'Book tutor',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+              ),
             ),
           ),
         ],
@@ -425,7 +567,8 @@ class _CoursesSubTab extends StatelessWidget {
             scrollDirection: Axis.horizontal,
             itemCount: learnCourseCards.length,
             separatorBuilder: (context, i) => const SizedBox(width: 12),
-            itemBuilder: (context, i) => _CourseCoverCard(card: learnCourseCards[i]),
+            itemBuilder: (context, i) =>
+                _CourseCoverCard(card: learnCourseCards[i]),
           ),
         ),
         const SizedBox(height: 20),
@@ -436,7 +579,10 @@ class _CoursesSubTab extends StatelessWidget {
           heading: "Let's Speak\nEnglish",
         ),
         const SizedBox(height: 20),
-        const Text('Speaking', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+        const Text(
+          'Speaking',
+          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+        ),
         const SizedBox(height: 10),
         const _SectionCard(
           title: 'Personalized Live Class',
@@ -447,14 +593,18 @@ class _CoursesSubTab extends StatelessWidget {
           ctaLabel: '🔥 Buy Now!',
         ),
         const SizedBox(height: 20),
-        const Text('English Pro Partner', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+        const Text(
+          'English Pro Partner',
+          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+        ),
         const SizedBox(height: 10),
         const _SectionCard(
           title: 'English Pro Partner',
           subtitle: '',
           gradient: [Color(0xFFE8A23C), Color(0xFFE87A3C)],
           heading: 'English Pro Partner',
-          caption: 'Abundant topics to choose from\nChat freely with native partners',
+          caption:
+              'Abundant topics to choose from\nChat freely with native partners',
           ctaLabel: 'Book now',
         ),
       ],
@@ -478,7 +628,9 @@ class _CourseCoverCard extends StatelessWidget {
     return GestureDetector(
       onTap: () {
         if (card.title == 'HelloEnglish') {
-          Navigator.of(context).push(MaterialPageRoute(builder: (_) => const EnglishCoursesScreen()));
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const EnglishCoursesScreen()),
+          );
         }
       },
       child: Container(
@@ -486,7 +638,11 @@ class _CourseCoverCard extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
-          gradient: LinearGradient(colors: colors, begin: Alignment.topLeft, end: Alignment.bottomRight),
+          gradient: LinearGradient(
+            colors: colors,
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -494,14 +650,33 @@ class _CourseCoverCard extends StatelessWidget {
             if (card.badge.isNotEmpty)
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(8)),
-                child: Text(card.badge, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w700)),
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  card.badge,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ),
             const Spacer(),
-            Text(card.title,
-                style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800)),
+            Text(
+              card.title,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
             const SizedBox(height: 6),
-            Text(card.subtitle, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+            Text(
+              card.subtitle,
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
           ],
         ),
       ),
@@ -531,10 +706,20 @@ class _SectionCard extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (title.isNotEmpty) Text(title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+        if (title.isNotEmpty)
+          Text(
+            title,
+            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+          ),
         if (subtitle.isNotEmpty) ...[
           const SizedBox(height: 2),
-          Text(subtitle, style: const TextStyle(color: AppColors.textTertiary, fontSize: 12.5)),
+          Text(
+            subtitle,
+            style: const TextStyle(
+              color: AppColors.textTertiary,
+              fontSize: 12.5,
+            ),
+          ),
         ],
         if (title.isNotEmpty || subtitle.isNotEmpty) const SizedBox(height: 10),
         Container(
@@ -543,7 +728,11 @@ class _SectionCard extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
-            gradient: LinearGradient(colors: gradient, begin: Alignment.topLeft, end: Alignment.bottomRight),
+            gradient: LinearGradient(
+              colors: gradient,
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -552,18 +741,39 @@ class _SectionCard extends StatelessWidget {
             children: [
               Text(
                 heading,
-                style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800, height: 1.15),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  height: 1.15,
+                ),
               ),
               if (caption.isNotEmpty) ...[
                 const SizedBox(height: 6),
-                Text(caption, style: const TextStyle(color: Colors.white70, fontSize: 11.5)),
+                Text(
+                  caption,
+                  style: const TextStyle(color: Colors.white70, fontSize: 11.5),
+                ),
               ],
               if (ctaLabel.isNotEmpty) ...[
                 const SizedBox(height: 10),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18)),
-                  child: Text(ctaLabel, style: const TextStyle(color: Colors.black, fontSize: 12, fontWeight: FontWeight.w700)),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: Text(
+                    ctaLabel,
+                    style: const TextStyle(
+                      color: Colors.black,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
               ],
             ],

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../models/user.dart';
-import '../models/chat_message.dart';
 import '../models/moment.dart';
 import '../models/voiceroom.dart';
 import '../models/live_stream.dart';
@@ -140,59 +139,10 @@ final List<Color> avatarPalette = [
 ];
 
 Color avatarColorFor(String seed) {
-  final idx = seed.codeUnits.fold<int>(0, (a, b) => a + b) % avatarPalette.length;
+  final idx =
+      seed.codeUnits.fold<int>(0, (a, b) => a + b) % avatarPalette.length;
   return avatarPalette[idx];
 }
-
-final List<ChatPreview> mockChats = [
-  ChatPreview(
-    user: mockUsers[4],
-    lastMessage: 'Welcome to FaceTalk! Tap here to get started 🎉',
-    time: '12:26 PM',
-    unreadCount: 2,
-  ),
-  ChatPreview(
-    user: mockUsers[0],
-    lastMessage: '[Photo] My first post 🌸',
-    time: '4h',
-    unreadCount: 1,
-  ),
-  ChatPreview(
-    user: mockUsers[1],
-    lastMessage: 'Cover... translate this for me?',
-    time: 'Yesterday',
-    isTyping: true,
-  ),
-  ChatPreview(
-    user: mockUsers[5],
-    lastMessage: '¡Hola! ¿Cómo estás hoy?',
-    time: 'Yesterday',
-  ),
-  ChatPreview(
-    user: mockUsers[6],
-    lastMessage: '[Voice message] 0:12',
-    time: '2 days ago',
-    isMuted: true,
-  ),
-];
-
-final List<ChatMessage> mockConversation = [
-  ChatMessage(text: 'Hi! Nice to meet you 😊', isMe: false, time: '12:20 PM'),
-  ChatMessage(text: 'Hello! Nice to meet you too!', isMe: true, time: '12:21 PM'),
-  ChatMessage(
-    text: 'I am learning English, could you correct my sentence?',
-    isMe: false,
-    time: '12:22 PM',
-  ),
-  ChatMessage(
-    text: 'Of course! Send it over.',
-    isMe: true,
-    time: '12:23 PM',
-    type: MessageType.correction,
-  ),
-  ChatMessage(text: '', isMe: false, time: '12:24 PM', type: MessageType.voice, voiceSeconds: 12),
-  ChatMessage(text: 'Sounds great, thank you! 🙏', isMe: true, time: '12:26 PM'),
-];
 
 final List<Moment> mockMoments = [
   Moment(
@@ -206,7 +156,8 @@ final List<Moment> mockMoments = [
   Moment(
     user: mockUsers[1],
     timeAgo: 'Yesterday',
-    text: 'Cover... could someone translate this sentence into Sinhala for me? 🙏',
+    text:
+        'Cover... could someone translate this sentence into Sinhala for me? 🙏',
     tag: '#topik hangat',
     likes: 12,
     comments: 5,
@@ -215,7 +166,8 @@ final List<Moment> mockMoments = [
   Moment(
     user: mockUsers[3],
     timeAgo: '2 days ago',
-    text: 'Anyone up for a music-themed voiceroom tonight? 🎶 Come practice English with me!',
+    text:
+        'Anyone up for a music-themed voiceroom tonight? 🎶 Come practice English with me!',
     tag: '#FIFA World Cup',
     likes: 21,
     comments: 9,
@@ -223,7 +175,8 @@ final List<Moment> mockMoments = [
   Moment(
     user: mockUsers[5],
     timeAgo: '3 days ago',
-    text: '¿Alguien puede corregir mi español? Estoy practicando todos los días.',
+    text:
+        '¿Alguien puede corregir mi español? Estoy practicando todos los días.',
     likes: 15,
     comments: 4,
     isTranslatable: true,
@@ -287,14 +240,54 @@ final List<VoiceRoom> mockVoiceRooms = [
 ];
 
 const languageCourses = [
-  {'name': 'HelloWords', 'icon': Icons.grid_view_rounded, 'color': Color(0xFF2ECC71), 'badge': true},
-  {'name': 'LiveClass', 'icon': Icons.menu_book_rounded, 'color': Color(0xFF4FA8FF), 'badge': false},
-  {'name': 'Pro Partner', 'icon': Icons.people_alt_rounded, 'color': Color(0xFFFF4D8D), 'badge': false},
-  {'name': 'HelloEnglish', 'icon': Icons.chat_bubble_rounded, 'color': Color(0xFF4FA8FF), 'badge': false},
-  {'name': 'Podcast', 'icon': Icons.podcasts_rounded, 'color': Color(0xFF2E3A8C), 'badge': true},
-  {'name': 'Grammar', 'icon': Icons.spellcheck_rounded, 'color': Color(0xFFFF7A45), 'badge': false},
-  {'name': 'Idioms', 'icon': Icons.menu_book_rounded, 'color': Color(0xFFE84393), 'badge': false},
-  {'name': 'Flashcards', 'icon': Icons.style_rounded, 'color': Color(0xFF00CEC9), 'badge': false},
+  {
+    'name': 'HelloWords',
+    'icon': Icons.grid_view_rounded,
+    'color': Color(0xFF2ECC71),
+    'badge': true,
+  },
+  {
+    'name': 'LiveClass',
+    'icon': Icons.menu_book_rounded,
+    'color': Color(0xFF4FA8FF),
+    'badge': false,
+  },
+  {
+    'name': 'Pro Partner',
+    'icon': Icons.people_alt_rounded,
+    'color': Color(0xFFFF4D8D),
+    'badge': false,
+  },
+  {
+    'name': 'HelloEnglish',
+    'icon': Icons.chat_bubble_rounded,
+    'color': Color(0xFF4FA8FF),
+    'badge': false,
+  },
+  {
+    'name': 'Podcast',
+    'icon': Icons.podcasts_rounded,
+    'color': Color(0xFF2E3A8C),
+    'badge': true,
+  },
+  {
+    'name': 'Grammar',
+    'icon': Icons.spellcheck_rounded,
+    'color': Color(0xFFFF7A45),
+    'badge': false,
+  },
+  {
+    'name': 'Idioms',
+    'icon': Icons.menu_book_rounded,
+    'color': Color(0xFFE84393),
+    'badge': false,
+  },
+  {
+    'name': 'Flashcards',
+    'icon': Icons.style_rounded,
+    'color': Color(0xFF00CEC9),
+    'badge': false,
+  },
 ];
 
 final List<LiveStream> mockLiveStreams = [
@@ -478,32 +471,69 @@ const speakingTutors = [
 ];
 
 const classCategories = [
-  {'name': '1v1 LiveClass', 'icon': Icons.chat_bubble_rounded, 'color': Color(0xFF7B4FE0), 'badge': 'HOT'},
-  {'name': 'Speaking', 'icon': Icons.forum_rounded, 'color': Color(0xFFE8A23C), 'badge': ''},
-  {'name': 'Pro Partner', 'icon': Icons.people_alt_rounded, 'color': Color(0xFFFF4D8D), 'badge': ''},
-  {'name': 'Popular Host Class', 'icon': Icons.ondemand_video_rounded, 'color': Color(0xFF2CB5C0), 'badge': ''},
+  {
+    'name': '1v1 LiveClass',
+    'icon': Icons.chat_bubble_rounded,
+    'color': Color(0xFF7B4FE0),
+    'badge': 'HOT',
+  },
+  {
+    'name': 'Speaking',
+    'icon': Icons.forum_rounded,
+    'color': Color(0xFFE8A23C),
+    'badge': '',
+  },
+  {
+    'name': 'Pro Partner',
+    'icon': Icons.people_alt_rounded,
+    'color': Color(0xFFFF4D8D),
+    'badge': '',
+  },
+  {
+    'name': 'Popular Host Class',
+    'icon': Icons.ondemand_video_rounded,
+    'color': Color(0xFF2CB5C0),
+    'badge': '',
+  },
 ];
 
 const roomChatLog = [
   RoomChatMessage(sender: 'Jeffrey', text: 'Long time no see Leo!'),
-  RoomChatMessage(sender: 'Lina', senderBadge: '20', text: '好喜欢你的英文口音!', isTranslated: true, icon: RoomMessageIcon.translate),
+  RoomChatMessage(
+    sender: 'Lina',
+    senderBadge: '20',
+    text: '好喜欢你的英文口音!',
+    isTranslated: true,
+    icon: RoomMessageIcon.translate,
+  ),
   RoomChatMessage(
     sender: 'Tommy',
     senderBadge: '10',
-    text: "Welcome to the English Chit-chat! We're talking about family expectations in our country",
+    text:
+        "Welcome to the English Chit-chat! We're talking about family expectations in our country",
     icon: RoomMessageIcon.gift,
   ),
   RoomChatMessage(
     sender: 'Notice',
-    text: 'Welcome to the Voiceroom! Please remember to be respectful, inclusive, and of course have fun!',
+    text:
+        'Welcome to the Voiceroom! Please remember to be respectful, inclusive, and of course have fun!',
     isSystem: true,
     icon: RoomMessageIcon.notice,
   ),
-  RoomChatMessage(sender: '好多鱼的界', text: 'Happy New Year !', icon: RoomMessageIcon.gift),
-  RoomChatMessage(sender: 'Tommy', text: '我只会一点中文 在大学有学过', icon: RoomMessageIcon.translate),
+  RoomChatMessage(
+    sender: '好多鱼的界',
+    text: 'Happy New Year !',
+    icon: RoomMessageIcon.gift,
+  ),
   RoomChatMessage(
     sender: 'Tommy',
-    text: "I stopped learning Chinese when my family moved to the US for my dad's job",
+    text: '我只会一点中文 在大学有学过',
+    icon: RoomMessageIcon.translate,
+  ),
+  RoomChatMessage(
+    sender: 'Tommy',
+    text:
+        "I stopped learning Chinese when my family moved to the US for my dad's job",
     icon: RoomMessageIcon.star,
   ),
 ];
@@ -524,9 +554,20 @@ const boardSpeakers = [
     nativeLanguageFull: 'English',
     learningLanguagesFull: ['Sinhalese'],
     hobbies: [
-      'Traveling', 'Reading', 'Movies', 'TV-series', 'Music',
-      'Fitness', 'Swimming', 'Camping', 'Fashion', 'Gardning',
-      'Photography', 'Dancing', 'Foot ball', 'Cricket',
+      'Traveling',
+      'Reading',
+      'Movies',
+      'TV-series',
+      'Music',
+      'Fitness',
+      'Swimming',
+      'Camping',
+      'Fashion',
+      'Gardning',
+      'Photography',
+      'Dancing',
+      'Foot ball',
+      'Cricket',
     ],
   ),
   RoomParticipant(name: '', flag: '', isEmptySeat: true),

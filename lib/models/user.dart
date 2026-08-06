@@ -1,5 +1,7 @@
 class AppUser {
-  final int id;
+  // Firestore document id (== Firebase Auth uid for the signed-in user).
+  // Empty for local/mock AppUsers that were never stored anywhere.
+  final String id;
   final String name;
   final String handle;
   final String avatarUrl;
@@ -13,15 +15,15 @@ class AppUser {
   final String bio;
   final String activeLabel;
   final List<String> tags;
-  // Fields below only come from the backend (hello-backend's UserResource);
-  // mock/local AppUsers leave them at their defaults.
+  // Fields below only come from Firestore's users/{uid} document; mock/local
+  // AppUsers leave them at their defaults.
   final String email;
   final String role;
   final String detail;
   final bool profileCompleted;
 
   const AppUser({
-    this.id = 0,
+    this.id = '',
     required this.name,
     required this.handle,
     required this.avatarUrl,
@@ -41,11 +43,12 @@ class AppUser {
     this.profileCompleted = false,
   });
 
-  /// Decodes a `UserResource` JSON object from the Laravel API. Field names
-  /// are shared by design — see hello-backend's UserResource docblock.
+  /// Decodes a `users/{uid}` Firestore document into an AppUser. Callers
+  /// must merge the document id into the map first (as `'id'`) — Firestore
+  /// document data doesn't include its own id.
   factory AppUser.fromJson(Map<String, dynamic> json) {
     return AppUser(
-      id: _asInt(json['id']),
+      id: json['id']?.toString() ?? '',
       name: json['name']?.toString() ?? '',
       handle: json['handle']?.toString() ?? '',
       avatarUrl: json['avatarUrl']?.toString() ?? '',
@@ -58,7 +61,9 @@ class AppUser {
       gender: json['gender']?.toString() ?? 'other',
       bio: json['bio']?.toString() ?? '',
       activeLabel: json['activeLabel']?.toString() ?? '',
-      tags: (json['tags'] as List?)?.map((e) => e.toString()).toList() ?? const [],
+      tags:
+          (json['tags'] as List?)?.map((e) => e.toString()).toList() ??
+          const [],
       email: json['email']?.toString() ?? '',
       role: json['role']?.toString() ?? 'student',
       detail: json['detail']?.toString() ?? '',
@@ -74,9 +79,9 @@ class AppUser {
 
 extension LanguageCode on String {
   /// First two letters, upper-cased, for a language "chip" (e.g. "English"
-  /// -> "EN"). Backend users can have an empty nativeLang/learningLang
-  /// (profile not finished yet), where plain `substring(0, 2)` would throw
-  /// a RangeError, so this falls back to "??" instead.
+  /// -> "EN"). A user can have an empty nativeLang/learningLang (profile
+  /// not finished yet), where plain `substring(0, 2)` would throw a
+  /// RangeError, so this falls back to "??" instead.
   String get languageCode {
     if (isEmpty) return '??';
     return substring(0, length < 2 ? length : 2).toUpperCase();

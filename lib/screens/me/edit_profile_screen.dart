@@ -2,32 +2,34 @@ import 'dart:typed_data';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../models/user.dart';
 import '../../services/auth_service.dart';
 import '../../services/storage_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
 import '../../widgets/auth_widgets.dart';
-import '../main_shell.dart';
-import 'signup_screen.dart';
 
-class CreateProfileScreen extends StatefulWidget {
-  final FaceTalkRole role;
+/// Lets the signed-in user edit their own profile (Firestore
+/// `users/{uid}` document). Pops with the updated AppUser on success so
+/// me_screen.dart can refresh without another round-trip.
+class EditProfileScreen extends StatefulWidget {
+  final AppUser user;
 
-  const CreateProfileScreen({super.key, this.role = FaceTalkRole.student});
+  const EditProfileScreen({super.key, required this.user});
 
   @override
-  State<CreateProfileScreen> createState() => _CreateProfileScreenState();
+  State<EditProfileScreen> createState() => _EditProfileScreenState();
 }
 
-class _CreateProfileScreenState extends State<CreateProfileScreen> {
-  final _nameController = TextEditingController();
-  final _bioController = TextEditingController();
-  final _detailController = TextEditingController();
-  String _nativeLang = 'English';
-  String _learningLang = 'Spanish';
+class _EditProfileScreenState extends State<EditProfileScreen> {
+  late final TextEditingController _nameController;
+  late final TextEditingController _bioController;
+  late final TextEditingController _detailController;
+  late String _nativeLang;
+  late String _learningLang;
+  late String? _avatarUrl;
   bool _loading = false;
   bool _uploadingPhoto = false;
-  String? _avatarUrl;
 
   static const _languages = [
     'English',
@@ -39,6 +41,23 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
     'Chinese',
   ];
 
+  bool get _isTeacher => widget.user.role == 'teacher';
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.user.name);
+    _bioController = TextEditingController(text: widget.user.bio);
+    _detailController = TextEditingController(text: widget.user.detail);
+    _avatarUrl = widget.user.avatarUrl.isEmpty ? null : widget.user.avatarUrl;
+    _nativeLang = _languages.contains(widget.user.nativeLang)
+        ? widget.user.nativeLang
+        : _languages.first;
+    _learningLang = _languages.contains(widget.user.learningLang)
+        ? widget.user.learningLang
+        : _languages[1];
+  }
+
   @override
   void dispose() {
     _nameController.dispose();
@@ -46,8 +65,6 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
     _detailController.dispose();
     super.dispose();
   }
-
-  bool get _isTeacher => widget.role == FaceTalkRole.teacher;
 
   void _showError(String message) {
     ScaffoldMessenger.of(context)
@@ -80,36 +97,34 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
     }
   }
 
-  Future<void> _finish() async {
+  Future<void> _save() async {
+    final name = _nameController.text.trim();
+    if (name.isEmpty) {
+      _showError('Display name cannot be empty.');
+      return;
+    }
+
     setState(() => _loading = true);
     try {
-      // Persists profileCompleted = true, so a restored session (see
-      // splash_screen.dart) goes straight into the app next time instead of
-      // looping back here.
-      await AuthService.instance.updateProfile({
-        if (_nameController.text.trim().isNotEmpty)
-          'name': _nameController.text.trim(),
+      final updated = await AuthService.instance.updateProfile({
+        'name': name,
         'bio': _bioController.text.trim(),
         if (_isTeacher) 'detail': _detailController.text.trim(),
         'nativeLang': _nativeLang,
         'learningLang': _learningLang,
         if (_avatarUrl != null) 'avatarUrl': _avatarUrl,
       });
-    } on FirebaseException catch (e) {
       if (!mounted) return;
-      setState(() => _loading = false);
+      Navigator.of(context).pop(updated);
+    } on FirebaseException catch (e) {
       _showError(e.message ?? 'Could not save your profile.');
-      return;
     } catch (_) {
-      // Firebase unreachable — still let the user into the app locally
-      // rather than blocking them; profile just won't be saved yet.
+      _showError(
+        'Could not reach Firebase. Check your connection and try again.',
+      );
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
-
-    if (!mounted) return;
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const MainShell()),
-      (route) => false,
-    );
   }
 
   @override
@@ -122,7 +137,7 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
       backgroundColor: AppColors.background,
       appBar: AppBar(
         title: const Text(
-          'Create Profile',
+          'Edit Profile',
           style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18),
         ),
       ),
@@ -176,27 +191,6 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
                   ),
                 ),
               ),
-              const SizedBox(height: 10),
-              Center(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceLight,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    _isTeacher ? '🧑‍🏫  Teacher' : '🎓  Student',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                ),
-              ),
               const SizedBox(height: 22),
               AuthTextField(
                 label: 'Display Name',
@@ -213,8 +207,8 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
                 icon: Icons.edit_note_rounded,
                 controller: _bioController,
               ),
-              // Teachers still list their subject; students no longer have
-              // an "Interests / Grade" field here.
+              // Matches create_profile_screen.dart: only teachers have a
+              // "Subject you teach" field.
               if (_isTeacher) ...[
                 const SizedBox(height: 16),
                 AuthTextField(
@@ -248,8 +242,8 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
               ),
               const SizedBox(height: 28),
               AuthPrimaryButton(
-                label: 'Finish & Continue',
-                onPressed: _finish,
+                label: 'Save Changes',
+                onPressed: _save,
                 loading: _loading,
               ),
             ],

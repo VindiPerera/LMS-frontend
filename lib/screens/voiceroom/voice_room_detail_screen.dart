@@ -34,7 +34,11 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                   IconButton(
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(),
-                    icon: const Icon(Icons.arrow_back_rounded, color: Colors.white70, size: 20),
+                    icon: const Icon(
+                      Icons.arrow_back_rounded,
+                      color: Colors.white70,
+                      size: 20,
+                    ),
                     onPressed: () => Navigator.of(context).pop(),
                   ),
                   const SizedBox(width: 8),
@@ -45,8 +49,15 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                   Container(
                     width: 30,
                     height: 30,
-                    decoration: const BoxDecoration(color: Color(0xFF2ECC71), shape: BoxShape.circle),
-                    child: const Icon(Icons.more_horiz_rounded, color: Colors.white, size: 16),
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF2ECC71),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.more_horiz_rounded,
+                      color: Colors.white,
+                      size: 16,
+                    ),
                   ),
                 ],
               ),
@@ -72,7 +83,11 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                           const Positioned(
                             right: 10,
                             bottom: 10,
-                            child: Icon(Icons.open_in_full_rounded, color: Colors.white38, size: 18),
+                            child: Icon(
+                              Icons.open_in_full_rounded,
+                              color: Colors.white38,
+                              size: 18,
+                            ),
                           ),
                         ],
                       ),
@@ -84,17 +99,20 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                     child: GridView.builder(
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
-                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 4,
-                        mainAxisSpacing: 14,
-                        crossAxisSpacing: 4,
-                        childAspectRatio: 1.05,
-                      ),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 4,
+                            mainAxisSpacing: 14,
+                            crossAxisSpacing: 4,
+                            childAspectRatio: 1.05,
+                          ),
                       itemCount: boardSpeakers.length,
                       itemBuilder: (context, i) {
                         final speaker = boardSpeakers[i];
                         return GestureDetector(
-                          onTap: speaker.isEmptySeat ? null : () => showRoomProfileSheet(context, speaker),
+                          onTap: speaker.isEmptySeat
+                              ? null
+                              : () => showRoomProfileSheet(context, speaker),
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -105,9 +123,16 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                                       decoration: BoxDecoration(
                                         color: Colors.white12,
                                         shape: BoxShape.circle,
-                                        border: Border.all(color: Colors.white38, width: 1),
+                                        border: Border.all(
+                                          color: Colors.white38,
+                                          width: 1,
+                                        ),
                                       ),
-                                      child: const Icon(Icons.front_hand_rounded, color: Colors.white38, size: 22),
+                                      child: const Icon(
+                                        Icons.front_hand_rounded,
+                                        color: Colors.white38,
+                                        size: 22,
+                                      ),
                                     )
                                   : Stack(
                                       clipBehavior: Clip.none,
@@ -117,7 +142,9 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                                           size: 56,
                                           showFlag: true,
                                           flag: speaker.flag,
-                                          borderWidth: speaker.isSpeaking ? 2.5 : 0,
+                                          borderWidth: speaker.isSpeaking
+                                              ? 2.5
+                                              : 0,
                                           borderColor: const Color(0xFF3DDC97),
                                         ),
                                         if (speaker.isSpeaking)
@@ -127,8 +154,15 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                                             child: Container(
                                               width: 18,
                                               height: 18,
-                                              decoration: const BoxDecoration(color: Color(0xFF3DDC97), shape: BoxShape.circle),
-                                              child: const Icon(Icons.mic_rounded, color: Colors.white, size: 11),
+                                              decoration: const BoxDecoration(
+                                                color: Color(0xFF3DDC97),
+                                                shape: BoxShape.circle,
+                                              ),
+                                              child: const Icon(
+                                                Icons.mic_rounded,
+                                                color: Colors.white,
+                                                size: 11,
+                                              ),
                                             ),
                                           ),
                                       ],
@@ -136,7 +170,11 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                               const SizedBox(height: 4),
                               Text(
                                 speaker.isEmptySeat ? '${i + 1}' : speaker.name,
-                                style: const TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.w600),
+                                style: const TextStyle(
+                                  color: Colors.white54,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
                             ],
                           ),
@@ -158,14 +196,25 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            for (var i = 0; i < boardStripCount; i++) AppAvatar(seed: 'strip$i', size: 32),
+                            for (var i = 0; i < boardStripCount; i++)
+                              AppAvatar(seed: 'strip$i', size: 32),
                             AppAvatar(seed: 'me', size: 32),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
-                              decoration: const BoxDecoration(color: Colors.white12, shape: BoxShape.circle),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 9,
+                                vertical: 8,
+                              ),
+                              decoration: const BoxDecoration(
+                                color: Colors.white12,
+                                shape: BoxShape.circle,
+                              ),
                               child: Text(
                                 '+$boardOthersCount',
-                                style: const TextStyle(fontSize: 11, color: Colors.white70, fontWeight: FontWeight.w700),
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.white70,
+                                  fontWeight: FontWeight.w700,
+                                ),
                               ),
                             ),
                           ],
@@ -189,7 +238,8 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                         const SizedBox(width: 8),
                         _SubtitlesButton(
                           enabled: _subtitlesOn,
-                          onTap: () => setState(() => _subtitlesOn = !_subtitlesOn),
+                          onTap: () =>
+                              setState(() => _subtitlesOn = !_subtitlesOn),
                         ),
                       ],
                     ),
@@ -207,13 +257,19 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
   Widget _actionChip(String label, IconData icon) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(16)),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(16),
+      ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, size: 14, color: Colors.white54),
           const SizedBox(width: 5),
-          Text(label, style: const TextStyle(fontSize: 12, color: Colors.white54)),
+          Text(
+            label,
+            style: const TextStyle(fontSize: 12, color: Colors.white54),
+          ),
         ],
       ),
     );
@@ -269,11 +325,19 @@ class _CommentLine extends StatelessWidget {
                 children: [
                   TextSpan(
                     text: '${comment.sender}  ·  ',
-                    style: const TextStyle(fontSize: 12, color: Colors.white54, fontWeight: FontWeight.w600),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Colors.white54,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                   TextSpan(
                     text: comment.text,
-                    style: const TextStyle(fontSize: 12.5, color: Colors.white, fontWeight: FontWeight.w800),
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                 ],
               ),
@@ -299,7 +363,10 @@ class _Composer extends StatelessWidget {
             child: Container(
               height: 36,
               padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(color: _VoiceRoomDetailScreenState.bubble, borderRadius: BorderRadius.circular(18)),
+              decoration: BoxDecoration(
+                color: _VoiceRoomDetailScreenState.bubble,
+                borderRadius: BorderRadius.circular(18),
+              ),
               child: Center(
                 child: TextField(
                   controller: controller,
@@ -318,15 +385,29 @@ class _Composer extends StatelessWidget {
           Container(
             width: 36,
             height: 36,
-            decoration: const BoxDecoration(color: Color(0xFF4FA8FF), shape: BoxShape.circle),
-            child: const Icon(Icons.mic_off_rounded, size: 18, color: Colors.white),
+            decoration: const BoxDecoration(
+              color: Color(0xFF4FA8FF),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.mic_off_rounded,
+              size: 18,
+              color: Colors.white,
+            ),
           ),
           const SizedBox(width: 6),
           Container(
             width: 36,
             height: 36,
-            decoration: const BoxDecoration(color: Color(0xFF7B68F4), shape: BoxShape.circle),
-            child: const Icon(Icons.front_hand_rounded, size: 18, color: Colors.white),
+            decoration: const BoxDecoration(
+              color: Color(0xFF7B68F4),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.front_hand_rounded,
+              size: 18,
+              color: Colors.white,
+            ),
           ),
         ],
       ),

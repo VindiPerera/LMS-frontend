@@ -12,6 +12,10 @@ class AppAvatar extends StatelessWidget {
   final String? flag;
   final double borderWidth;
   final Color? borderColor;
+  // A real uploaded photo (see StorageService), if any. Mock data uses a
+  // single letter for this field instead of a URL, so this is only treated
+  // as an image when it actually looks like one.
+  final String? imageUrl;
 
   const AppAvatar({
     super.key,
@@ -23,6 +27,7 @@ class AppAvatar extends StatelessWidget {
     this.flag,
     this.borderWidth = 0,
     this.borderColor,
+    this.imageUrl,
   });
 
   factory AppAvatar.forUser(
@@ -38,8 +43,11 @@ class AppAvatar extends StatelessWidget {
       isOnline: user.isOnline,
       showFlag: showFlag,
       flag: user.countryFlag,
+      imageUrl: user.avatarUrl,
     );
   }
+
+  bool get _hasImage => imageUrl != null && imageUrl!.startsWith('http');
 
   @override
   Widget build(BuildContext context) {
@@ -57,24 +65,34 @@ class AppAvatar extends StatelessWidget {
             height: size,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              gradient: LinearGradient(
-                colors: [color, color.withValues(alpha: 0.6)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
+              gradient: _hasImage
+                  ? null
+                  : LinearGradient(
+                      colors: [color, color.withValues(alpha: 0.6)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+              image: _hasImage
+                  ? DecorationImage(
+                      image: NetworkImage(imageUrl!),
+                      fit: BoxFit.cover,
+                    )
+                  : null,
               border: borderWidth > 0
                   ? Border.all(color: borderColor ?? color, width: borderWidth)
                   : null,
             ),
             alignment: Alignment.center,
-            child: Text(
-              initial,
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w700,
-                fontSize: size * 0.4,
-              ),
-            ),
+            child: _hasImage
+                ? null
+                : Text(
+                    initial,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: size * 0.4,
+                    ),
+                  ),
           ),
           if (showOnlineDot)
             Positioned(
@@ -84,9 +102,14 @@ class AppAvatar extends StatelessWidget {
                 width: size * 0.28,
                 height: size * 0.28,
                 decoration: BoxDecoration(
-                  color: isOnline ? const Color(0xFF3DDC97) : const Color(0xFF6E6E78),
+                  color: isOnline
+                      ? const Color(0xFF3DDC97)
+                      : const Color(0xFF6E6E78),
                   shape: BoxShape.circle,
-                  border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 2),
+                  border: Border.all(
+                    color: Theme.of(context).scaffoldBackgroundColor,
+                    width: 2,
+                  ),
                 ),
               ),
             ),

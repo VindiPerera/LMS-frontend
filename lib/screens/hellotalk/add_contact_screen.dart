@@ -37,7 +37,11 @@ class AddContactScreen extends StatelessWidget {
             elevation: 0,
             centerTitle: true,
             leading: IconButton(
-              icon: const Icon(Icons.close_rounded, color: AppColors.textPrimary, size: 26),
+              icon: const Icon(
+                Icons.close_rounded,
+                color: AppColors.textPrimary,
+                size: 26,
+              ),
               onPressed: () => Navigator.of(context).pop(),
             ),
             title: const Text(
@@ -55,14 +59,21 @@ class AddContactScreen extends StatelessWidget {
               children: [
                 // Search Input
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 12,
+                  ),
                   decoration: BoxDecoration(
                     color: const Color(0xFFECECEF),
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: Row(
                     children: const [
-                      Icon(Icons.search_rounded, color: AppColors.textTertiary, size: 22),
+                      Icon(
+                        Icons.search_rounded,
+                        color: AppColors.textTertiary,
+                        size: 22,
+                      ),
                       SizedBox(width: 10),
                       Expanded(
                         child: Text(
@@ -99,13 +110,21 @@ class AddContactScreen extends StatelessWidget {
                         label: 'Create Group Chat',
                         onTap: () {},
                       ),
-                      const Divider(height: 1, indent: 56, color: AppColors.divider),
+                      const Divider(
+                        height: 1,
+                        indent: 56,
+                        color: AppColors.divider,
+                      ),
                       _ActionTile(
                         icon: Icons.crop_free_rounded,
                         label: 'Scan QR Code',
                         onTap: () {},
                       ),
-                      const Divider(height: 1, indent: 56, color: AppColors.divider),
+                      const Divider(
+                        height: 1,
+                        indent: 56,
+                        color: AppColors.divider,
+                      ),
                       _ActionTile(
                         icon: Icons.mail_outline_rounded,
                         label: 'Invite',
@@ -174,9 +193,7 @@ class AddContactScreen extends StatelessWidget {
                       ),
                     ],
                   ),
-                  child: CustomPaint(
-                    painter: QrCodePainter(),
-                  ),
+                  child: CustomPaint(painter: QrCodePainter()),
                 ),
                 const SizedBox(height: 24),
 
@@ -190,7 +207,11 @@ class AddContactScreen extends StatelessWidget {
                         const SnackBar(content: Text('Sharing QR Code...')),
                       );
                     },
-                    icon: const Icon(Icons.upload_rounded, size: 20, color: Colors.white),
+                    icon: const Icon(
+                      Icons.upload_rounded,
+                      size: 20,
+                      color: Colors.white,
+                    ),
                     label: const Text(
                       'Share QR Code',
                       style: TextStyle(
@@ -294,26 +315,26 @@ class QrCodePainter extends CustomPainter {
 
     // Matrix modules (deterministic pattern)
     final matrix = [
-      [0,0,0,0,0,0,0, 0, 1,0,1,1,0, 0,0,0,0,0,0,0],
-      [0,1,1,1,1,1,0, 1, 0,1,0,0,1, 0,1,1,1,1,1,0],
-      [0,1,0,0,0,1,0, 0, 1,1,1,0,0, 0,1,0,0,0,1,0],
-      [0,1,0,0,0,1,0, 1, 0,0,1,1,1, 0,1,0,0,0,1,0],
-      [0,1,0,0,0,1,0, 0, 1,0,1,0,0, 0,1,0,0,0,1,0],
-      [0,1,1,1,1,1,0, 1, 1,1,0,1,1, 0,1,1,1,1,1,0],
-      [0,0,0,0,0,0,0, 0, 1,0,1,0,0, 0,0,0,0,0,0,0],
-      [1,0,1,1,0,1,0, 1, 0,1,1,0,1, 1,0,1,1,0,1,1],
-      [0,1,0,0,1,0,1, 0, 1,0,0,1,0, 0,1,0,1,0,0,1],
-      [1,1,1,0,1,1,0, 1, 1,1,0,1,1, 1,0,1,0,1,1,0],
-      [0,0,1,1,0,0,1, 0, 0,1,1,0,0, 0,1,1,1,0,0,1],
-      [1,1,0,0,1,1,0, 1, 1,0,1,1,0, 1,0,0,1,1,1,0],
-      [0,0,0,0,0,0,0, 0, 1,1,0,0,1, 0,1,0,1,0,0,1],
-      [0,0,0,0,0,0,0, 1, 0,1,1,0,0, 0,0,0,0,0,0,0],
-      [0,1,1,1,1,1,0, 0, 1,0,0,1,1, 1,0,1,1,1,0,1],
-      [0,1,0,0,0,1,0, 1, 1,1,0,1,0, 0,1,0,0,1,1,0],
-      [0,1,0,0,0,1,0, 0, 0,1,1,0,1, 1,0,1,1,0,0,1],
-      [0,1,0,0,0,1,0, 1, 1,0,0,1,0, 0,1,0,0,1,1,0],
-      [0,1,1,1,1,1,0, 0, 1,1,1,0,1, 1,0,1,1,0,1,1],
-      [0,0,0,0,0,0,0, 1, 0,0,1,1,0, 0,1,0,0,1,0,0],
+      [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+      [0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 1, 1, 1, 1, 0],
+      [0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0],
+      [0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 1, 1, 1, 0, 1, 0, 0, 0, 1, 0],
+      [0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0],
+      [0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 1, 1, 1, 1, 0],
+      [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      [1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1],
+      [0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1],
+      [1, 1, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 0],
+      [0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1],
+      [1, 1, 0, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 0, 1, 1, 1, 0],
+      [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1],
+      [0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      [0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1],
+      [0, 1, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0],
+      [0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 0, 1],
+      [0, 1, 0, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0],
+      [0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1],
+      [0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0],
     ];
 
     for (int r = 0; r < matrix.length; r++) {
@@ -342,7 +363,10 @@ class QrCodePainter extends CustomPainter {
     // Inner 5x5 white square
     canvas.drawRect(Rect.fromLTWH(x + ms, y + ms, 5 * ms, 5 * ms), paintWhite);
     // Center 3x3 dark square
-    canvas.drawRect(Rect.fromLTWH(x + 2 * ms, y + 2 * ms, 3 * ms, 3 * ms), paintDark);
+    canvas.drawRect(
+      Rect.fromLTWH(x + 2 * ms, y + 2 * ms, 3 * ms, 3 * ms),
+      paintDark,
+    );
   }
 
   @override

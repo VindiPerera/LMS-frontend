@@ -1,6 +1,9 @@
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:google_sign_in/google_sign_in.dart';
 import '../models/user.dart';
-import 'api_client.dart';
+import 'push_notification_service.dart';
 
 /// Result of a successful register/login/Google sign-in.
 class AuthResult {
@@ -9,120 +12,202 @@ class AuthResult {
   const AuthResult(this.user, {this.isNewUser = false});
 }
 
-/// Owns the current session: talks to the Laravel auth endpoints, keeps the
-/// Sanctum token in [ApiClient], and persists it so the app can restore a
-/// session on next launch.
+/// Owns the current session. Firebase Auth persists the session itself (no
+/// manual token storage needed, unlike the old Sanctum-based setup); this
+/// just layers the app's `users/{uid}` Firestore profile on top of it.
 class AuthService {
   AuthService._();
   static final AuthService instance = AuthService._();
 
-  static const _tokenKey = 'facetalk_api_token';
+  static final _users = FirebaseFirestore.instance.collection('users');
 
   AppUser? _currentUser;
   AppUser? get currentUser => _currentUser;
-  bool get isLoggedIn => _currentUser != null;
+  bool get isLoggedIn => FirebaseAuth.instance.currentUser != null;
 
-  /// Tries to resume a session from a token saved on a previous launch.
-  /// Returns the user on success, or null if there was no token or it's no
-  /// longer valid (in which case the stored token is cleared).
-  Future<AppUser?> restoreSession() async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString(_tokenKey);
-    if (token == null) return null;
+  /// Updates the cached user after a profile edit, so other screens reading
+  /// [currentUser] see the change without another round-trip.
+  void setCurrentUser(AppUser user) => _currentUser = user;
 
-    ApiClient.instance.setToken(token);
+  /// Waits for Firebase Auth to report its (persisted) sign-in state, then
+  /// loads the matching Firestore profile if there is one. Called once from
+  /// splash_screen.dart on app start.
+  Future<AppUser?> init() async {
+    final user = await FirebaseAuth.instance.authStateChanges().first;
+    if (user == null) return null;
+    return refreshCurrentUser();
+  }
+
+  /// Re-fetches the current user's profile from Firestore — used by
+  /// me_screen.dart so the Profile tab reflects the latest backend state.
+  /// Falls back to the existing cached user if the request fails.
+  Future<AppUser?> refreshCurrentUser() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return null;
     try {
-      final res = await ApiClient.instance.get('/me');
-      _currentUser = AppUser.fromJson(res['user'] as Map<String, dynamic>);
-      return _currentUser;
+      final doc = await _users.doc(uid).get();
+      if (doc.exists) {
+        _currentUser = AppUser.fromJson({...doc.data()!, 'id': doc.id});
+      }
     } catch (_) {
-      await prefs.remove(_tokenKey);
-      ApiClient.instance.setToken(null);
-      return null;
+      // Offline or Firestore down — keep showing whatever we already have.
     }
+    return _currentUser;
   }
 
   /// [name] is optional — signup_screen.dart no longer asks for a display
-  /// name; the backend derives a placeholder from the email until the user
-  /// sets a real one on create_profile_screen.dart.
+  /// name; a placeholder derived from the email is used until the user sets
+  /// a real one on create_profile_screen.dart.
   Future<AppUser> register({
     String? name,
     required String email,
     required String password,
-    required String passwordConfirmation,
     required String role,
   }) async {
-    final result = await _authenticate(() => ApiClient.instance.post('/register', {
-          if (name != null && name.isNotEmpty) 'name': name,
-          'email': email,
-          'password': password,
-          'password_confirmation': passwordConfirmation,
-          'role': role,
-        }));
-    return result.user;
-  }
+    final credential = await FirebaseAuth.instance
+        .createUserWithEmailAndPassword(email: email, password: password);
+    final uid = credential.user!.uid;
+    final displayName = (name != null && name.isNotEmpty)
+        ? name
+        : email.split('@').first;
 
-  Future<AppUser> login({required String email, required String password}) async {
-    final result = await _authenticate(() => ApiClient.instance.post('/login', {
-          'email': email,
-          'password': password,
-        }));
-    return result.user;
-  }
-
-  /// "Continue with Google". [idToken] is the Google ID token from
-  /// GoogleAuth.signInIdToken(); [role] is only used the first time this
-  /// Google account signs in (ignored for an existing account).
-  Future<AuthResult> loginWithGoogle({required String idToken, String? role}) {
-    return _authenticate(() => ApiClient.instance.post('/auth/google', {
-          'id_token': idToken,
-          if (role != null) 'role': role,
-        }));
-  }
-
-  /// "Forgot password" step 1: asks the backend to email a reset code.
-  Future<void> forgotPassword({required String email}) async {
-    await ApiClient.instance.post('/forgot-password', {'email': email});
-  }
-
-  /// "Forgot password" step 2: exchanges the emailed code for a new password.
-  Future<void> resetPassword({
-    required String email,
-    required String token,
-    required String password,
-    required String passwordConfirmation,
-  }) async {
-    await ApiClient.instance.post('/reset-password', {
+    await _users.doc(uid).set({
+      'name': displayName,
       'email': email,
-      'token': token,
-      'password': password,
-      'password_confirmation': passwordConfirmation,
+      'role': role,
+      'handle': await _generateUniqueHandle(displayName),
+      'isOnline': false,
+      'isVip': false,
+      'tags': <String>[],
+      'profileCompleted': false,
+      'createdAt': FieldValue.serverTimestamp(),
     });
+
+    _afterSignIn();
+    return (await refreshCurrentUser())!;
   }
 
-  Future<AuthResult> _authenticate(Future<Map<String, dynamic>> Function() request) async {
-    final res = await request();
-    final token = res['token'] as String;
-    final user = AppUser.fromJson(res['user'] as Map<String, dynamic>);
+  Future<AppUser> login({
+    required String email,
+    required String password,
+  }) async {
+    await FirebaseAuth.instance.signInWithEmailAndPassword(
+      email: email,
+      password: password,
+    );
+    _afterSignIn();
+    return (await refreshCurrentUser())!;
+  }
 
-    ApiClient.instance.setToken(token);
-    _currentUser = user;
+  /// "Continue with Google". [role] is only used the first time this Google
+  /// account signs in (ignored for an existing account). Returns null if
+  /// the user dismissed the account picker/popup.
+  Future<AuthResult?> loginWithGoogle({String? role}) async {
+    final UserCredential credential;
+    try {
+      if (kIsWeb) {
+        // Web: FirebaseAuth drives the OAuth popup directly — no separate
+        // google_sign_in plumbing or client ID needed, just the Google
+        // provider enabled in the Firebase console.
+        credential = await FirebaseAuth.instance.signInWithPopup(
+          GoogleAuthProvider(),
+        );
+      } else {
+        final googleUser = await GoogleSignIn().signIn();
+        if (googleUser == null) return null; // user cancelled
+        final googleAuth = await googleUser.authentication;
+        credential = await FirebaseAuth.instance.signInWithCredential(
+          GoogleAuthProvider.credential(
+            accessToken: googleAuth.accessToken,
+            idToken: googleAuth.idToken,
+          ),
+        );
+      }
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'popup-closed-by-user' ||
+          e.code == 'cancelled-popup-request') {
+        return null; // user cancelled — not a real error
+      }
+      rethrow;
+    }
 
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_tokenKey, token);
+    final user = credential.user!;
+    final doc = await _users.doc(user.uid).get();
+    final isNewUser = !doc.exists;
 
-    return AuthResult(user, isNewUser: res['isNewUser'] == true);
+    if (isNewUser) {
+      final displayName =
+          user.displayName ?? user.email?.split('@').first ?? 'user';
+      await _users.doc(user.uid).set({
+        'name': displayName,
+        'email': user.email,
+        'role': role ?? 'student',
+        'handle': await _generateUniqueHandle(displayName),
+        'avatarUrl': user.photoURL ?? '',
+        'isOnline': false,
+        'isVip': false,
+        'tags': <String>[],
+        'profileCompleted': false,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    }
+
+    _afterSignIn();
+    return AuthResult((await refreshCurrentUser())!, isNewUser: isNewUser);
+  }
+
+  /// "Forgot password": Firebase emails the user a reset link directly —
+  /// there's no in-app code-entry step (unlike the old Laravel-backed flow),
+  /// so there's no separate "confirm reset" method to call afterwards.
+  Future<void> forgotPassword({required String email}) async {
+    await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+  }
+
+  /// Updates the signed-in user's own `users/{uid}` document (create/edit
+  /// profile screens). Always marks the profile as completed — both screens
+  /// that call this represent the user finishing/editing their profile.
+  Future<AppUser> updateProfile(Map<String, dynamic> fields) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) throw StateError('Not signed in.');
+
+    await _users.doc(uid).update({...fields, 'profileCompleted': true});
+    return (await refreshCurrentUser())!;
   }
 
   Future<void> logout() async {
+    await FirebaseAuth.instance.signOut();
     try {
-      await ApiClient.instance.post('/logout');
+      await GoogleSignIn().signOut();
     } catch (_) {
-      // Best-effort — the local session is cleared below regardless.
+      // Not signed in with Google, or unsupported on this platform — fine.
     }
-    ApiClient.instance.setToken(null);
     _currentUser = null;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_tokenKey);
+  }
+
+  /// Registers this device for push notifications, best-effort — a failure
+  /// here (e.g. permission denied, no VAPID key configured yet) shouldn't
+  /// block sign-in.
+  void _afterSignIn() {
+    // ignore: discarded_futures
+    PushNotificationService.instance.initialize();
+  }
+
+  /// Build a unique @handle from a display name, e.g. "Vinuk Lakvindu" ->
+  /// "vinuk_lakvindu" (mirrors the old backend's AuthController logic).
+  Future<String> _generateUniqueHandle(String name) async {
+    final base = name
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'^_+|_+$'), '');
+    var handle = base.isEmpty ? 'user' : base;
+    var suffix = 1;
+
+    while ((await _users.where('handle', isEqualTo: handle).limit(1).get())
+        .docs
+        .isNotEmpty) {
+      handle = '${base.isEmpty ? 'user' : base}_${suffix++}';
+    }
+    return handle;
   }
 }
