@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../data/mock_data.dart';
 import '../../models/moment.dart';
+import '../../models/user.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
 
@@ -159,11 +160,11 @@ class _MomentCard extends StatelessWidget {
                     const SizedBox(height: 3),
                     Row(
                       children: [
-                        _langBadge(moment.user.nativeLang.substring(0, 2).toUpperCase(), AppColors.perfectGreen),
+                        _langBadge(moment.user.nativeLang.languageCode, AppColors.perfectGreen),
                         const SizedBox(width: 4),
                         const Icon(Icons.sync_alt_rounded, size: 12, color: AppColors.textTertiary),
                         const SizedBox(width: 4),
-                        _langBadge(moment.user.learningLang.substring(0, 2).toUpperCase(), AppColors.primaryPurple, dotted: true),
+                        _langBadge(moment.user.learningLang.languageCode, AppColors.primaryPurple, dotted: true),
                       ],
                     ),
                   ],
