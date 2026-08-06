@@ -1,15 +1,45 @@
 import 'package:flutter/material.dart';
-import '../../data/mock_data.dart';
+import '../../data/mock_data.dart' as mock;
+import '../../models/user.dart';
 import '../../services/auth_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
 import '../auth/splash_screen.dart';
+import 'edit_profile_screen.dart';
 
-class MeScreen extends StatelessWidget {
+class MeScreen extends StatefulWidget {
   const MeScreen({super.key});
 
   @override
+  State<MeScreen> createState() => _MeScreenState();
+}
+
+class _MeScreenState extends State<MeScreen> {
+  // Falls back to the old mock profile only if we somehow reach this screen
+  // without a logged-in user (shouldn't happen — MainShell is only reachable
+  // post-login — but keeps the tab from crashing rather than showing it).
+  AppUser get _user => AuthService.instance.currentUser ?? mock.currentUser;
+
+  @override
+  void initState() {
+    super.initState();
+    // Pulls the latest profile from the backend (e.g. edited on another
+    // device) rather than only showing what was cached at login.
+    AuthService.instance.refreshCurrentUser().then((_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  Future<void> _editProfile() async {
+    final updated = await Navigator.of(context).push<AppUser>(
+      MaterialPageRoute(builder: (_) => EditProfileScreen(user: _user)),
+    );
+    if (updated != null && mounted) setState(() {});
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final user = _user;
     return Scaffold(
       body: SafeArea(
         child: ListView(
@@ -19,13 +49,22 @@ class MeScreen extends StatelessWidget {
             const SizedBox(height: 14),
             _VipPromoBanner(),
             const SizedBox(height: 18),
-            _ProfileHeader(),
+            _ProfileHeader(user: user, onEdit: _editProfile),
             const SizedBox(height: 18),
             Row(
               children: [
-                Expanded(child: _StatCard(icon: '🔥', value: '1', label: 'Day Streak', trailing: '🎁')),
+                Expanded(
+                  child: _StatCard(
+                    icon: '🔥',
+                    value: '1',
+                    label: 'Day Streak',
+                    trailing: '🎁',
+                  ),
+                ),
                 const SizedBox(width: 12),
-                Expanded(child: _StatCard(icon: null, value: '0', label: 'Visitors')),
+                Expanded(
+                  child: _StatCard(icon: null, value: '0', label: 'Visitors'),
+                ),
               ],
             ),
             const SizedBox(height: 12),
@@ -33,7 +72,10 @@ class MeScreen extends StatelessWidget {
             const SizedBox(height: 18),
             _VipBenefitsCard(),
             const SizedBox(height: 22),
-            const Text('Language Courses', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+            const Text(
+              'Language Courses',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+            ),
             const SizedBox(height: 12),
             _CoursesGrid(),
             const SizedBox(height: 20),
@@ -66,19 +108,35 @@ class _TopBar extends StatelessWidget {
   Widget _pillBadge(String text, String count) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(color: AppColors.surfaceLight, borderRadius: BorderRadius.circular(20)),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceLight,
+        borderRadius: BorderRadius.circular(20),
+      ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
             width: 18,
             height: 18,
-            decoration: const BoxDecoration(color: AppColors.vipGold, shape: BoxShape.circle),
+            decoration: const BoxDecoration(
+              color: AppColors.vipGold,
+              shape: BoxShape.circle,
+            ),
             alignment: Alignment.center,
-            child: const Text('HT', style: TextStyle(fontSize: 7, fontWeight: FontWeight.w800, color: Colors.black)),
+            child: const Text(
+              'HT',
+              style: TextStyle(
+                fontSize: 7,
+                fontWeight: FontWeight.w800,
+                color: Colors.black,
+              ),
+            ),
           ),
           const SizedBox(width: 6),
-          Text(count, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+          Text(
+            count,
+            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+          ),
         ],
       ),
     );
@@ -88,7 +146,10 @@ class _TopBar extends StatelessWidget {
     return Container(
       width: 38,
       height: 38,
-      decoration: const BoxDecoration(color: AppColors.surfaceLight, shape: BoxShape.circle),
+      decoration: const BoxDecoration(
+        color: AppColors.surfaceLight,
+        shape: BoxShape.circle,
+      ),
       child: Icon(icon, size: 18),
     );
   }
@@ -108,13 +169,27 @@ class _VipPromoBanner extends StatelessWidget {
           Expanded(
             child: Text(
               'Learn more about exclusive VIP privileges',
-              style: TextStyle(color: AppColors.vipCardText, fontWeight: FontWeight.w700, fontSize: 13.5),
+              style: TextStyle(
+                color: AppColors.vipCardText,
+                fontWeight: FontWeight.w700,
+                fontSize: 13.5,
+              ),
             ),
           ),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
-            child: Text('View Now', style: TextStyle(color: AppColors.vipCardText, fontWeight: FontWeight.w700, fontSize: 12.5)),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              'View Now',
+              style: TextStyle(
+                color: AppColors.vipCardText,
+                fontWeight: FontWeight.w700,
+                fontSize: 12.5,
+              ),
+            ),
           ),
         ],
       ),
@@ -123,6 +198,11 @@ class _VipPromoBanner extends StatelessWidget {
 }
 
 class _ProfileHeader extends StatelessWidget {
+  final AppUser user;
+  final VoidCallback onEdit;
+
+  const _ProfileHeader({required this.user, required this.onEdit});
+
   @override
   Widget build(BuildContext context) {
     return Row(
@@ -141,13 +221,15 @@ class _ProfileHeader extends StatelessWidget {
                     width: 78,
                     height: 78,
                     child: CircularProgressIndicator(
-                      value: 0.45,
+                      value: user.profileCompleted ? 1 : 0.45,
                       strokeWidth: 3,
                       backgroundColor: AppColors.surfaceLight,
-                      valueColor: const AlwaysStoppedAnimation(AppColors.primaryPurple),
+                      valueColor: const AlwaysStoppedAnimation(
+                        AppColors.primaryPurple,
+                      ),
                     ),
                   ),
-                  Center(child: AppAvatar(seed: currentUser.name, size: 66)),
+                  Center(child: AppAvatar(seed: user.name, size: 66)),
                 ],
               ),
             ),
@@ -155,8 +237,18 @@ class _ProfileHeader extends StatelessWidget {
               bottom: -10,
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(10)),
-                child: const Text('45%', style: TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.w700)),
+                decoration: BoxDecoration(
+                  color: Colors.black,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  user.profileCompleted ? '100%' : '45%',
+                  style: const TextStyle(
+                    fontSize: 10,
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ),
             ),
           ],
@@ -170,59 +262,114 @@ class _ProfileHeader extends StatelessWidget {
                 children: [
                   Flexible(
                     child: Text(
-                      currentUser.name,
+                      user.name,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
+                      style: const TextStyle(
+                        fontSize: 19,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(color: AppColors.surfaceLight, borderRadius: BorderRadius.circular(10)),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: const [
-                        Text('VIP', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: AppColors.vipGold)),
-                        SizedBox(width: 3),
-                        Text('Upgrade', style: TextStyle(fontSize: 10, color: AppColors.textSecondary)),
-                        Icon(Icons.chevron_right_rounded, size: 12, color: AppColors.textSecondary),
-                      ],
+                  if (user.isVip) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.surfaceLight,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: const [
+                          Text(
+                            'VIP',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.vipGold,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
+                  ],
                 ],
               ),
               const SizedBox(height: 4),
               Row(
                 children: [
-                  Text('@${currentUser.handle}', style: const TextStyle(color: AppColors.textTertiary, fontSize: 12.5)),
+                  Text(
+                    '@${user.handle}',
+                    style: const TextStyle(
+                      color: AppColors.textTertiary,
+                      fontSize: 12.5,
+                    ),
+                  ),
                   const SizedBox(width: 4),
-                  const Icon(Icons.copy_rounded, size: 12, color: AppColors.textTertiary),
+                  const Icon(
+                    Icons.copy_rounded,
+                    size: 12,
+                    color: AppColors.textTertiary,
+                  ),
                 ],
               ),
               const SizedBox(height: 8),
               Row(
                 children: const [
-                  Text('1 ', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-                  Text('Following  ', style: TextStyle(color: AppColors.textTertiary, fontSize: 13)),
-                  Text('1 ', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-                  Text('Followers', style: TextStyle(color: AppColors.textTertiary, fontSize: 13)),
+                  Text(
+                    '1 ',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                  ),
+                  Text(
+                    'Following  ',
+                    style: TextStyle(
+                      color: AppColors.textTertiary,
+                      fontSize: 13,
+                    ),
+                  ),
+                  Text(
+                    '1 ',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                  ),
+                  Text(
+                    'Followers',
+                    style: TextStyle(
+                      color: AppColors.textTertiary,
+                      fontSize: 13,
+                    ),
+                  ),
                 ],
               ),
             ],
           ),
         ),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          decoration: BoxDecoration(color: AppColors.primaryPurple, borderRadius: BorderRadius.circular(20)),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: const [
-              Icon(Icons.edit_rounded, size: 14, color: Colors.white),
-              SizedBox(width: 6),
-              Text('Edit', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13)),
-              SizedBox(width: 4),
-              Icon(Icons.circle, size: 6, color: AppColors.badgeRed),
-            ],
+        InkWell(
+          onTap: onEdit,
+          borderRadius: BorderRadius.circular(20),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppColors.primaryPurple,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.edit_rounded, size: 14, color: Colors.white),
+                SizedBox(width: 6),
+                Text(
+                  'Edit',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ],
@@ -235,13 +382,21 @@ class _StatCard extends StatelessWidget {
   final String value;
   final String label;
   final String? trailing;
-  const _StatCard({this.icon, required this.value, required this.label, this.trailing});
+  const _StatCard({
+    this.icon,
+    required this.value,
+    required this.label,
+    this.trailing,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(color: AppColors.card, borderRadius: BorderRadius.circular(14)),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(14),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -250,16 +405,30 @@ class _StatCard extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  if (icon != null) Text(icon!, style: const TextStyle(fontSize: 18)),
+                  if (icon != null)
+                    Text(icon!, style: const TextStyle(fontSize: 18)),
                   if (icon != null) const SizedBox(width: 6),
-                  Text(value, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+                  Text(
+                    value,
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
                 ],
               ),
-              if (trailing != null) Text(trailing!, style: const TextStyle(fontSize: 20)),
+              if (trailing != null)
+                Text(trailing!, style: const TextStyle(fontSize: 20)),
             ],
           ),
           const SizedBox(height: 6),
-          Text(label, style: const TextStyle(color: AppColors.textTertiary, fontSize: 12.5)),
+          Text(
+            label,
+            style: const TextStyle(
+              color: AppColors.textTertiary,
+              fontSize: 12.5,
+            ),
+          ),
         ],
       ),
     );
@@ -271,19 +440,40 @@ class _MomentsRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(color: AppColors.card, borderRadius: BorderRadius.circular(14)),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(14),
+      ),
       child: Row(
         children: [
           Container(
             width: 34,
             height: 34,
-            decoration: BoxDecoration(color: AppColors.primaryPurple.withValues(alpha: 0.15), shape: BoxShape.circle),
-            child: const Icon(Icons.public_rounded, color: AppColors.primaryPurple, size: 18),
+            decoration: BoxDecoration(
+              color: AppColors.primaryPurple.withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.public_rounded,
+              color: AppColors.primaryPurple,
+              size: 18,
+            ),
           ),
           const SizedBox(width: 12),
-          const Expanded(child: Text('Moments', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15))),
-          const Text('0', style: TextStyle(color: AppColors.textTertiary, fontSize: 14)),
-          const Icon(Icons.chevron_right_rounded, color: AppColors.textTertiary),
+          const Expanded(
+            child: Text(
+              'Moments',
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+            ),
+          ),
+          const Text(
+            '0',
+            style: TextStyle(color: AppColors.textTertiary, fontSize: 14),
+          ),
+          const Icon(
+            Icons.chevron_right_rounded,
+            color: AppColors.textTertiary,
+          ),
         ],
       ),
     );
@@ -295,7 +485,10 @@ class _VipBenefitsCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(color: AppColors.vipCardBg, borderRadius: BorderRadius.circular(20)),
+      decoration: BoxDecoration(
+        color: AppColors.vipCardBg,
+        borderRadius: BorderRadius.circular(20),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -303,11 +496,32 @@ class _VipBenefitsCard extends StatelessWidget {
             children: [
               const Text('👑', style: TextStyle(fontSize: 16)),
               const SizedBox(width: 6),
-              Text('VIP benefits', style: TextStyle(color: AppColors.vipCardText, fontWeight: FontWeight.w800, fontSize: 15)),
+              Text(
+                'VIP benefits',
+                style: TextStyle(
+                  color: AppColors.vipCardText,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 15,
+                ),
+              ),
               const Spacer(),
-              Text('Free', style: TextStyle(color: AppColors.vipCardText.withValues(alpha: 0.5), fontWeight: FontWeight.w700, fontSize: 12)),
+              Text(
+                'Free',
+                style: TextStyle(
+                  color: AppColors.vipCardText.withValues(alpha: 0.5),
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12,
+                ),
+              ),
               const SizedBox(width: 26),
-              Text('VIP', style: TextStyle(color: AppColors.vipCardText, fontWeight: FontWeight.w800, fontSize: 13)),
+              Text(
+                'VIP',
+                style: TextStyle(
+                  color: AppColors.vipCardText,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 14),
@@ -324,10 +538,18 @@ class _VipBenefitsCard extends StatelessWidget {
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primaryPurple,
                 padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(24),
+                ),
               ),
-              child: const Text('See all VIP Features',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 14.5)),
+              child: const Text(
+                'See all VIP Features',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 14.5,
+                ),
+              ),
             ),
           ),
         ],
@@ -340,15 +562,29 @@ class _VipBenefitsCard extends StatelessWidget {
       children: [
         Expanded(
           flex: 3,
-          child: Text(label, style: TextStyle(color: AppColors.vipCardText, fontSize: 13.5)),
+          child: Text(
+            label,
+            style: TextStyle(color: AppColors.vipCardText, fontSize: 13.5),
+          ),
         ),
         Expanded(
           flex: 1,
-          child: Text(freeValue, textAlign: TextAlign.center, style: TextStyle(color: AppColors.vipCardText.withValues(alpha: 0.45), fontSize: 12.5)),
+          child: Text(
+            freeValue,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: AppColors.vipCardText.withValues(alpha: 0.45),
+              fontSize: 12.5,
+            ),
+          ),
         ),
         Expanded(
           flex: 1,
-          child: Icon(Icons.check_rounded, color: AppColors.vipCardText, size: 18),
+          child: Icon(
+            Icons.check_rounded,
+            color: AppColors.vipCardText,
+            size: 18,
+          ),
         ),
       ],
     );
@@ -367,9 +603,9 @@ class _CoursesGrid extends StatelessWidget {
         crossAxisSpacing: 8,
         childAspectRatio: 0.78,
       ),
-      itemCount: languageCourses.length,
+      itemCount: mock.languageCourses.length,
       itemBuilder: (context, i) {
-        final course = languageCourses[i];
+        final course = mock.languageCourses[i];
         return Column(
           children: [
             Stack(
@@ -378,8 +614,15 @@ class _CoursesGrid extends StatelessWidget {
                 Container(
                   width: 52,
                   height: 52,
-                  decoration: BoxDecoration(color: course['color'] as Color, borderRadius: BorderRadius.circular(16)),
-                  child: Icon(course['icon'] as IconData, color: Colors.white, size: 24),
+                  decoration: BoxDecoration(
+                    color: course['color'] as Color,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Icon(
+                    course['icon'] as IconData,
+                    color: Colors.white,
+                    size: 24,
+                  ),
                 ),
                 if (course['badge'] as bool)
                   Positioned(
@@ -388,7 +631,10 @@ class _CoursesGrid extends StatelessWidget {
                     child: Container(
                       width: 10,
                       height: 10,
-                      decoration: const BoxDecoration(color: AppColors.badgeRed, shape: BoxShape.circle),
+                      decoration: const BoxDecoration(
+                        color: AppColors.badgeRed,
+                        shape: BoxShape.circle,
+                      ),
                     ),
                   ),
               ],
@@ -399,7 +645,10 @@ class _CoursesGrid extends StatelessWidget {
               textAlign: TextAlign.center,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
+              style: const TextStyle(
+                fontSize: 11,
+                color: AppColors.textSecondary,
+              ),
             ),
           ],
         );
@@ -443,12 +692,30 @@ class _SettingsList extends StatelessWidget {
           return Column(
             children: [
               ListTile(
-                leading: Icon(icon, color: isLogout ? AppColors.badgeRed : AppColors.textSecondary, size: 20),
-                title: Text(label, style: TextStyle(fontSize: 14, color: isLogout ? AppColors.badgeRed : null)),
-                trailing: isLogout ? null : const Icon(Icons.chevron_right_rounded, color: AppColors.textTertiary),
+                leading: Icon(
+                  icon,
+                  color: isLogout
+                      ? AppColors.badgeRed
+                      : AppColors.textSecondary,
+                  size: 20,
+                ),
+                title: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: isLogout ? AppColors.badgeRed : null,
+                  ),
+                ),
+                trailing: isLogout
+                    ? null
+                    : const Icon(
+                        Icons.chevron_right_rounded,
+                        color: AppColors.textTertiary,
+                      ),
                 onTap: () => _handleTap(context, label),
               ),
-              if (i != _items.length - 1) const Divider(height: 1, indent: 52, color: AppColors.divider),
+              if (i != _items.length - 1)
+                const Divider(height: 1, indent: 52, color: AppColors.divider),
             ],
           );
         }),

@@ -22,10 +22,10 @@ class _SplashScreenState extends State<SplashScreen> {
     _tryResumeSession();
   }
 
-  /// If a token from a previous login is still saved and still valid on the
-  /// backend, skip straight past the auth screens into the app.
+  /// Firebase Auth persists sign-in state itself — if it reports an
+  /// existing user, skip straight past the auth screens into the app.
   Future<void> _tryResumeSession() async {
-    final user = await AuthService.instance.restoreSession();
+    final user = await AuthService.instance.init();
     if (!mounted) return;
 
     if (user != null) {
@@ -40,9 +40,9 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   void _goToLogin(BuildContext context) {
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const LoginScreen()),
-    );
+    Navigator.of(
+      context,
+    ).pushReplacement(MaterialPageRoute(builder: (_) => const LoginScreen()));
   }
 
   @override
@@ -84,11 +84,17 @@ class _SplashScreenState extends State<SplashScreen> {
                         child: SizedBox(
                           width: 22,
                           height: 22,
-                          child: CircularProgressIndicator(strokeWidth: 2.4, color: AppColors.primaryPurple),
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.4,
+                            color: AppColors.primaryPurple,
+                          ),
                         ),
                       ),
                     )
-                  : AuthPrimaryButton(label: 'Next', onPressed: () => _goToLogin(context)),
+                  : AuthPrimaryButton(
+                      label: 'Next',
+                      onPressed: () => _goToLogin(context),
+                    ),
               const SizedBox(height: 40),
             ],
           ),

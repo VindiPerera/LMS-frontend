@@ -43,19 +43,28 @@ class AuthTextField extends StatelessWidget {
           style: const TextStyle(fontSize: 14.5),
           decoration: InputDecoration(
             hintText: hint,
-            hintStyle: const TextStyle(color: AppColors.textTertiary, fontSize: 14),
+            hintStyle: const TextStyle(
+              color: AppColors.textTertiary,
+              fontSize: 14,
+            ),
             prefixIcon: Icon(icon, size: 20, color: AppColors.textTertiary),
             suffixIcon: suffixIcon,
             filled: true,
             fillColor: AppColors.surfaceLight,
-            contentPadding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
+            contentPadding: const EdgeInsets.symmetric(
+              vertical: 14,
+              horizontal: 12,
+            ),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
               borderSide: BorderSide.none,
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: AppColors.primaryPurple, width: 1.4),
+              borderSide: const BorderSide(
+                color: AppColors.primaryPurple,
+                width: 1.4,
+              ),
             ),
           ),
         ),
@@ -85,18 +94,32 @@ class AuthPrimaryButton extends StatelessWidget {
         onPressed: loading ? null : onPressed,
         style: ElevatedButton.styleFrom(
           backgroundColor: AppColors.primaryPurple,
-          disabledBackgroundColor: AppColors.primaryPurple.withValues(alpha: 0.6),
+          disabledBackgroundColor: AppColors.primaryPurple.withValues(
+            alpha: 0.6,
+          ),
           padding: const EdgeInsets.symmetric(vertical: 15),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(26),
+          ),
           elevation: 0,
         ),
         child: loading
             ? const SizedBox(
                 width: 20,
                 height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.4,
+                  color: Colors.white,
+                ),
               )
-            : Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15)),
+            : Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 15,
+                ),
+              ),
       ),
     );
   }
@@ -126,20 +149,32 @@ class GoogleAuthButton extends StatelessWidget {
         style: OutlinedButton.styleFrom(
           padding: const EdgeInsets.symmetric(vertical: 14),
           side: const BorderSide(color: AppColors.divider),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(26),
+          ),
         ),
         child: loading
             ? const SizedBox(
                 width: 20,
                 height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2.4, color: AppColors.primaryPurple),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.4,
+                  color: AppColors.primaryPurple,
+                ),
               )
             : Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   const _GoogleG(),
                   const SizedBox(width: 10),
-                  Text(label, style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w600, fontSize: 14.5)),
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      color: AppColors.textPrimary,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14.5,
+                    ),
+                  ),
                 ],
               ),
       ),
@@ -169,6 +204,69 @@ class _GoogleG extends StatelessWidget {
   }
 }
 
+/// Label + dropdown control for choosing a native/learning language, shared
+/// by create_profile_screen.dart and edit_profile_screen.dart.
+class LanguageDropdown extends StatelessWidget {
+  final String label;
+  final String value;
+  final List<String> options;
+  final ValueChanged<String> onChanged;
+
+  const LanguageDropdown({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.options,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: AppColors.textPrimary,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            color: AppColors.surfaceLight,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: value,
+              isExpanded: true,
+              icon: const Icon(
+                Icons.keyboard_arrow_down_rounded,
+                color: AppColors.textTertiary,
+              ),
+              style: const TextStyle(
+                fontSize: 14,
+                color: AppColors.textPrimary,
+                fontWeight: FontWeight.w500,
+              ),
+              items: options
+                  .map((o) => DropdownMenuItem(value: o, child: Text(o)))
+                  .toList(),
+              onChanged: (v) {
+                if (v != null) onChanged(v);
+              },
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 /// Divider with centered "or" label.
 class AuthOrDivider extends StatelessWidget {
   const AuthOrDivider({super.key});
@@ -180,7 +278,10 @@ class AuthOrDivider extends StatelessWidget {
         Expanded(child: Divider(color: AppColors.divider)),
         Padding(
           padding: EdgeInsets.symmetric(horizontal: 12),
-          child: Text('or', style: TextStyle(color: AppColors.textTertiary, fontSize: 12.5)),
+          child: Text(
+            'or',
+            style: TextStyle(color: AppColors.textTertiary, fontSize: 12.5),
+          ),
         ),
         Expanded(child: Divider(color: AppColors.divider)),
       ],

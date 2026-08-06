@@ -1,9 +1,11 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import '../../models/user.dart';
-import '../../services/api_client.dart';
 import '../../services/partner_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
+import '../hellotalk/chat_detail_screen.dart';
+import 'partner_profile_screen.dart';
 
 class ConnectScreen extends StatefulWidget {
   const ConnectScreen({super.key});
@@ -12,7 +14,8 @@ class ConnectScreen extends StatefulWidget {
   State<ConnectScreen> createState() => _ConnectScreenState();
 }
 
-class _ConnectScreenState extends State<ConnectScreen> with SingleTickerProviderStateMixin {
+class _ConnectScreenState extends State<ConnectScreen>
+    with SingleTickerProviderStateMixin {
   late final TabController _tabController;
   final _filters = const ['Recommended', 'Nearby', 'New Users', 'Same City'];
   int _filterIndex = 0;
@@ -33,12 +36,15 @@ class _ConnectScreenState extends State<ConnectScreen> with SingleTickerProvider
       final partners = await PartnerService.fetchPartners();
       if (!mounted) return;
       setState(() => _partners = partners);
-    } on ApiException catch (e) {
+    } on FirebaseException catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.message);
+      setState(() => _error = e.message ?? 'Could not load partners.');
     } catch (_) {
       if (!mounted) return;
-      setState(() => _error = 'Could not reach the server. Is the backend running?');
+      setState(
+        () => _error =
+            'Could not reach Firebase. Check your connection and try again.',
+      );
     }
   }
 
@@ -55,7 +61,10 @@ class _ConnectScreenState extends State<ConnectScreen> with SingleTickerProvider
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('Add Friends', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 19)),
+            const Text(
+              'Add Friends',
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 19),
+            ),
             const SizedBox(width: 6),
             IconButton(
               icon: const Icon(Icons.add_rounded, size: 20),
@@ -75,7 +84,10 @@ class _ConnectScreenState extends State<ConnectScreen> with SingleTickerProvider
           indicatorColor: AppColors.primaryPurple,
           labelColor: AppColors.primaryPurple,
           unselectedLabelColor: AppColors.textSecondary,
-          labelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5),
+          labelStyle: const TextStyle(
+            fontWeight: FontWeight.w600,
+            fontSize: 14.5,
+          ),
           tabAlignment: TabAlignment.start,
           tabs: const [
             Tab(text: 'Partners'),
@@ -146,7 +158,9 @@ class _PartnersTab extends StatelessWidget {
                 backgroundColor: AppColors.surfaceLight,
                 selectedColor: AppColors.primaryPurple,
                 side: BorderSide.none,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
               );
             },
           ),
@@ -162,11 +176,19 @@ class _PartnersTab extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.cloud_off_rounded, size: 42, color: AppColors.textTertiary),
+            const Icon(
+              Icons.cloud_off_rounded,
+              size: 42,
+              color: AppColors.textTertiary,
+            ),
             const SizedBox(height: 10),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 32),
-              child: Text(error!, textAlign: TextAlign.center, style: const TextStyle(color: AppColors.textTertiary)),
+              child: Text(
+                error!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: AppColors.textTertiary),
+              ),
             ),
             const SizedBox(height: 12),
             TextButton(onPressed: onRetry, child: const Text('Retry')),
@@ -177,12 +199,20 @@ class _PartnersTab extends StatelessWidget {
 
     final users = partners;
     if (users == null) {
-      return const Center(child: CircularProgressIndicator(strokeWidth: 2.4, color: AppColors.primaryPurple));
+      return const Center(
+        child: CircularProgressIndicator(
+          strokeWidth: 2.4,
+          color: AppColors.primaryPurple,
+        ),
+      );
     }
 
     if (users.isEmpty) {
       return const Center(
-        child: Text('No partners yet — check back soon!', style: TextStyle(color: AppColors.textTertiary)),
+        child: Text(
+          'No partners yet — check back soon!',
+          style: TextStyle(color: AppColors.textTertiary),
+        ),
       );
     }
 
@@ -191,7 +221,8 @@ class _PartnersTab extends StatelessWidget {
       child: ListView.separated(
         padding: const EdgeInsets.fromLTRB(14, 6, 14, 16),
         itemCount: users.length,
-        separatorBuilder: (context, i) => const Divider(height: 1, color: AppColors.divider),
+        separatorBuilder: (context, i) =>
+            const Divider(height: 1, color: AppColors.divider),
         itemBuilder: (context, i) => _PartnerListTile(user: users[i]),
       ),
     );
@@ -202,103 +233,161 @@ class _PartnerListTile extends StatelessWidget {
   final AppUser user;
   const _PartnerListTile({required this.user});
 
+  void _openProfile(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => PartnerProfileScreen(initial: user)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Column(
-            children: [
-              AppAvatar.forUser(user, size: 60, showFlag: true),
-              const SizedBox(height: 6),
-              if (user.activeLabel.isNotEmpty)
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (user.isOnline) ...[
-                      Container(
-                        width: 6,
-                        height: 6,
-                        decoration: const BoxDecoration(color: AppColors.online, shape: BoxShape.circle),
-                      ),
-                      const SizedBox(width: 3),
-                    ],
-                    Flexible(
-                      child: Text(
-                        user.activeLabel,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 10, color: AppColors.textTertiary),
-                      ),
-                    ),
-                  ],
-                ),
-            ],
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+    return InkWell(
+      onTap: () => _openProfile(context),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Column(
               children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        user.name,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16.5),
-                      ),
-                    ),
-                    if (user.isVip) ...[
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(color: AppColors.vipGold, borderRadius: BorderRadius.circular(6)),
-                        child: const Text('VIP', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: Colors.black)),
+                AppAvatar.forUser(user, size: 60, showFlag: true),
+                const SizedBox(height: 6),
+                if (user.activeLabel.isNotEmpty)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (user.isOnline) ...[
+                        Container(
+                          width: 6,
+                          height: 6,
+                          decoration: const BoxDecoration(
+                            color: AppColors.online,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 3),
+                      ],
+                      Flexible(
+                        child: Text(
+                          user.activeLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 10,
+                            color: AppColors.textTertiary,
+                          ),
+                        ),
                       ),
                     ],
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    _langPill(user.nativeLang.languageCode, AppColors.perfectGreen),
-                    const SizedBox(width: 6),
-                    const Icon(Icons.sync_alt_rounded, size: 13, color: AppColors.textTertiary),
-                    const SizedBox(width: 6),
-                    _langPill(user.learningLang.languageCode, AppColors.primaryPurple, dotted: true),
-                  ],
-                ),
-                if (user.bio.isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  Text(
-                    user.bio,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 13, color: AppColors.textSecondary, height: 1.3),
                   ),
-                ],
-                if (user.tags.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: user.tags.map((t) => _tagChip(t)).toList(),
-                  ),
-                ],
               ],
             ),
-          ),
-          const SizedBox(width: 8),
-          Container(
-            width: 44,
-            height: 44,
-            decoration: const BoxDecoration(color: AppColors.primaryPurple, shape: BoxShape.circle),
-            child: const Icon(Icons.front_hand_rounded, color: Colors.white, size: 20),
-          ),
-        ],
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          user.name,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 16.5,
+                          ),
+                        ),
+                      ),
+                      if (user.isVip) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.vipGold,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Text(
+                            'VIP',
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.black,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      _langPill(
+                        user.nativeLang.languageCode,
+                        AppColors.perfectGreen,
+                      ),
+                      const SizedBox(width: 6),
+                      const Icon(
+                        Icons.sync_alt_rounded,
+                        size: 13,
+                        color: AppColors.textTertiary,
+                      ),
+                      const SizedBox(width: 6),
+                      _langPill(
+                        user.learningLang.languageCode,
+                        AppColors.primaryPurple,
+                        dotted: true,
+                      ),
+                    ],
+                  ),
+                  if (user.bio.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      user.bio,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: AppColors.textSecondary,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+                  if (user.tags.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: user.tags.map((t) => _tagChip(t)).toList(),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => ChatDetailScreen(user: user)),
+              ),
+              child: Container(
+                width: 44,
+                height: 44,
+                decoration: const BoxDecoration(
+                  color: AppColors.primaryPurple,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.front_hand_rounded,
+                  color: Colors.white,
+                  size: 20,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -310,12 +399,20 @@ class _PartnerListTile extends StatelessWidget {
         border: Border.all(color: color, width: 1),
         borderRadius: BorderRadius.circular(4),
       ),
-      child: Text(text, style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.w800)),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 10,
+          color: color,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
     );
   }
 
   Widget _tagChip(String text) {
-    final isHighlight = text.contains('both like') || text == 'New' || text == 'Free to Chat';
+    final isHighlight =
+        text.contains('both like') || text == 'New' || text == 'Free to Chat';
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
@@ -326,7 +423,9 @@ class _PartnerListTile extends StatelessWidget {
         text,
         style: TextStyle(
           fontSize: 11.5,
-          color: isHighlight ? const Color(0xFFD9722E) : AppColors.textSecondary,
+          color: isHighlight
+              ? const Color(0xFFD9722E)
+              : AppColors.textSecondary,
           fontWeight: FontWeight.w600,
         ),
       ),

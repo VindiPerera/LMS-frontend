@@ -1,7 +1,6 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import '../../services/api_client.dart';
 import '../../services/auth_service.dart';
-import '../../services/google_auth.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_logo.dart';
 import '../../widgets/auth_widgets.dart';
@@ -37,7 +36,9 @@ class _SignupScreenState extends State<SignupScreen> {
   void _showError(String message) {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(message), backgroundColor: AppColors.badgeRed));
+      ..showSnackBar(
+        SnackBar(content: Text(message), backgroundColor: AppColors.badgeRed),
+      );
   }
 
   void _goToCreateProfile() {
@@ -66,14 +67,15 @@ class _SignupScreenState extends State<SignupScreen> {
       await AuthService.instance.register(
         email: email,
         password: password,
-        passwordConfirmation: confirm,
         role: _role == FaceTalkRole.teacher ? 'teacher' : 'student',
       );
       _goToCreateProfile();
-    } on ApiException catch (e) {
-      _showError(e.message);
+    } on FirebaseAuthException catch (e) {
+      _showError(e.message ?? 'Could not create your account.');
     } catch (_) {
-      _showError('Could not reach the server. Is the backend running?');
+      _showError(
+        'Could not reach Firebase. Check your connection and try again.',
+      );
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -82,18 +84,13 @@ class _SignupScreenState extends State<SignupScreen> {
   Future<void> _continueWithGoogle() async {
     setState(() => _googleLoading = true);
     try {
-      final idToken = await GoogleAuth.signInIdToken();
-      if (idToken == null) return; // user cancelled the account picker
-
-      await AuthService.instance.loginWithGoogle(
-        idToken: idToken,
+      final result = await AuthService.instance.loginWithGoogle(
         role: _role == FaceTalkRole.teacher ? 'teacher' : 'student',
       );
+      if (result == null) return; // user cancelled the account picker
       _goToCreateProfile();
-    } on ApiException catch (e) {
-      _showError(e.message);
-    } on StateError catch (e) {
-      _showError(e.message);
+    } on FirebaseAuthException catch (e) {
+      _showError(e.message ?? 'Google sign-in failed. Please try again.');
     } catch (_) {
       _showError('Google sign-in failed. Please try again.');
     } finally {
@@ -116,18 +113,36 @@ class _SignupScreenState extends State<SignupScreen> {
               const Text(
                 'Create your account',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: AppColors.textPrimary),
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textPrimary,
+                ),
               ),
               const SizedBox(height: 8),
               const Text(
                 'Join FaceTalk as a student or a teacher and\nstart real conversations today.',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 13.5, height: 1.4, color: AppColors.textSecondary),
+                style: TextStyle(
+                  fontSize: 13.5,
+                  height: 1.4,
+                  color: AppColors.textSecondary,
+                ),
               ),
               const SizedBox(height: 24),
-              const Text('I am joining as', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+              const Text(
+                'I am joining as',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary,
+                ),
+              ),
               const SizedBox(height: 10),
-              _RoleSelector(role: _role, onChanged: (r) => setState(() => _role = r)),
+              _RoleSelector(
+                role: _role,
+                onChanged: (r) => setState(() => _role = r),
+              ),
               const SizedBox(height: 20),
               AuthTextField(
                 label: 'Email',
@@ -145,11 +160,14 @@ class _SignupScreenState extends State<SignupScreen> {
                 obscureText: _obscurePassword,
                 suffixIcon: IconButton(
                   icon: Icon(
-                    _obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                    _obscurePassword
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined,
                     size: 19,
                     color: AppColors.textTertiary,
                   ),
-                  onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                  onPressed: () =>
+                      setState(() => _obscurePassword = !_obscurePassword),
                 ),
               ),
               const SizedBox(height: 16),
@@ -161,21 +179,42 @@ class _SignupScreenState extends State<SignupScreen> {
                 obscureText: _obscurePassword,
               ),
               const SizedBox(height: 22),
-              AuthPrimaryButton(label: 'Sign Up', onPressed: _continue, loading: _loading),
+              AuthPrimaryButton(
+                label: 'Sign Up',
+                onPressed: _continue,
+                loading: _loading,
+              ),
               const SizedBox(height: 18),
               const AuthOrDivider(),
               const SizedBox(height: 18),
-              GoogleAuthButton(onPressed: _continueWithGoogle, label: 'Sign up with Google', loading: _googleLoading),
+              GoogleAuthButton(
+                onPressed: _continueWithGoogle,
+                label: 'Sign up with Google',
+                loading: _googleLoading,
+              ),
               const SizedBox(height: 28),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Text('Already have an account?', style: TextStyle(color: AppColors.textSecondary, fontSize: 13.5)),
+                  const Text(
+                    'Already have an account?',
+                    style: TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 13.5,
+                    ),
+                  ),
                   TextButton(
                     onPressed: () => Navigator.of(context).pushReplacement(
                       MaterialPageRoute(builder: (_) => const LoginScreen()),
                     ),
-                    child: const Text('Log In', style: TextStyle(color: AppColors.primaryPurple, fontWeight: FontWeight.w700, fontSize: 13.5)),
+                    child: const Text(
+                      'Log In',
+                      style: TextStyle(
+                        color: AppColors.primaryPurple,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13.5,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -225,7 +264,12 @@ class _RoleCard extends StatelessWidget {
   final bool selected;
   final VoidCallback onTap;
 
-  const _RoleCard({required this.label, required this.icon, required this.selected, required this.onTap});
+  const _RoleCard({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -236,20 +280,33 @@ class _RoleCard extends StatelessWidget {
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(vertical: 16),
         decoration: BoxDecoration(
-          color: selected ? AppColors.primaryPurple.withValues(alpha: 0.1) : AppColors.surfaceLight,
+          color: selected
+              ? AppColors.primaryPurple.withValues(alpha: 0.1)
+              : AppColors.surfaceLight,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: selected ? AppColors.primaryPurple : Colors.transparent, width: 1.4),
+          border: Border.all(
+            color: selected ? AppColors.primaryPurple : Colors.transparent,
+            width: 1.4,
+          ),
         ),
         child: Column(
           children: [
-            Icon(icon, color: selected ? AppColors.primaryPurple : AppColors.textTertiary, size: 22),
+            Icon(
+              icon,
+              color: selected
+                  ? AppColors.primaryPurple
+                  : AppColors.textTertiary,
+              size: 22,
+            ),
             const SizedBox(height: 6),
             Text(
               label,
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w700,
-                color: selected ? AppColors.primaryPurple : AppColors.textSecondary,
+                color: selected
+                    ? AppColors.primaryPurple
+                    : AppColors.textSecondary,
               ),
             ),
           ],

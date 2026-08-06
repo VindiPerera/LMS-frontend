@@ -35,12 +35,18 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
 
-  # Talks to the Laravel backend (hello-backend).
-  http: ^1.2.2
-  # Persists the Sanctum API token across app restarts.
-  shared_preferences: ^2.3.3
-  # "Continue with Google" (Google Identity Services on web).
+  # Firebase: replaces hello-backend (Laravel) entirely. See
+  # lib/firebase_options.dart for the one-time project setup this needs.
+  firebase_core: ^3.6.0
+  firebase_auth: ^5.3.1
+  cloud_firestore: ^5.4.4
+  firebase_storage: ^12.3.4
+  firebase_messaging: ^15.1.3
+  # "Continue with Google" on non-web platforms (web uses FirebaseAuth's
+  # signInWithPopup directly, no separate package needed there).
   google_sign_in: ^6.2.2
+  # Avatar picking, for Firebase Cloud Storage uploads.
+  image_picker: ^1.1.2
 
 dev_dependencies:
   flutter_test:

@@ -1,8 +1,7 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../../models/user.dart';
-import '../../services/api_client.dart';
 import '../../services/auth_service.dart';
-import '../../services/google_auth.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_logo.dart';
 import '../../widgets/auth_widgets.dart';
@@ -35,7 +34,9 @@ class _LoginScreenState extends State<LoginScreen> {
   void _showError(String message) {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(message), backgroundColor: AppColors.badgeRed));
+      ..showSnackBar(
+        SnackBar(content: Text(message), backgroundColor: AppColors.badgeRed),
+      );
   }
 
   /// Routes to the right next screen after a successful login/sign-in:
@@ -49,7 +50,9 @@ class _LoginScreenState extends State<LoginScreen> {
         (route) => false,
       );
     } else {
-      final role = user.role == 'teacher' ? FaceTalkRole.teacher : FaceTalkRole.student;
+      final role = user.role == 'teacher'
+          ? FaceTalkRole.teacher
+          : FaceTalkRole.student;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => CreateProfileScreen(role: role)),
       );
@@ -66,12 +69,17 @@ class _LoginScreenState extends State<LoginScreen> {
 
     setState(() => _loading = true);
     try {
-      final user = await AuthService.instance.login(email: email, password: password);
+      final user = await AuthService.instance.login(
+        email: email,
+        password: password,
+      );
       _enterApp(user);
-    } on ApiException catch (e) {
-      _showError(e.message);
+    } on FirebaseAuthException catch (e) {
+      _showError(e.message ?? 'Could not log in. Please check your details.');
     } catch (_) {
-      _showError('Could not reach the server. Is the backend running?');
+      _showError(
+        'Could not reach Firebase. Check your connection and try again.',
+      );
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -80,15 +88,11 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _continueWithGoogle() async {
     setState(() => _googleLoading = true);
     try {
-      final idToken = await GoogleAuth.signInIdToken();
-      if (idToken == null) return; // user cancelled the account picker
-
-      final result = await AuthService.instance.loginWithGoogle(idToken: idToken);
+      final result = await AuthService.instance.loginWithGoogle();
+      if (result == null) return; // user cancelled the account picker
       _enterApp(result.user);
-    } on ApiException catch (e) {
-      _showError(e.message);
-    } on StateError catch (e) {
-      _showError(e.message);
+    } on FirebaseAuthException catch (e) {
+      _showError(e.message ?? 'Google sign-in failed. Please try again.');
     } catch (_) {
       _showError('Google sign-in failed. Please try again.');
     } finally {
@@ -111,13 +115,21 @@ class _LoginScreenState extends State<LoginScreen> {
               const Text(
                 'Welcome back',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: AppColors.textPrimary),
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textPrimary,
+                ),
               ),
               const SizedBox(height: 8),
               const Text(
                 'Log in to keep talking and learning with\nstudents and teachers worldwide.',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 13.5, height: 1.4, color: AppColors.textSecondary),
+                style: TextStyle(
+                  fontSize: 13.5,
+                  height: 1.4,
+                  color: AppColors.textSecondary,
+                ),
               ),
               const SizedBox(height: 30),
               AuthTextField(
@@ -136,11 +148,14 @@ class _LoginScreenState extends State<LoginScreen> {
                 obscureText: _obscurePassword,
                 suffixIcon: IconButton(
                   icon: Icon(
-                    _obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                    _obscurePassword
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined,
                     size: 19,
                     color: AppColors.textTertiary,
                   ),
-                  onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                  onPressed: () =>
+                      setState(() => _obscurePassword = !_obscurePassword),
                 ),
               ),
               const SizedBox(height: 8),
@@ -148,28 +163,60 @@ class _LoginScreenState extends State<LoginScreen> {
                 alignment: Alignment.centerRight,
                 child: TextButton(
                   onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const ForgotPasswordScreen()),
+                    MaterialPageRoute(
+                      builder: (_) => const ForgotPasswordScreen(),
+                    ),
                   ),
-                  style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(0, 0)),
-                  child: const Text('Forgot password?', style: TextStyle(color: AppColors.primaryPurple, fontSize: 12.5, fontWeight: FontWeight.w600)),
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: const Size(0, 0),
+                  ),
+                  child: const Text(
+                    'Forgot password?',
+                    style: TextStyle(
+                      color: AppColors.primaryPurple,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ),
               ),
               const SizedBox(height: 12),
-              AuthPrimaryButton(label: 'Log In', onPressed: _continue, loading: _loading),
+              AuthPrimaryButton(
+                label: 'Log In',
+                onPressed: _continue,
+                loading: _loading,
+              ),
               const SizedBox(height: 18),
               const AuthOrDivider(),
               const SizedBox(height: 18),
-              GoogleAuthButton(onPressed: _continueWithGoogle, loading: _googleLoading),
+              GoogleAuthButton(
+                onPressed: _continueWithGoogle,
+                loading: _googleLoading,
+              ),
               const SizedBox(height: 28),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Text("Don't have an account?", style: TextStyle(color: AppColors.textSecondary, fontSize: 13.5)),
+                  const Text(
+                    "Don't have an account?",
+                    style: TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 13.5,
+                    ),
+                  ),
                   TextButton(
                     onPressed: () => Navigator.of(context).pushReplacement(
                       MaterialPageRoute(builder: (_) => const SignupScreen()),
                     ),
-                    child: const Text('Sign Up', style: TextStyle(color: AppColors.primaryPurple, fontWeight: FontWeight.w700, fontSize: 13.5)),
+                    child: const Text(
+                      'Sign Up',
+                      style: TextStyle(
+                        color: AppColors.primaryPurple,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13.5,
+                      ),
+                    ),
                   ),
                 ],
               ),
