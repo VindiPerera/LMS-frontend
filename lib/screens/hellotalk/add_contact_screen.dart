@@ -1,10 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../../data/mock_data.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import '../../data/mock_data.dart' as mock;
+import '../../models/user.dart';
+import '../../services/auth_service.dart';
+import '../../services/friend_link_service.dart';
+import '../../services/partner_service.dart';
 import '../../theme/app_colors.dart';
+import '../../widgets/app_avatar.dart';
+import '../friends/friend_profile_screen.dart';
+import '../friends/my_qr_code_screen.dart';
+import '../friends/scan_qr_screen.dart';
 
 /// Modal screen that slides up smoothly from bottom to top.
-class AddContactScreen extends StatelessWidget {
+class AddContactScreen extends StatefulWidget {
   const AddContactScreen({super.key});
 
   /// Helper method to present AddContactScreen as a smooth bottom-to-top modal sheet
@@ -19,8 +28,97 @@ class AddContactScreen extends StatelessWidget {
   }
 
   @override
+  State<AddContactScreen> createState() => _AddContactScreenState();
+}
+
+class _AddContactScreenState extends State<AddContactScreen> {
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+  List<AppUser> _searchResults = [];
+  bool _isSearching = false;
+  String? _searchError;
+  String _friendLink = '';
+  bool _loadingLink = true;
+
+  AppUser get _currentUser =>
+      AuthService.instance.currentUser ?? mock.currentUser;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadFriendLink();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadFriendLink() async {
+    // The QR/link payload must carry the real Firestore uid — that's what
+    // getFriendProfile()/scan_qr_screen.dart look up by. Falling back to the
+    // handle here would silently generate a code nobody could ever redeem.
+    final userId = _currentUser.id;
+    if (userId.isEmpty) {
+      if (!mounted) return;
+      setState(() => _loadingLink = false);
+      return;
+    }
+    final link =
+        await FriendLinkService.instance.generateFriendLink(userId);
+    if (!mounted) return;
+    setState(() {
+      _friendLink = link;
+      _loadingLink = false;
+    });
+  }
+
+  Future<void> _onSearchChanged(String value) async {
+    final query = value.trim();
+    setState(() {
+      _searchQuery = query;
+      _searchError = null;
+    });
+
+    if (query.isEmpty) {
+      setState(() {
+        _searchResults = [];
+        _isSearching = false;
+      });
+      return;
+    }
+
+    setState(() => _isSearching = true);
+
+    try {
+      final partners = await PartnerService.fetchPartners(limit: 50);
+      final qLower = query.toLowerCase().replaceAll('@', '');
+      final filtered = partners.where((user) {
+        return user.name.toLowerCase().contains(qLower) ||
+            user.handle.toLowerCase().contains(qLower);
+      }).toList();
+
+      if (!mounted) return;
+      setState(() {
+        _searchResults = filtered;
+        _isSearching = false;
+      });
+    } catch (_) {
+      // Real failure (offline/Firestore error) — say so rather than
+      // quietly showing the signed-in user as a fake "search result".
+      if (!mounted) return;
+      setState(() {
+        _searchResults = [];
+        _searchError = 'Could not search right now. Check your connection.';
+        _isSearching = false;
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final userHandle = '@${currentUser.handle}';
+    final userHandle = '@${_currentUser.handle}';
 
     return Container(
       decoration: const BoxDecoration(
@@ -56,198 +154,363 @@ class AddContactScreen extends StatelessWidget {
           body: SingleChildScrollView(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 // Search Input
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 14,
-                    vertical: 12,
+                    vertical: 4,
                   ),
                   decoration: BoxDecoration(
                     color: const Color(0xFFECECEF),
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: Row(
-                    children: const [
-                      Icon(
+                    children: [
+                      const Icon(
                         Icons.search_rounded,
                         color: AppColors.textTertiary,
                         size: 22,
                       ),
-                      SizedBox(width: 10),
+                      const SizedBox(width: 10),
                       Expanded(
-                        child: Text(
-                          'Search FaceTalk ID',
-                          style: TextStyle(
-                            color: AppColors.textTertiary,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w400,
+                        child: TextField(
+                          controller: _searchController,
+                          onChanged: _onSearchChanged,
+                          decoration: const InputDecoration(
+                            hintText: 'Search FaceTalk ID or name',
+                            hintStyle: TextStyle(
+                              color: AppColors.textTertiary,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w400,
+                            ),
+                            border: InputBorder.none,
                           ),
                         ),
                       ),
+                      if (_searchQuery.isNotEmpty)
+                        IconButton(
+                          icon: const Icon(
+                            Icons.cancel_rounded,
+                            color: AppColors.textTertiary,
+                            size: 18,
+                          ),
+                          onPressed: () {
+                            _searchController.clear();
+                            _onSearchChanged('');
+                          },
+                        ),
                     ],
                   ),
                 ),
                 const SizedBox(height: 20),
 
-                // Action Items Card
-                Container(
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(18),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.03),
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
+                // If user is searching, render Search Results list
+                if (_searchQuery.isNotEmpty) ...[
+                  if (_isSearching)
+                    const Padding(
+                      padding: EdgeInsets.all(24.0),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.4,
+                        color: AppColors.primaryPurple,
                       ),
-                    ],
-                  ),
-                  child: Column(
-                    children: [
-                      _ActionTile(
-                        icon: Icons.group_add_outlined,
-                        label: 'Create Group Chat',
-                        onTap: () {},
+                    )
+                  else if (_searchError != null)
+                    Padding(
+                      padding: const EdgeInsets.all(24.0),
+                      child: Column(
+                        children: [
+                          Text(
+                            _searchError!,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: AppColors.textTertiary,
+                              fontSize: 14.5,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          TextButton(
+                            onPressed: () => _onSearchChanged(_searchQuery),
+                            child: const Text('Retry'),
+                          ),
+                        ],
                       ),
-                      const Divider(
-                        height: 1,
-                        indent: 56,
-                        color: AppColors.divider,
-                      ),
-                      _ActionTile(
-                        icon: Icons.crop_free_rounded,
-                        label: 'Scan QR Code',
-                        onTap: () {},
-                      ),
-                      const Divider(
-                        height: 1,
-                        indent: 56,
-                        color: AppColors.divider,
-                      ),
-                      _ActionTile(
-                        icon: Icons.mail_outline_rounded,
-                        label: 'Invite',
-                        onTap: () {},
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 32),
-
-                // My FaceTalk ID Title & Handle
-                const Text(
-                  'My FaceTalk ID',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                GestureDetector(
-                  onTap: () {
-                    Clipboard.setData(ClipboardData(text: userHandle));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('FaceTalk ID copied to clipboard'),
-                        duration: Duration(seconds: 2),
-                      ),
-                    );
-                  },
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        userHandle,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          color: AppColors.textSecondary,
-                          fontWeight: FontWeight.w500,
+                    )
+                  else if (_searchResults.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.all(24.0),
+                      child: Text(
+                        'No users found',
+                        style: TextStyle(
+                          color: AppColors.textTertiary,
+                          fontSize: 14.5,
                         ),
                       ),
-                      const SizedBox(width: 4),
-                      const Icon(
-                        Icons.copy_rounded,
-                        size: 14,
-                        color: AppColors.textTertiary,
-                      ),
-                    ],
+                    )
+                  else
+                    ListView.separated(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: _searchResults.length,
+                      separatorBuilder: (context, i) =>
+                          const Divider(height: 1, color: AppColors.divider),
+                      itemBuilder: (context, i) {
+                        final user = _searchResults[i];
+                        return ListTile(
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 4,
+                          ),
+                          leading: AppAvatar.forUser(user, size: 46),
+                          title: Text(
+                            user.name,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 15.5,
+                            ),
+                          ),
+                          subtitle: Text(
+                            '@${user.handle}',
+                            style: const TextStyle(
+                              color: AppColors.textSecondary,
+                              fontSize: 13,
+                            ),
+                          ),
+                          trailing: ElevatedButton(
+                            onPressed: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => FriendProfileScreen(
+                                    friendId: user.id.isNotEmpty
+                                        ? user.id
+                                        : user.handle,
+                                    source: 'search',
+                                  ),
+                                ),
+                              );
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.primaryPurple,
+                              foregroundColor: Colors.white,
+                              elevation: 0,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 6,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                            child: const Text('View Profile'),
+                          ),
+                        );
+                      },
+                    ),
+                ] else ...[
+                  // Action Items Card
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(18),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.03),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      children: [
+                        _ActionTile(
+                          icon: Icons.group_add_outlined,
+                          label: 'Create Group Chat',
+                          onTap: () {},
+                        ),
+                        const Divider(
+                          height: 1,
+                          indent: 56,
+                          color: AppColors.divider,
+                        ),
+                        _ActionTile(
+                          icon: Icons.crop_free_rounded,
+                          label: 'Scan QR Code',
+                          onTap: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => const ScanQRScreen(),
+                              ),
+                            );
+                          },
+                        ),
+                        const Divider(
+                          height: 1,
+                          indent: 56,
+                          color: AppColors.divider,
+                        ),
+                        _ActionTile(
+                          icon: Icons.mail_outline_rounded,
+                          label: 'Invite',
+                          onTap: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => const MyQRCodeScreen(),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(height: 18),
+                  const SizedBox(height: 32),
 
-                // QR Code Box
-                Container(
-                  width: 210,
-                  height: 210,
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.05),
-                        blurRadius: 12,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
+                  // My FaceTalk ID Title & Handle
+                  const Text(
+                    'My FaceTalk ID',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.textPrimary,
+                    ),
                   ),
-                  child: CustomPaint(painter: QrCodePainter()),
-                ),
-                const SizedBox(height: 24),
-
-                // Share QR Code Pill Button
-                SizedBox(
-                  width: double.infinity,
-                  height: 50,
-                  child: ElevatedButton.icon(
-                    onPressed: () {
+                  const SizedBox(height: 4),
+                  GestureDetector(
+                    onTap: () {
+                      Clipboard.setData(ClipboardData(text: userHandle));
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Sharing QR Code...')),
+                        const SnackBar(
+                          content: Text('FaceTalk ID copied to clipboard'),
+                          duration: Duration(seconds: 2),
+                        ),
                       );
                     },
-                    icon: const Icon(
-                      Icons.upload_rounded,
-                      size: 20,
-                      color: Colors.white,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          userHandle,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            color: AppColors.textSecondary,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        const Icon(
+                          Icons.copy_rounded,
+                          size: 14,
+                          color: AppColors.textTertiary,
+                        ),
+                      ],
                     ),
-                    label: const Text(
-                      'Share QR Code',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
+                  ),
+                  const SizedBox(height: 18),
+
+                  // Real QR Code Box (using QrImageView with user's generated deep link)
+                  GestureDetector(
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const MyQRCodeScreen(),
+                        ),
+                      );
+                    },
+                    child: Container(
+                      width: 210,
+                      height: 210,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.05),
+                            blurRadius: 14,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: _loadingLink
+                          ? const Center(
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.4,
+                                color: AppColors.primaryPurple,
+                              ),
+                            )
+                          : QrImageView(
+                              data: _friendLink,
+                              size: 180,
+                              version: QrVersions.auto,
+                              eyeStyle: const QrEyeStyle(
+                                eyeShape: QrEyeShape.square,
+                                color: AppColors.primaryPurple,
+                              ),
+                              dataModuleStyle: const QrDataModuleStyle(
+                                dataModuleShape: QrDataModuleShape.square,
+                                color: AppColors.textPrimary,
+                              ),
+                            ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+
+                  // Share QR Code Pill Button
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const MyQRCodeScreen(),
+                          ),
+                        );
+                      },
+                      icon: const Icon(
+                        Icons.upload_rounded,
+                        size: 20,
                         color: Colors.white,
                       ),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primaryPurple,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(26),
+                      label: const Text(
+                        'Share QR Code',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primaryPurple,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(26),
+                        ),
                       ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 10),
+                  const SizedBox(height: 10),
 
-                // Save as Image Button
-                TextButton(
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Saved QR Code to gallery')),
-                    );
-                  },
-                  child: const Text(
-                    'Save as Image',
-                    style: TextStyle(
-                      fontSize: 14.5,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textTertiary,
+                  // Save as Image Button
+                  TextButton(
+                    onPressed: () {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Saved QR Code to gallery'),
+                        ),
+                      );
+                    },
+                    child: const Text(
+                      'Save as Image',
+                      style: TextStyle(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textTertiary,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 16),
+                  const SizedBox(height: 16),
+                ],
               ],
             ),
           ),
@@ -299,76 +562,4 @@ class _ActionTile extends StatelessWidget {
       ),
     );
   }
-}
-
-/// Custom painter that draws an authentic 2D Barcode / QR Code pattern
-class QrCodePainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = Colors.black;
-    final moduleSize = size.width / 21;
-
-    // Corner Finder Patterns (Top-Left, Top-Right, Bottom-Left)
-    _drawFinderPattern(canvas, 0, 0, moduleSize);
-    _drawFinderPattern(canvas, 14 * moduleSize, 0, moduleSize);
-    _drawFinderPattern(canvas, 0, 14 * moduleSize, moduleSize);
-
-    // Matrix modules (deterministic pattern)
-    final matrix = [
-      [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
-      [0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 1, 1, 1, 1, 0],
-      [0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0],
-      [0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 1, 1, 1, 0, 1, 0, 0, 0, 1, 0],
-      [0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0],
-      [0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 1, 1, 1, 1, 0],
-      [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-      [1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1],
-      [0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1],
-      [1, 1, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 0],
-      [0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1],
-      [1, 1, 0, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 0, 1, 1, 1, 0],
-      [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1],
-      [0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-      [0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1],
-      [0, 1, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0],
-      [0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 0, 1],
-      [0, 1, 0, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0],
-      [0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1],
-      [0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0],
-    ];
-
-    for (int r = 0; r < matrix.length; r++) {
-      for (int c = 0; c < matrix[r].length; c++) {
-        if (matrix[r][c] == 1) {
-          canvas.drawRect(
-            Rect.fromLTWH(
-              c * moduleSize,
-              r * moduleSize,
-              moduleSize + 0.3,
-              moduleSize + 0.3,
-            ),
-            paint,
-          );
-        }
-      }
-    }
-  }
-
-  void _drawFinderPattern(Canvas canvas, double x, double y, double ms) {
-    final paintDark = Paint()..color = Colors.black;
-    final paintWhite = Paint()..color = Colors.white;
-
-    // Outer 7x7 square
-    canvas.drawRect(Rect.fromLTWH(x, y, 7 * ms, 7 * ms), paintDark);
-    // Inner 5x5 white square
-    canvas.drawRect(Rect.fromLTWH(x + ms, y + ms, 5 * ms, 5 * ms), paintWhite);
-    // Center 3x3 dark square
-    canvas.drawRect(
-      Rect.fromLTWH(x + 2 * ms, y + 2 * ms, 3 * ms, 3 * ms),
-      paintDark,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
 import '../../data/mock_data.dart' as mock;
+import '../../models/moment.dart';
 import '../../models/user.dart';
 import '../../services/auth_service.dart';
+import '../../services/moment_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
 import '../auth/splash_screen.dart';
+import '../friends/my_qr_code_screen.dart';
+import '../moments/user_moments_screen.dart';
+import 'course_detail_sheet.dart';
 import 'edit_profile_screen.dart';
 
 class MeScreen extends StatefulWidget {
@@ -68,9 +73,9 @@ class _MeScreenState extends State<MeScreen> {
               ],
             ),
             const SizedBox(height: 12),
-            _MomentsRow(),
-            const SizedBox(height: 18),
-            _VipBenefitsCard(),
+            _MomentsRow(user: user),
+            // const SizedBox(height: 18),
+            // _VipBenefitsCard(),
             const SizedBox(height: 22),
             const Text(
               'Language Courses',
@@ -176,18 +181,30 @@ class _VipPromoBanner extends StatelessWidget {
               ),
             ),
           ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Text(
-              'View Now',
-              style: TextStyle(
-                color: AppColors.vipCardText,
-                fontWeight: FontWeight.w700,
-                fontSize: 12.5,
+          GestureDetector(
+            onTap: () {
+              showModalBottomSheet(
+                context: context,
+                backgroundColor: Colors.transparent,
+                builder: (_) => Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: _VipBenefitsCard(),
+                ),
+              );
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                'View Now',
+                style: TextStyle(
+                  color: AppColors.vipCardText,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12.5,
+                ),
               ),
             ),
           ),
@@ -436,46 +453,74 @@ class _StatCard extends StatelessWidget {
 }
 
 class _MomentsRow extends StatelessWidget {
+  final AppUser user;
+  const _MomentsRow({required this.user});
+
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(
-        color: AppColors.card,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 34,
-            height: 34,
+    return StreamBuilder<List<Moment>>(
+      stream: MomentService.streamUserMoments(userId: user.id),
+      builder: (context, snapshot) {
+        final count = snapshot.data?.length ?? 0;
+
+        return InkWell(
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => UserMomentsScreen(
+                  userId: user.id.isNotEmpty ? user.id : user.handle,
+                  userName: user.name,
+                ),
+              ),
+            );
+          },
+          borderRadius: BorderRadius.circular(14),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             decoration: BoxDecoration(
-              color: AppColors.primaryPurple.withValues(alpha: 0.15),
-              shape: BoxShape.circle,
+              color: AppColors.card,
+              borderRadius: BorderRadius.circular(14),
             ),
-            child: const Icon(
-              Icons.public_rounded,
-              color: AppColors.primaryPurple,
-              size: 18,
+            child: Row(
+              children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: AppColors.primaryPurple.withValues(alpha: 0.15),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.public_rounded,
+                    color: AppColors.primaryPurple,
+                    size: 18,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text(
+                    'My Moments',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                  ),
+                ),
+                Text(
+                  '$count',
+                  style: const TextStyle(
+                    color: AppColors.textTertiary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                const Icon(
+                  Icons.chevron_right_rounded,
+                  color: AppColors.textTertiary,
+                ),
+              ],
             ),
           ),
-          const SizedBox(width: 12),
-          const Expanded(
-            child: Text(
-              'Moments',
-              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
-            ),
-          ),
-          const Text(
-            '0',
-            style: TextStyle(color: AppColors.textTertiary, fontSize: 14),
-          ),
-          const Icon(
-            Icons.chevron_right_rounded,
-            color: AppColors.textTertiary,
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -606,51 +651,61 @@ class _CoursesGrid extends StatelessWidget {
       itemCount: mock.languageCourses.length,
       itemBuilder: (context, i) {
         final course = mock.languageCourses[i];
-        return Column(
-          children: [
-            Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Container(
-                  width: 52,
-                  height: 52,
-                  decoration: BoxDecoration(
-                    color: course['color'] as Color,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Icon(
-                    course['icon'] as IconData,
-                    color: Colors.white,
-                    size: 24,
-                  ),
-                ),
-                if (course['badge'] as bool)
-                  Positioned(
-                    right: -2,
-                    top: -2,
-                    child: Container(
-                      width: 10,
-                      height: 10,
-                      decoration: const BoxDecoration(
-                        color: AppColors.badgeRed,
-                        shape: BoxShape.circle,
-                      ),
+        final name = course['name'] as String;
+        // Only these 4 have a detail sheet behind them so far; the rest
+        // (HelloWords/HelloEnglish/Podcast/Grammar) are untouched.
+        const wired = {'Teachers', 'LiveClass', 'Idioms', 'Flashcards'};
+
+        return GestureDetector(
+          onTap: wired.contains(name)
+              ? () => CourseDetailSheet.show(context, name)
+              : null,
+          child: Column(
+            children: [
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Container(
+                    width: 52,
+                    height: 52,
+                    decoration: BoxDecoration(
+                      color: course['color'] as Color,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Icon(
+                      course['icon'] as IconData,
+                      color: Colors.white,
+                      size: 24,
                     ),
                   ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Text(
-              course['name'] as String,
-              textAlign: TextAlign.center,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 11,
-                color: AppColors.textSecondary,
+                  if (course['badge'] as bool)
+                    Positioned(
+                      right: -2,
+                      top: -2,
+                      child: Container(
+                        width: 10,
+                        height: 10,
+                        decoration: const BoxDecoration(
+                          color: AppColors.badgeRed,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                ],
               ),
-            ),
-          ],
+              const SizedBox(height: 6),
+              Text(
+                course['name'] as String,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: AppColors.textSecondary,
+                ),
+              ),
+            ],
+          ),
         );
       },
     );
@@ -669,13 +724,26 @@ class _SettingsList extends StatelessWidget {
   ];
 
   Future<void> _handleTap(BuildContext context, String label) async {
-    if (label != 'Log Out') return;
-
-    await AuthService.instance.logout();
-    if (!context.mounted) return;
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const SplashScreen()),
-      (route) => false,
+    if (label == 'Invite Friends') {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const MyQRCodeScreen()),
+      );
+      return;
+    }
+    if (label == 'Log Out') {
+      await AuthService.instance.logout();
+      if (!context.mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const SplashScreen()),
+        (route) => false,
+      );
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Opening $label...'),
+        duration: const Duration(seconds: 1),
+      ),
     );
   }
 

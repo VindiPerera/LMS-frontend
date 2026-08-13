@@ -1,0 +1,177 @@
+rules_version = '2';
+
+// ============================================================================
+// FaceTalk — Firestore Security Rules
+// ============================================================================
+// SCOPE WARNING: this file only covers the collections the Moments feature
+// touches — moments/{postId} (+ comments subcollection), notifications,
+// reports, users (read/own-write only), and friendships (read/own-write
+// only, needed for the "friends"-visibility check below). It does NOT cover
+// chats/messages, voicerooms, or partner/connect data used elsewhere in the
+// app. Firestore rules are deny-by-default outside matched paths, so if this
+// project currently has no firestore.rules deployed (it didn't at the time
+// this file was written — Firestore was presumably running on its default
+// console rules), deploying this file as-is WILL break every collection not
+// listed here. Merge this into a complete rules file covering the rest of
+// the app's collections before running `firebase deploy --only firestore:rules`.
+// ============================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // Deterministic friendship doc id used by FriendService: sorted uid pair
+    // joined with "_". Mirrors FriendService.getFriendshipDocId.
+    function friendshipId(uidA, uidB) {
+      return uidA < uidB ? uidA + '_' + uidB : uidB + '_' + uidA;
+    }
+
+    function friendshipStatus(uidA, uidB) {
+      let path = /databases/$(database)/documents/friendships/$(friendshipId(uidA, uidB));
+      return exists(path) ? get(path).data.status : 'none';
+    }
+
+    function isFriendOf(otherUid) {
+      return isSignedIn() && friendshipStatus(request.auth.uid, otherUid) == 'friends';
+    }
+
+    function isBlockedBy(otherUid) {
+      return isSignedIn() && friendshipStatus(request.auth.uid, otherUid) == 'blocked';
+    }
+
+    // ------------------------------------------------------------------
+    // users/{uid} — profile documents. Full read for any signed-in user
+    // (needed across the app: avatars, names, the friend/block checks
+    // above); only the profile owner may write their own document.
+    // ------------------------------------------------------------------
+    match /users/{uid} {
+      allow read: if isSignedIn();
+      allow create, update: if isOwner(uid);
+      allow delete: if false;
+    }
+
+    // ------------------------------------------------------------------
+    // friendships/{docId} — only the two participants involved may read
+    // or write. Doc id is always friendshipId(uidA, uidB); we don't have
+    // the two uids split out here so we check membership via `userIds`.
+    // ------------------------------------------------------------------
+    match /friendships/{docId} {
+      allow read, write: if isSignedIn() && request.auth.uid in resource.data.userIds;
+      allow create: if isSignedIn() && request.auth.uid in request.resource.data.userIds;
+    }
+
+    // ------------------------------------------------------------------
+    // moments/{postId}
+    // ------------------------------------------------------------------
+    match /moments/{postId} {
+
+      function isPostOwner() {
+        return isSignedIn() && resource.data.user.id == request.auth.uid;
+      }
+
+      function visibleToMe() {
+        return resource.data.isDeleted == false && (
+          resource.data.visibility == 'public' ||
+          (resource.data.visibility == 'friends' && (
+            resource.data.user.id == request.auth.uid || isFriendOf(resource.data.user.id)
+          )) ||
+          (resource.data.visibility == 'onlyMe' && resource.data.user.id == request.auth.uid)
+        );
+      }
+
+      allow read: if isSignedIn() && visibleToMe();
+
+      allow create: if isSignedIn() &&
+        request.resource.data.user.id == request.auth.uid &&
+        request.resource.data.isDeleted == false &&
+        request.resource.data.likes.size() == 0 &&
+        request.resource.data.commentCount == 0 &&
+        request.resource.data.reshareCount == 0 &&
+        request.resource.data.reportCount == 0;
+
+      // Two distinct kinds of update are allowed on an existing post:
+      //  1. The owner editing/deleting/archiving their own post — anything
+      //     except user.id, createdAt, commentCount and reshareCount (those
+      //     two are Cloud-Function-only, see functions/index.js).
+      //  2. Any signed-in, non-blocked user toggling their own uid in
+      //     `likes` (and the matching `reactions` bucket) — nothing else on
+      //     the document may change in that case.
+      allow update: if isSignedIn() && (
+        (
+          isPostOwner() &&
+          request.resource.data.user.id == resource.data.user.id &&
+          request.resource.data.createdAt == resource.data.createdAt &&
+          request.resource.data.commentCount == resource.data.commentCount &&
+          request.resource.data.reshareCount == resource.data.reshareCount
+        ) ||
+        (
+          !isBlockedBy(resource.data.user.id) &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['likes', 'likeCount', 'reactions', 'updatedAt']) &&
+          // the only uid that may be added/removed from `likes` is your own
+          request.resource.data.likes.toSet()
+            .difference(resource.data.likes.toSet())
+            .difference([request.auth.uid]).size() == 0 &&
+          resource.data.likes.toSet()
+            .difference(request.resource.data.likes.toSet())
+            .difference([request.auth.uid]).size() == 0
+        )
+      );
+
+      // Never hard-delete from the client — soft delete via `isDeleted` is
+      // an update, handled above. functions/index.js's onPostDelete only
+      // runs for an actual Admin-SDK/console hard delete.
+      allow delete: if false;
+
+      match /comments/{commentId} {
+        function postOwnerId() {
+          return get(/databases/$(database)/documents/moments/$(postId)).data.user.id;
+        }
+
+        allow read: if isSignedIn();
+
+        allow create: if isSignedIn() &&
+          request.resource.data.userId == request.auth.uid &&
+          !isBlockedBy(postOwnerId());
+
+        // No editing — comments are create/delete only.
+        allow update: if false;
+
+        allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      }
+    }
+
+    // ------------------------------------------------------------------
+    // notifications/{uid}/items/{notifId} — owner-only. In practice these
+    // are written by Cloud Functions (Admin SDK bypasses rules); the client
+    // rule below only needs to cover the owner marking their own items read.
+    // ------------------------------------------------------------------
+    match /notifications/{uid}/items/{notifId} {
+      allow read, write: if isOwner(uid);
+    }
+
+    // ------------------------------------------------------------------
+    // reports/{reportId} — any signed-in user may file one about someone
+    // else's post; only admins (users/{uid}.role == 'admin') may read them.
+    // ------------------------------------------------------------------
+    match /reports/{reportId} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn() &&
+        request.resource.data.reporterId == request.auth.uid &&
+        request.resource.data.reason in ['spam', 'inappropriate', 'harassment', 'other'];
+      allow update, delete: if false;
+    }
+  }
+}

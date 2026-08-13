@@ -55,8 +55,18 @@ class _SplashScreenState extends State<SplashScreen> {
           child: Column(
             children: [
               const Spacer(flex: 3),
-              const AppLogo(height: 70),
-              const SizedBox(height: 14),
+              const AppLogo(height: 90),
+              const SizedBox(height: 12),
+              const Text(
+                'Language learning application',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w400,
+                  color: Color(0xFFC62828),
+                ),
+              ),
+              const SizedBox(height: 12),
               const Text(
                 'Talk, learn and grow together',
                 textAlign: TextAlign.center,

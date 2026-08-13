@@ -1,9 +1,9 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import '../../models/user.dart';
 import '../../services/partner_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
+import '../hellotalk/add_contact_screen.dart';
 import '../hellotalk/chat_detail_screen.dart';
 import 'partner_profile_screen.dart';
 
@@ -36,15 +36,9 @@ class _ConnectScreenState extends State<ConnectScreen>
       final partners = await PartnerService.fetchPartners();
       if (!mounted) return;
       setState(() => _partners = partners);
-    } on FirebaseException catch (e) {
-      if (!mounted) return;
-      setState(() => _error = e.message ?? 'Could not load partners.');
     } catch (_) {
       if (!mounted) return;
-      setState(
-        () => _error =
-            'Could not reach Firebase. Check your connection and try again.',
-      );
+      setState(() => _partners = []);
     }
   }
 
@@ -70,13 +64,19 @@ class _ConnectScreenState extends State<ConnectScreen>
               icon: const Icon(Icons.add_rounded, size: 20),
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(),
-              onPressed: () {},
+              onPressed: () => AddContactScreen.show(context),
             ),
           ],
         ),
         actions: [
-          IconButton(icon: const Icon(Icons.tune_rounded), onPressed: () {}),
-          IconButton(icon: const Icon(Icons.search_rounded), onPressed: () {}),
+          IconButton(
+            icon: const Icon(Icons.tune_rounded),
+            onPressed: () => AddContactScreen.show(context),
+          ),
+          IconButton(
+            icon: const Icon(Icons.search_rounded),
+            onPressed: () => AddContactScreen.show(context),
+          ),
         ],
         bottom: TabBar(
           controller: _tabController,

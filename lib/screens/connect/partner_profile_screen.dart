@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import '../../models/moment.dart';
 import '../../models/user.dart';
+import '../../services/moment_service.dart';
 import '../../services/partner_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
 import '../../widgets/auth_widgets.dart';
 import '../hellotalk/chat_detail_screen.dart';
+import '../moments/user_moments_screen.dart';
 
 /// Full profile view for a partner tapped from connect_screen.dart's list.
 /// Shows the [initial] user immediately (already fetched for the list), then
@@ -211,7 +214,84 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
                   children: user.tags.map(_tagChip).toList(),
                 ),
               ],
-              const SizedBox(height: 32),
+              const SizedBox(height: 20),
+              StreamBuilder<List<Moment>>(
+                stream: MomentService.streamUserMoments(
+                  userId: user.id.isNotEmpty ? user.id : user.handle,
+                ),
+                builder: (context, snapshot) {
+                  final count = snapshot.data?.length ?? 0;
+                  return InkWell(
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => UserMomentsScreen(
+                            userId: user.id.isNotEmpty ? user.id : user.handle,
+                            userName: user.name,
+                          ),
+                        ),
+                      );
+                    },
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: AppColors.divider),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              color: AppColors.primaryPurple.withValues(alpha: 0.12),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.public_rounded,
+                              size: 18,
+                              color: AppColors.primaryPurple,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  "${user.name}'s Moments",
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 14.5,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  count > 0 ? '$count moments posted' : 'View moment history',
+                                  style: const TextStyle(
+                                    color: AppColors.textTertiary,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Icon(
+                            Icons.chevron_right_rounded,
+                            color: AppColors.textTertiary,
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 24),
               AuthPrimaryButton(
                 label: 'Say Hi',
                 onPressed: () => Navigator.of(context).push(

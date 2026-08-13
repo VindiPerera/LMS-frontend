@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/chat_service.dart';
+import '../services/notification_service.dart';
 import '../theme/app_colors.dart';
 import 'hellotalk/chat_list_screen.dart';
 import 'connect/connect_screen.dart';
@@ -17,6 +18,7 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> {
   int _index = 0;
   late final Stream<int> _unreadStream = ChatService.streamTotalUnread();
+  late final Stream<int> _notificationUnreadStream = NotificationService.streamUnreadCount();
 
   final _screens = const [
     ChatListScreen(),
@@ -73,11 +75,13 @@ class _MainShellState extends State<MainShell> {
                                   : AppColors.textTertiary,
                               size: 24,
                             ),
-                            // Only the Message tab (index 0) has a live badge
-                            // — real unread counts from ChatService.
-                            if (i == 0)
+                            // Message (index 0) and Moments (index 2) are
+                            // the only tabs with a live unread badge — chat
+                            // unread count and Moments notification count,
+                            // respectively.
+                            if (i == 0 || i == 2)
                               StreamBuilder<int>(
-                                stream: _unreadStream,
+                                stream: i == 0 ? _unreadStream : _notificationUnreadStream,
                                 builder: (context, snapshot) {
                                   final count = snapshot.data ?? 0;
                                   if (count <= 0) {

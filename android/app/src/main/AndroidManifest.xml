@@ -1,4 +1,17 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Add Friend via QR Code: camera access for scan_qr_screen.dart's
+         mobile_scanner view. Also covers create_moment_screen.dart's
+         camera photo/video capture. -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+
+    <!-- Moments: local/push notification banners (Android 13+ requires this
+         explicitly) and gallery access for create_moment_screen.dart's
+         image_picker calls. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
     <application
         android:label="FaceTalk"
         android:name="${applicationName}"
@@ -40,6 +53,13 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- Add Friend via QR Code: lets url_launcher's canLaunchUrl/launchUrl
+             actually see Messenger on Android 11+ (package visibility), for
+             the fb-messenger:// share button in add_contact_screen.dart. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="fb-messenger"/>
         </intent>
     </queries>
 </manifest>

@@ -48,6 +48,42 @@ dependencies:
   # Avatar picking, for Firebase Cloud Storage uploads.
   image_picker: ^1.1.2
 
+  # Add Friend via QR Code: generating/rendering the code, scanning it back,
+  # and sharing it. NOTE: intentionally NOT using firebase_dynamic_links —
+  # Google shut that service down in August 2025, so it can no longer create
+  # or resolve links at all. See lib/services/friend_link_service.dart for
+  # what replaces it and how to upgrade once this project has a real domain
+  # for Android App Links / iOS Universal Links.
+  qr_flutter: ^4.1.0
+  mobile_scanner: ^5.0.0
+  share_plus: ^10.1.4
+  url_launcher: ^6.2.0
+
+  # Moments feed: media, formatting, and connectivity/notification support.
+  # No state-management package added here on purpose — the rest of the app
+  # (auth, chat, friends, connect) is plain StatefulWidget + singleton
+  # services, so Moments follows that instead of introducing Riverpod as a
+  # one-off pattern. See lib/services/moment_service.dart.
+  cached_network_image: ^3.4.1
+  flutter_image_compress: ^2.5.1
+  photo_view: ^0.15.0
+  video_player: ^2.14.0
+  chewie: ^1.13.1
+  # NOTE: video_compress hasn't been updated in years and is a known risk on
+  # newer Android Gradle/embedding versions. Kept because it was explicitly
+  # requested; if video posting breaks on a real device build, the fix is to
+  # drop the compression step in media_service.dart and upload the picked
+  # file as-is (still works, just larger uploads).
+  video_compress: ^3.1.4
+  video_thumbnail: ^0.5.6
+  timeago: ^3.7.1
+  shimmer: ^3.0.0
+  uuid: ^4.6.0
+  connectivity_plus: ^7.3.1
+  flutter_linkify: ^6.0.0
+  flutter_local_notifications: ^22.3.0
+  linkify: ^5.0.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

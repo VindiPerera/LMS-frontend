@@ -1,12 +1,162 @@
-import 'package:flutter/material.dart';
-import '../../data/mock_data.dart';
-import '../../models/moment.dart';
-import '../../models/user.dart';
-import '../../theme/app_colors.dart';
-import '../../widgets/app_avatar.dart';
+import 'dart:async';
 
-class MomentsScreen extends StatelessWidget {
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+
+import '../../models/moment.dart';
+import '../../services/friend_service.dart';
+import '../../services/moment_service.dart';
+import '../../theme/app_colors.dart';
+import '../../widgets/connectivity_banner.dart';
+import '../../widgets/moment_card.dart';
+import '../../widgets/moment_card_shimmer.dart';
+import '../../widgets/notification_badge.dart';
+import 'create_moment_screen.dart';
+import 'notification_screen.dart';
+
+class MomentsScreen extends StatefulWidget {
   const MomentsScreen({super.key});
+
+  @override
+  State<MomentsScreen> createState() => _MomentsScreenState();
+}
+
+class _MomentsScreenState extends State<MomentsScreen> {
+  final List<Moment> _posts = [];
+  DocumentSnapshot<Map<String, dynamic>>? _lastDoc;
+  bool _hasMore = true;
+  bool _initialLoading = true;
+  bool _loadingMore = false;
+
+  final Set<String> _hiddenPostIds = {}; // reported this session
+  Set<String> _blockedIds = {};
+  Set<String> _friendIds = {};
+
+  final _scrollController = ScrollController();
+  StreamSubscription<List<Moment>>? _liveSub;
+  StreamSubscription<Set<String>>? _blockedSub;
+  StreamSubscription<Set<String>>? _friendSub;
+
+  String? get _uid => FirebaseAuth.instance.currentUser?.uid;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+    _blockedSub = FriendService.instance.streamBlockedIds().listen((ids) {
+      if (mounted) setState(() => _blockedIds = ids);
+    });
+    _friendSub = FriendService.instance.streamFriendIds().listen((ids) {
+      if (mounted) setState(() => _friendIds = ids);
+    });
+    _loadFirstPage();
+    _subscribeLiveWindow();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    _liveSub?.cancel();
+    _blockedSub?.cancel();
+    _friendSub?.cancel();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    final threshold = _scrollController.position.maxScrollExtent - 600;
+    if (_scrollController.position.pixels >= threshold) {
+      _loadMore();
+    }
+  }
+
+  Future<void> _loadFirstPage() async {
+    final page = await MomentService.fetchPage(startAfter: null);
+    if (!mounted) return;
+    setState(() {
+      _posts
+        ..clear()
+        ..addAll(page.moments);
+      _lastDoc = page.lastDoc;
+      _hasMore = page.hasMore;
+      _initialLoading = false;
+    });
+  }
+
+  /// Live view of the newest ~15 posts, merged into [_posts] by id so
+  /// new/edited/removed posts reflect instantly without disturbing the
+  /// pagination cursor (which only ever advances from one-time
+  /// [MomentService.fetchPage] reads — see class docs on MomentService).
+  void _subscribeLiveWindow() {
+    _liveSub = MomentService.streamFirstPage().listen((livePosts) {
+      if (!mounted) return;
+      setState(() {
+        _initialLoading = false;
+        final liveIds = livePosts.map((m) => m.id).toSet();
+        _posts.removeWhere((p) => _knownLiveIds.contains(p.id) && !liveIds.contains(p.id));
+        for (final post in livePosts.reversed) {
+          final idx = _posts.indexWhere((p) => p.id == post.id);
+          if (idx >= 0) {
+            _posts[idx] = post;
+          } else {
+            _posts.insert(0, post);
+          }
+        }
+        _knownLiveIds = liveIds;
+      });
+    });
+  }
+
+  Set<String> _knownLiveIds = {};
+
+  Future<void> _loadMore() async {
+    if (_loadingMore || !_hasMore || _lastDoc == null) return;
+    setState(() => _loadingMore = true);
+    final page = await MomentService.fetchPage(startAfter: _lastDoc);
+    if (!mounted) return;
+    setState(() {
+      for (final post in page.moments) {
+        if (!_posts.any((p) => p.id == post.id)) {
+          _posts.add(post);
+        }
+      }
+      _lastDoc = page.lastDoc;
+      _hasMore = page.hasMore;
+      _loadingMore = false;
+    });
+  }
+
+  Future<void> _refresh() async {
+    _lastDoc = null;
+    _hasMore = true;
+    await _loadFirstPage();
+  }
+
+  List<Moment> get _visiblePosts {
+    final uid = _uid;
+    return _posts.where((moment) {
+      if (_hiddenPostIds.contains(moment.id)) return false;
+      if (_blockedIds.contains(moment.user.id)) return false;
+      switch (moment.visibility) {
+        case MomentVisibility.public:
+          return true;
+        case MomentVisibility.friends:
+          return moment.user.id == uid || _friendIds.contains(moment.user.id);
+        case MomentVisibility.onlyMe:
+          return moment.user.id == uid;
+      }
+    }).toList();
+  }
+
+  Future<void> _openCreateMoment() async {
+    final posted = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => const CreateMomentScreen()),
+    );
+    if (posted == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Moment posted!')));
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -16,36 +166,45 @@ class MomentsScreen extends StatelessWidget {
         appBar: AppBar(
           titleSpacing: 12,
           title: Container(
-            height: 36,
+            height: 40,
             padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
               color: AppColors.surfaceLight,
               borderRadius: BorderRadius.circular(18),
             ),
-            child: const Row(
-              children: [
-                Icon(
+            child: const TextField(
+              decoration: InputDecoration(
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                contentPadding: EdgeInsets.only(top: 8),
+                hintText: 'Search moments',
+                hintStyle: TextStyle(
+                  color: AppColors.textTertiary,
+                  fontSize: 13.5,
+                ),
+                prefixIcon: Icon(
                   Icons.search_rounded,
                   size: 18,
                   color: AppColors.textTertiary,
                 ),
-                SizedBox(width: 8),
-                Text(
-                  'FIFA World Cup',
-                  style: TextStyle(
-                    color: AppColors.textTertiary,
-                    fontSize: 13.5,
-                  ),
-                ),
-              ],
+                prefixIconConstraints: BoxConstraints(minWidth: 20, minHeight: 20),
+              ),
             ),
           ),
           actions: [
-            IconButton(
-              icon: const Icon(Icons.notifications_none_rounded),
-              onPressed: () {},
+            NotificationBadge(
+              child: IconButton(
+                icon: const Icon(Icons.notifications_none_rounded),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const NotificationScreen()),
+                ),
+              ),
             ),
-            IconButton(icon: const Icon(Icons.edit_outlined), onPressed: () {}),
+            IconButton(
+              icon: const Icon(Icons.edit_outlined),
+              onPressed: _openCreateMoment,
+            ),
           ],
           bottom: const TabBar(
             isScrollable: true,
@@ -63,63 +222,111 @@ class MomentsScreen extends StatelessWidget {
             ],
           ),
         ),
-        body: TabBarView(
+        body: Column(
           children: [
-            _RecentFeed(),
-            const Center(
-              child: Text(
-                'Help posts',
-                style: TextStyle(color: AppColors.textTertiary),
-              ),
-            ),
-            const Center(
-              child: Text(
-                'Following posts',
-                style: TextStyle(color: AppColors.textTertiary),
-              ),
-            ),
-            const Center(
-              child: Text(
-                'Learn posts',
-                style: TextStyle(color: AppColors.textTertiary),
-              ),
-            ),
-            const Center(
-              child: Text(
-                'Selfie posts',
-                style: TextStyle(color: AppColors.textTertiary),
+            const ConnectivityBanner(),
+            Expanded(
+              child: TabBarView(
+                children: [
+                  _buildRecentTab(),
+                  const Center(
+                    child: Text('Help posts', style: TextStyle(color: AppColors.textTertiary)),
+                  ),
+                  const Center(
+                    child: Text('Following posts', style: TextStyle(color: AppColors.textTertiary)),
+                  ),
+                  const Center(
+                    child: Text('Learn posts', style: TextStyle(color: AppColors.textTertiary)),
+                  ),
+                  const Center(
+                    child: Text('Selfie posts', style: TextStyle(color: AppColors.textTertiary)),
+                  ),
+                ],
               ),
             ),
           ],
         ),
         floatingActionButton: FloatingActionButton(
-          onPressed: () {},
+          onPressed: _openCreateMoment,
           backgroundColor: AppColors.primaryPurple,
           child: const Icon(Icons.add_rounded, size: 28),
         ),
       ),
     );
   }
-}
 
-class _RecentFeed extends StatelessWidget {
-  const _RecentFeed();
+  Widget _buildRecentTab() {
+    if (_initialLoading) {
+      return ListView.builder(
+        padding: const EdgeInsets.only(bottom: 20),
+        itemCount: 3,
+        itemBuilder: (context, index) => const MomentCardShimmer(),
+      );
+    }
 
-  @override
-  Widget build(BuildContext context) {
-    return ListView.builder(
-      padding: const EdgeInsets.only(bottom: 20),
-      itemCount: mockMoments.length + 1,
-      itemBuilder: (context, i) {
-        if (i == 0) return const _PostPromptBanner();
-        return _MomentCard(moment: mockMoments[i - 1]);
-      },
+    final posts = _visiblePosts;
+
+    if (posts.isEmpty) {
+      return RefreshIndicator(
+        onRefresh: _refresh,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            _PostPromptBanner(onPostTap: _openCreateMoment),
+            const SizedBox(height: 60),
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 32),
+                child: Column(
+                  children: [
+                    Icon(Icons.travel_explore_rounded, size: 56, color: AppColors.textTertiary),
+                    SizedBox(height: 14),
+                    Text(
+                      'Be the first to share a moment!',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: AppColors.textPrimary),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _refresh,
+      child: ListView.builder(
+        controller: _scrollController,
+        padding: const EdgeInsets.only(bottom: 20),
+        itemCount: posts.length + 2,
+        itemBuilder: (context, index) {
+          if (index == 0) return _PostPromptBanner(onPostTap: _openCreateMoment);
+          if (index == posts.length + 1) {
+            if (!_hasMore) return const SizedBox.shrink();
+            return const Padding(
+              padding: EdgeInsets.symmetric(vertical: 20),
+              child: Center(child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primaryPurple)),
+            );
+          }
+          final post = posts[index - 1];
+          return MomentCard(
+            key: ValueKey(post.id),
+            moment: post,
+            onDeleted: () => setState(() => _posts.removeWhere((p) => p.id == post.id)),
+            onReported: () => setState(() => _hiddenPostIds.add(post.id)),
+          );
+        },
+      ),
     );
   }
 }
 
 class _PostPromptBanner extends StatelessWidget {
-  const _PostPromptBanner();
+  final VoidCallback onPostTap;
+
+  const _PostPromptBanner({required this.onPostTap});
 
   @override
   Widget build(BuildContext context) {
@@ -166,7 +373,7 @@ class _PostPromptBanner extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           ElevatedButton(
-            onPressed: () {},
+            onPressed: onPostTap,
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.primaryPurple,
               shape: RoundedRectangleBorder(
@@ -181,192 +388,6 @@ class _PostPromptBanner extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _MomentCard extends StatelessWidget {
-  final Moment moment;
-  const _MomentCard({required this.moment});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: AppColors.divider, width: 6)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              AppAvatar.forUser(moment.user, size: 44, showFlag: true),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      moment.user.name,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 14,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Row(
-                      children: [
-                        _langBadge(
-                          moment.user.nativeLang.languageCode,
-                          AppColors.perfectGreen,
-                        ),
-                        const SizedBox(width: 4),
-                        const Icon(
-                          Icons.sync_alt_rounded,
-                          size: 12,
-                          color: AppColors.textTertiary,
-                        ),
-                        const SizedBox(width: 4),
-                        _langBadge(
-                          moment.user.learningLang.languageCode,
-                          AppColors.primaryPurple,
-                          dotted: true,
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              Text(
-                moment.timeAgo,
-                style: const TextStyle(
-                  color: AppColors.textTertiary,
-                  fontSize: 11.5,
-                ),
-              ),
-              const SizedBox(width: 4),
-              const Icon(
-                Icons.more_horiz_rounded,
-                size: 18,
-                color: AppColors.textTertiary,
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          if (moment.tag != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Text(
-                '#${moment.tag}',
-                style: const TextStyle(
-                  color: AppColors.primaryPurple,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          Text(moment.text, style: const TextStyle(fontSize: 14, height: 1.35)),
-          if (moment.isTranslatable)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Row(
-                children: const [
-                  Icon(
-                    Icons.translate_rounded,
-                    size: 14,
-                    color: AppColors.primaryPurple,
-                  ),
-                  SizedBox(width: 4),
-                  Text(
-                    'Translate',
-                    style: TextStyle(
-                      color: AppColors.primaryPurple,
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          if (moment.imageUrl != null)
-            Container(
-              margin: const EdgeInsets.only(top: 10),
-              height: 180,
-              width: double.infinity,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF6FA8DC), Color(0xFF3D8B5F)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-              ),
-              alignment: Alignment.center,
-              child: const Icon(
-                Icons.image_rounded,
-                color: Colors.white54,
-                size: 40,
-              ),
-            ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              _actionIcon(Icons.favorite_border_rounded, '${moment.likes}'),
-              const SizedBox(width: 20),
-              _actionIcon(
-                Icons.chat_bubble_outline_rounded,
-                '${moment.comments}',
-              ),
-              const Spacer(),
-              const Icon(
-                Icons.card_giftcard_rounded,
-                size: 19,
-                color: AppColors.textTertiary,
-              ),
-              const SizedBox(width: 16),
-              const Icon(
-                Icons.share_outlined,
-                size: 19,
-                color: AppColors.textTertiary,
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-        ],
-      ),
-    );
-  }
-
-  Widget _langBadge(String text, Color color, {bool dotted = false}) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-      decoration: BoxDecoration(
-        border: Border.all(color: color, width: 1),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: 9.5,
-          color: color,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
-    );
-  }
-
-  Widget _actionIcon(IconData icon, String label) {
-    return Row(
-      children: [
-        Icon(icon, size: 19, color: AppColors.textTertiary),
-        const SizedBox(width: 5),
-        Text(
-          label,
-          style: const TextStyle(color: AppColors.textTertiary, fontSize: 12.5),
-        ),
-      ],
     );
   }
 }

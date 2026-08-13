@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../models/user.dart';
-import '../models/moment.dart';
 import '../models/voiceroom.dart';
 import '../models/live_stream.dart';
 import '../models/learn_item.dart';
@@ -144,45 +143,6 @@ Color avatarColorFor(String seed) {
   return avatarPalette[idx];
 }
 
-final List<Moment> mockMoments = [
-  Moment(
-    user: mockUsers[0],
-    timeAgo: '4 hours ago',
-    text: 'My first post',
-    imageUrl: 'flowers',
-    likes: 7,
-    comments: 2,
-  ),
-  Moment(
-    user: mockUsers[1],
-    timeAgo: 'Yesterday',
-    text:
-        'Cover... could someone translate this sentence into Sinhala for me? 🙏',
-    tag: '#topik hangat',
-    likes: 12,
-    comments: 5,
-    isTranslatable: true,
-  ),
-  Moment(
-    user: mockUsers[3],
-    timeAgo: '2 days ago',
-    text:
-        'Anyone up for a music-themed voiceroom tonight? 🎶 Come practice English with me!',
-    tag: '#FIFA World Cup',
-    likes: 21,
-    comments: 9,
-  ),
-  Moment(
-    user: mockUsers[5],
-    timeAgo: '3 days ago',
-    text:
-        '¿Alguien puede corregir mi español? Estoy practicando todos los días.',
-    likes: 15,
-    comments: 4,
-    isTranslatable: true,
-  ),
-];
-
 final List<VoiceRoom> mockVoiceRooms = [
   VoiceRoom(
     title: 'ZETIFY 🎧 | Asian R&B Selection ✨',
@@ -240,40 +200,16 @@ final List<VoiceRoom> mockVoiceRooms = [
 ];
 
 const languageCourses = [
-  {
-    'name': 'HelloWords',
-    'icon': Icons.grid_view_rounded,
-    'color': Color(0xFF2ECC71),
-    'badge': true,
+    {
+    'name': 'Teachers',
+    'icon': Icons.school_rounded,
+    'color': Color(0xFFFF4D8D),
+    'badge': false,
   },
   {
     'name': 'LiveClass',
     'icon': Icons.menu_book_rounded,
     'color': Color(0xFF4FA8FF),
-    'badge': false,
-  },
-  {
-    'name': 'Pro Partner',
-    'icon': Icons.people_alt_rounded,
-    'color': Color(0xFFFF4D8D),
-    'badge': false,
-  },
-  {
-    'name': 'HelloEnglish',
-    'icon': Icons.chat_bubble_rounded,
-    'color': Color(0xFF4FA8FF),
-    'badge': false,
-  },
-  {
-    'name': 'Podcast',
-    'icon': Icons.podcasts_rounded,
-    'color': Color(0xFF2E3A8C),
-    'badge': true,
-  },
-  {
-    'name': 'Grammar',
-    'icon': Icons.spellcheck_rounded,
-    'color': Color(0xFFFF7A45),
     'badge': false,
   },
   {
@@ -415,8 +351,8 @@ const liveClassBanner = CourseBanner(
 
 const proPartnerBanner = CourseBanner(
   tagline: '',
-  title: 'English Pro Partner',
-  subtitle: 'Abundant topics to choose from\nChat freely with native partners',
+  title: 'Teachers',
+  subtitle: 'Abundant topics to choose from\nChat freely with native teachers',
   ctaLabel: 'Book now',
   coverSeed: 'propartner',
 );

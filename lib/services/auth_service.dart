@@ -35,6 +35,11 @@ class AuthService {
   Future<AppUser?> init() async {
     final user = await FirebaseAuth.instance.authStateChanges().first;
     if (user == null) return null;
+    // Resuming an existing session (the common case — most launches aren't
+    // a fresh login) still needs a fresh FCM token registered, per the
+    // Moments push-notification setup; register/login already do this via
+    // _afterSignIn() for a brand-new sign-in.
+    _afterSignIn();
     return refreshCurrentUser();
   }
 

@@ -23,7 +23,7 @@ class _SignupScreenState extends State<SignupScreen> {
   bool _obscurePassword = true;
   bool _loading = false;
   bool _googleLoading = false;
-  FaceTalkRole _role = FaceTalkRole.student;
+  final _role = FaceTalkRole.student;
 
   @override
   void dispose() {
@@ -121,7 +121,7 @@ class _SignupScreenState extends State<SignupScreen> {
               ),
               const SizedBox(height: 8),
               const Text(
-                'Join FaceTalk as a student or a teacher and\nstart real conversations today.',
+                'Join FaceTalk and start real conversations today.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 13.5,
@@ -130,20 +130,6 @@ class _SignupScreenState extends State<SignupScreen> {
                 ),
               ),
               const SizedBox(height: 24),
-              const Text(
-                'I am joining as',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 10),
-              _RoleSelector(
-                role: _role,
-                onChanged: (r) => setState(() => _role = r),
-              ),
-              const SizedBox(height: 20),
               AuthTextField(
                 label: 'Email',
                 hint: 'you@example.com',
@@ -226,92 +212,4 @@ class _SignupScreenState extends State<SignupScreen> {
   }
 }
 
-class _RoleSelector extends StatelessWidget {
-  final FaceTalkRole role;
-  final ValueChanged<FaceTalkRole> onChanged;
 
-  const _RoleSelector({required this.role, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: _RoleCard(
-            label: 'Student',
-            icon: Icons.school_outlined,
-            selected: role == FaceTalkRole.student,
-            onTap: () => onChanged(FaceTalkRole.student),
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _RoleCard(
-            label: 'Teacher',
-            icon: Icons.menu_book_outlined,
-            selected: role == FaceTalkRole.teacher,
-            onTap: () => onChanged(FaceTalkRole.teacher),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _RoleCard extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _RoleCard({
-    required this.label,
-    required this.icon,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        decoration: BoxDecoration(
-          color: selected
-              ? AppColors.primaryPurple.withValues(alpha: 0.1)
-              : AppColors.surfaceLight,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: selected ? AppColors.primaryPurple : Colors.transparent,
-            width: 1.4,
-          ),
-        ),
-        child: Column(
-          children: [
-            Icon(
-              icon,
-              color: selected
-                  ? AppColors.primaryPurple
-                  : AppColors.textTertiary,
-              size: 22,
-            ),
-            const SizedBox(height: 6),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                color: selected
-                    ? AppColors.primaryPurple
-                    : AppColors.textSecondary,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
