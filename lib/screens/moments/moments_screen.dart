@@ -1,12 +1,15 @@
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../../models/moment.dart';
+import '../../services/auth_service.dart';
 import '../../services/friend_service.dart';
 import '../../services/moment_service.dart';
 import '../../theme/app_colors.dart';
+import '../../widgets/app_avatar.dart';
 import '../../widgets/connectivity_banner.dart';
 import '../../widgets/moment_card.dart';
 import '../../widgets/moment_card_shimmer.dart';
@@ -27,6 +30,7 @@ class _MomentsScreenState extends State<MomentsScreen> {
   bool _hasMore = true;
   bool _initialLoading = true;
   bool _loadingMore = false;
+  bool _hasUserSharedFirstMoment = false;
 
   final Set<String> _hiddenPostIds = {}; // reported this session
   Set<String> _blockedIds = {};
@@ -49,6 +53,22 @@ class _MomentsScreenState extends State<MomentsScreen> {
     });
     _loadFirstPage();
     _subscribeLiveWindow();
+    _checkUserMoments();
+  }
+
+  Future<void> _checkUserMoments() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || uid.isEmpty) return;
+    if (_posts.any((p) => p.user.id == uid)) {
+      if (mounted && !_hasUserSharedFirstMoment) {
+        setState(() => _hasUserSharedFirstMoment = true);
+      }
+      return;
+    }
+    final count = await MomentService.getUserMomentsCount(uid);
+    if (mounted) {
+      setState(() => _hasUserSharedFirstMoment = count > 0);
+    }
   }
 
   @override
@@ -80,6 +100,7 @@ class _MomentsScreenState extends State<MomentsScreen> {
         _initialLoading = false;
         _loadError = null;
       });
+      _checkUserMoments();
     } catch (e, st) {
       debugPrint('MomentsScreen: failed to load feed: $e\n$st');
       if (!mounted) return;
@@ -113,6 +134,7 @@ class _MomentsScreenState extends State<MomentsScreen> {
           }
           _knownLiveIds = liveIds;
         });
+        _checkUserMoments();
       },
       onError: (Object e, StackTrace st) {
         // Most commonly a missing composite Firestore index or a rules
@@ -171,14 +193,41 @@ class _MomentsScreenState extends State<MomentsScreen> {
     }).toList();
   }
 
-  Future<void> _openCreateMoment() async {
+  Future<void> _openCreateMoment({String? initialText, String? initialPicker}) async {
     final posted = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => const CreateMomentScreen()),
+      MaterialPageRoute(
+        builder: (_) => CreateMomentScreen(
+          initialText: initialText,
+          initialPicker: initialPicker,
+        ),
+      ),
     );
     if (posted == true && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Moment posted!')));
+      setState(() => _hasUserSharedFirstMoment = true);
+      await _refresh();
     }
   }
+
+  Widget _buildComposerHeader() {
+    if (!_hasUserSharedFirstMoment) {
+      return _PostPromptBanner(
+        onPostTap: _openCreateMoment,
+        onPhotoTap: () => _openCreateMoment(initialPicker: 'image'),
+        onVideoTap: () => _openCreateMoment(initialPicker: 'video'),
+        onTopicTap: (topic) => _openCreateMoment(initialText: '$topic '),
+      );
+    }
+
+    return _RegularPostMomentCard(
+      onTap: _openCreateMoment,
+      onPhotoTap: () => _openCreateMoment(initialPicker: 'image'),
+      onVideoTap: () => _openCreateMoment(initialPicker: 'video'),
+      onTextTap: () => _openCreateMoment(),
+    );
+  }
+
+
 
   @override
   Widget build(BuildContext context) {
@@ -322,7 +371,8 @@ class _MomentsScreenState extends State<MomentsScreen> {
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
           children: [
-            _PostPromptBanner(onPostTap: _openCreateMoment),
+            _buildComposerHeader(),
+
             const SizedBox(height: 60),
             const Center(
               child: Padding(
@@ -352,7 +402,9 @@ class _MomentsScreenState extends State<MomentsScreen> {
         padding: const EdgeInsets.only(bottom: 20),
         itemCount: posts.length + 2,
         itemBuilder: (context, index) {
-          if (index == 0) return _PostPromptBanner(onPostTap: _openCreateMoment);
+          if (index == 0) {
+            return _buildComposerHeader();
+          }
           if (index == posts.length + 1) {
             if (!_hasMore) return const SizedBox.shrink();
             return const Padding(
@@ -373,71 +425,331 @@ class _MomentsScreenState extends State<MomentsScreen> {
   }
 }
 
-class _PostPromptBanner extends StatelessWidget {
-  final VoidCallback onPostTap;
+class _RegularPostMomentCard extends StatelessWidget {
+  final VoidCallback onTap;
+  final VoidCallback onPhotoTap;
+  final VoidCallback onVideoTap;
+  final VoidCallback onTextTap;
 
-  const _PostPromptBanner({required this.onPostTap});
+  const _RegularPostMomentCard({
+    required this.onTap,
+    required this.onPhotoTap,
+    required this.onVideoTap,
+    required this.onTextTap,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final user = AuthService.instance.currentUser;
+
     return Container(
       margin: const EdgeInsets.fromLTRB(14, 10, 14, 14),
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
         color: AppColors.card,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: AppColors.primaryPurple.withValues(alpha: 0.2),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(
-              Icons.travel_explore_rounded,
-              color: AppColors.primaryPurple,
-            ),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: const [
-                Text(
-                  'Post your first Moment',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
-                ),
-                SizedBox(height: 2),
-                Text(
-                  'More partners will see you and reach out to learn together!',
-                  style: TextStyle(
-                    color: AppColors.textTertiary,
-                    fontSize: 11.5,
+        ],
+      ),
+      child: Column(
+        children: [
+          InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(20),
+            child: Row(
+              children: [
+                if (user != null)
+                  AppAvatar.forUser(user, size: 38)
+                else
+                  const AppAvatar(seed: 'me', size: 38),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceLight,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: AppColors.divider.withValues(alpha: 0.6)),
+                    ),
+                    child: const Text(
+                      'Share what is on your mind...',
+                      style: TextStyle(
+                        color: AppColors.textTertiary,
+                        fontSize: 13.5,
+                      ),
+                    ),
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(width: 8),
-          ElevatedButton(
-            onPressed: onPostTap,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primaryPurple,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(18),
+          const SizedBox(height: 10),
+          const Divider(height: 1, color: AppColors.divider),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _actionItem(
+                icon: Icons.image_outlined,
+                label: 'Photo',
+                color: const Color(0xFF00C48C),
+                onTap: onPhotoTap,
               ),
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+              _actionItem(
+                icon: Icons.videocam_outlined,
+                label: 'Video',
+                color: const Color(0xFFE91E63),
+                onTap: onVideoTap,
+              ),
+              _actionItem(
+                icon: Icons.edit_note_rounded,
+                label: 'Write',
+                color: AppColors.primaryPurple,
+                onTap: onTextTap,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _actionItem({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        child: Row(
+          children: [
+            Icon(icon, size: 19, color: color),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: const TextStyle(
+                color: AppColors.textSecondary,
+                fontWeight: FontWeight.w600,
+                fontSize: 12.5,
+              ),
             ),
-            child: const Text(
-              'Post',
-              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PostPromptBanner extends StatelessWidget {
+  final VoidCallback onPostTap;
+  final VoidCallback onPhotoTap;
+  final VoidCallback onVideoTap;
+  final ValueChanged<String> onTopicTap;
+
+  const _PostPromptBanner({
+    required this.onPostTap,
+    required this.onPhotoTap,
+    required this.onVideoTap,
+    required this.onTopicTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(14, 10, 14, 14),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header Row
+          InkWell(
+            onTap: onPostTap,
+            borderRadius: BorderRadius.circular(12),
+            child: Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: AppColors.primaryPurple.withValues(alpha: 0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.explore_rounded,
+                    color: AppColors.primaryPurple,
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: const [
+                      Text(
+                        'Post your first Moment',
+                        style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+                      ),
+                      SizedBox(height: 3),
+                      Text(
+                        'Share with partners worldwide to start learning together!',
+                        style: TextStyle(
+                          color: AppColors.textTertiary,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                ElevatedButton(
+                  onPressed: onPostTap,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primaryPurple,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
+                  ),
+                  child: const Text(
+                    'Post',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 14),
+          const Divider(height: 1, color: AppColors.divider),
+          const SizedBox(height: 12),
+
+          // Shortcut Actions (Photo, Video, Write)
+          Row(
+            children: [
+              _shortcutButton(
+                icon: Icons.image_outlined,
+                label: 'Photo',
+                color: const Color(0xFF00C48C),
+                onTap: onPhotoTap,
+              ),
+              const SizedBox(width: 10),
+              _shortcutButton(
+                icon: Icons.videocam_outlined,
+                label: 'Video',
+                color: const Color(0xFFE91E63),
+                onTap: onVideoTap,
+              ),
+              const SizedBox(width: 10),
+              _shortcutButton(
+                icon: Icons.edit_note_rounded,
+                label: 'Write',
+                color: AppColors.primaryPurple,
+                onTap: onPostTap,
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 12),
+
+          // Quick Topic Prompt Pills
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _topicPill('👋 #SelfIntroduction', onTopicTap),
+                const SizedBox(width: 8),
+                _topicPill('🎯 #DailyGoal', onTopicTap),
+                const SizedBox(width: 8),
+                _topicPill('❓ #AskQuestion', onTopicTap),
+                const SizedBox(width: 8),
+                _topicPill('📸 #MyCity', onTopicTap),
+              ],
             ),
           ),
         ],
       ),
     );
   }
+
+  Widget _shortcutButton({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 18, color: color),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  color: color,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12.5,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _topicPill(String topic, ValueChanged<String> onTap) {
+    return GestureDetector(
+      onTap: () => onTap(topic),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: AppColors.surfaceLight,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.divider),
+        ),
+        child: Text(
+          topic,
+          style: const TextStyle(
+            fontSize: 12,
+            color: AppColors.textSecondary,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
 }
+
+

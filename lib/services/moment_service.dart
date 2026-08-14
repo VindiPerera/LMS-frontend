@@ -138,6 +138,21 @@ class MomentService {
         .map((snap) => snap.docs.map(Moment.fromFirestore).toList());
   }
 
+  /// Returns the total active moments count for a user.
+  static Future<int> getUserMomentsCount(String userId) async {
+    if (userId.isEmpty) return 0;
+    try {
+      final snap = await _moments
+          .where('user.id', isEqualTo: userId)
+          .where('isDeleted', isEqualTo: false)
+          .get();
+      return snap.docs.length;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+
   /// One-time fetch, used to hydrate the read-only original-post preview
   /// inside a reshare (see lib/widgets/embedded_post_card.dart). Returns
   /// null both when the post was hard-deleted and when it was soft-deleted

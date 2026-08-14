@@ -62,15 +62,24 @@ class _VideoItem {
 /// their existing Storage URL untouched.
 class CreateMomentScreen extends StatefulWidget {
   final Moment? existing;
+  final String? initialText;
+  final String? initialPicker;
 
-  const CreateMomentScreen({super.key, this.existing});
+  const CreateMomentScreen({
+    super.key,
+    this.existing,
+    this.initialText,
+    this.initialPicker,
+  });
 
   @override
   State<CreateMomentScreen> createState() => _CreateMomentScreenState();
 }
 
 class _CreateMomentScreenState extends State<CreateMomentScreen> {
-  late final _textController = TextEditingController(text: widget.existing?.text ?? '');
+  late final _textController = TextEditingController(
+    text: widget.existing?.text ?? widget.initialText ?? '',
+  );
   late MomentVisibility _visibility = widget.existing?.visibility ?? MomentVisibility.public;
 
   /// Allocated once (either the post being edited, or a fresh id from
@@ -106,7 +115,15 @@ class _CreateMomentScreenState extends State<CreateMomentScreen> {
     ConnectivityService.instance.onlineStatus.listen((value) {
       if (mounted) setState(() => _online = value);
     });
+
+    if (widget.initialPicker == 'image') {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _pickImage(ImageSource.gallery));
+    } else if (widget.initialPicker == 'video') {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _pickVideo(ImageSource.gallery));
+    }
   }
+
+
 
   @override
   void dispose() {
