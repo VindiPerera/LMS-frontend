@@ -380,31 +380,131 @@ const roomOthersCount = 13;
 
 const speakingTutors = [
   Tutor(
+    id: 'teacher_den',
     name: 'Den',
     flag: '🇺🇸',
     languages: 'English/Russian',
-    bio: 'Hello friends! 👋',
+    bio: 'Hello friends! 👋 Certified TEFL teacher from the USA. I focus on pronunciation, casual conversation, and boosting your fluency!',
+    isPro: false,
+    age: 31,
+    gender: 'male',
+    handle: 'den_tutor',
+    rating: 4.9,
+    reviewCount: 142,
+    studentsCount: 310,
+    lessonsCount: 890,
   ),
   Tutor(
+    id: 'teacher_sajida',
     name: 'Sajida',
     flag: '🇬🇧',
-    languages: 'English',
-    bio: "Im sajida from England. I'm a graduate in Biomed...",
+    languages: 'English/Spanish',
+    bio: "I'm Sajida from England. I'm a graduate in Biomedicine and certified TESOL English teacher helping students speak fluently.",
+    isPro: false,
+    age: 28,
+    gender: 'female',
+    handle: 'sajida_uk',
+    rating: 5.0,
+    reviewCount: 98,
+    studentsCount: 220,
+    lessonsCount: 650,
   ),
   Tutor(
-    name: 'KIRSTIN',
+    id: 'teacher_kirstin',
+    name: 'Kirstin',
     flag: '🇨🇦',
-    languages: 'English',
-    bio: '💎 PRO PARTNER ENGLISH TUTOR 💎',
+    languages: 'English/French',
+    bio: '💎 PRO PARTNER ENGLISH TUTOR 💎 Specializing in business English, daily conversations, and natural idioms.',
     isPro: true,
+    age: 29,
+    gender: 'female',
+    handle: 'kirstin_ca',
+    rating: 4.9,
+    reviewCount: 215,
+    studentsCount: 480,
+    lessonsCount: 1420,
   ),
   Tutor(
+    id: 'teacher_paul',
     name: 'Paul Charles',
     flag: '🇬🇧',
-    languages: 'English',
-    bio: '*Note - I teach adults only, intermediate level and ab...',
+    languages: 'English/German',
+    bio: '*Note - I teach adults only, intermediate level and above. Focused on public speaking and workplace confidence.',
+    isPro: true,
+    age: 42,
+    gender: 'male',
+    handle: 'paul_charles',
+    rating: 4.8,
+    reviewCount: 86,
+    studentsCount: 190,
+    lessonsCount: 540,
+  ),
+  Tutor(
+    id: 'teacher_elena',
+    name: 'Elena Rostova',
+    flag: '🇷🇺',
+    languages: 'Russian/English',
+    bio: 'Native Russian speaker and language enthusiast. Let\'s practice daily dialogues and cultural insights!',
+    isPro: false,
+    age: 26,
+    gender: 'female',
+    handle: 'elena_r',
+    rating: 4.9,
+    reviewCount: 64,
+    studentsCount: 130,
+    lessonsCount: 380,
+  ),
+  Tutor(
+    id: 'teacher_hiroshi',
+    name: 'Hiroshi Tanaka',
+    flag: '🇯🇵',
+    languages: 'Japanese/English',
+    bio: 'Tokyo native teaching practical Japanese from beginner JLPT N5 to natural business conversation.',
+    isPro: true,
+    age: 34,
+    gender: 'male',
+    handle: 'hiroshi_jp',
+    rating: 5.0,
+    reviewCount: 175,
+    studentsCount: 390,
+    lessonsCount: 990,
   ),
 ];
+
+AppUser tutorToAppUser(Tutor tutor) {
+  return AppUser(
+    id: tutor.id.isNotEmpty
+        ? tutor.id
+        : 'teacher_${tutor.name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '_')}',
+    name: tutor.name,
+    handle: tutor.handle.isNotEmpty
+        ? tutor.handle
+        : 'teacher_${tutor.name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '')}',
+    avatarUrl: tutor.avatarUrl,
+    countryFlag: tutor.flag,
+    nativeLang: tutor.languages.split('/').first.trim(),
+    learningLang: tutor.languages.contains('/')
+        ? tutor.languages.split('/').last.trim()
+        : 'English',
+    isOnline: true,
+    isVip: tutor.isPro,
+    age: tutor.age,
+    gender: tutor.gender,
+    bio: tutor.bio,
+    activeLabel: 'Active now',
+    tags: [
+      tutor.isPro ? 'Pro Partner' : 'Certified Tutor',
+      '1v1 LiveClass',
+      '★ ${tutor.rating}',
+    ],
+    role: 'teacher',
+    detail: tutor.languages,
+  );
+}
+
+final List<AppUser> fixedTeacherUsers =
+    speakingTutors.map(tutorToAppUser).toList();
+
 
 const classCategories = [
   {

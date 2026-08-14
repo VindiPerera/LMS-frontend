@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import '../models/moment.dart';
 import 'auth_service.dart';
+import 'friend_service.dart';
 
 /// One page of the Moments feed, keyed by a [DocumentSnapshot] cursor
 /// (never a raw timestamp — two posts can share a createdAt down to the
@@ -37,6 +38,46 @@ class MomentService {
       FirebaseFirestore.instance.collection('moments');
 
   // --------------------------------------------------------------------
+  // Audience — see firestore.rules `visibleToMe()` for the read side.
+  // --------------------------------------------------------------------
+  //
+  // A Firestore *list* query (as opposed to a single-doc get) is validated
+  // against its own filters, not against the documents it actually returns
+  // — so a rule condition like "isFriendOf(post.user.id)" that isn't
+  // mirrored by an equivalent query filter causes the whole feed query to
+  // be rejected with permission-denied, regardless of what's really in the
+  // collection. `visibility` alone can't be queried around a live
+  // friendship lookup, so every moment also carries a denormalized
+  // `audience` array — the literal 'public', or the uids allowed to read
+  // it — computed here at write time and matched with a `.where('audience',
+  // arrayContainsAny: [...])` filter on every list query below.
+  //
+  // Trade-off: for `friends` visibility, `audience` is a snapshot of the
+  // owner's friends *at write time*. A friend added after posting won't
+  // retroactively see it, and an unfriended uid won't retroactively lose
+  // access, until the post is next edited (or archived/deleted).
+
+  static List<String> _audienceKeysForReader() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    return uid == null || uid.isEmpty ? const ['public'] : ['public', uid];
+  }
+
+  static Future<List<String>> _audienceFor({
+    required MomentVisibility visibility,
+    required String ownerUid,
+  }) async {
+    switch (visibility) {
+      case MomentVisibility.public:
+        return [ownerUid, 'public'];
+      case MomentVisibility.onlyMe:
+        return [ownerUid];
+      case MomentVisibility.friends:
+        final friendIds = await FriendService.instance.getFriendIds();
+        return {ownerUid, ...friendIds}.toList();
+    }
+  }
+
+  // --------------------------------------------------------------------
   // Reads
   // --------------------------------------------------------------------
 
@@ -47,6 +88,7 @@ class MomentService {
   static Stream<List<Moment>> streamFirstPage({int limit = defaultPageSize}) {
     return _moments
         .where('isDeleted', isEqualTo: false)
+        .where('audience', arrayContainsAny: _audienceKeysForReader())
         .orderBy('createdAt', descending: true)
         .limit(limit)
         .snapshots()
@@ -61,6 +103,7 @@ class MomentService {
   }) async {
     Query<Map<String, dynamic>> query = _moments
         .where('isDeleted', isEqualTo: false)
+        .where('audience', arrayContainsAny: _audienceKeysForReader())
         .orderBy('createdAt', descending: true)
         .limit(limit);
     if (startAfter != null) {
@@ -75,9 +118,10 @@ class MomentService {
     );
   }
 
-  /// Stream moments published by a specific user. See
+  /// Stream moments published by a specific user, restricted to the ones
+  /// the *current* signed-in user may actually see. See
   /// firestore.indexes.json index #2 (`user.id` ASC, `isDeleted` ASC,
-  /// `createdAt` DESC).
+  /// `audience` CONTAINS, `createdAt` DESC).
   static Stream<List<Moment>> streamUserMoments({
     required String userId,
     int limit = 30,
@@ -87,6 +131,7 @@ class MomentService {
     return _moments
         .where('user.id', isEqualTo: userId)
         .where('isDeleted', isEqualTo: false)
+        .where('audience', arrayContainsAny: _audienceKeysForReader())
         .orderBy('createdAt', descending: true)
         .limit(limit)
         .snapshots()
@@ -164,9 +209,20 @@ class MomentService {
       isReshare: isReshare,
       originalPostId: originalPostId,
     );
+    final audience = await _audienceFor(visibility: visibility, ownerUid: uid);
 
     final ref = postId != null && postId.isNotEmpty ? _moments.doc(postId) : _moments.doc();
-    await ref.set(draft.toCreateMap());
+    await ref.set({...draft.toCreateMap(), 'audience': audience});
+
+    if (isReshare && originalPostId != null && originalPostId.isNotEmpty) {
+      try {
+        await _moments.doc(originalPostId).update({
+          'reshareCount': FieldValue.increment(1),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      } catch (_) {}
+    }
+
     return ref.id;
   }
 
@@ -190,15 +246,25 @@ class MomentService {
     if (videoUrl != null) update['videoUrl'] = videoUrl;
     if (videoThumbnailUrl != null) update['videoThumbnailUrl'] = videoThumbnailUrl;
     if (mediaType != null) update['mediaType'] = mediaType.storageValue;
-    if (visibility != null) update['visibility'] = visibility.storageValue;
+    if (visibility != null) {
+      update['visibility'] = visibility.storageValue;
+      // Only the owner can change visibility (see firestore.rules), so
+      // recomputing the audience from the caller's own uid is safe here.
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid != null) {
+        update['audience'] = await _audienceFor(visibility: visibility, ownerUid: uid);
+      }
+    }
     await _moments.doc(postId).update(update);
   }
 
   /// Archive == keep the post but only its owner can see it.
   static Future<void> archiveMoment(String postId) async {
     if (postId.isEmpty) return;
+    final uid = FirebaseAuth.instance.currentUser?.uid;
     await _moments.doc(postId).update({
       'visibility': MomentVisibility.onlyMe.storageValue,
+      if (uid != null) 'audience': [uid],
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }

@@ -1,3 +1,5 @@
+import '../config/api_config.dart';
+
 class AppUser {
   // Firestore document id (== Firebase Auth uid for the signed-in user).
   // Empty for local/mock AppUsers that were never stored anywhere.
@@ -51,7 +53,8 @@ class AppUser {
       id: json['id']?.toString() ?? '',
       name: json['name']?.toString() ?? '',
       handle: json['handle']?.toString() ?? '',
-      avatarUrl: json['avatarUrl']?.toString() ?? '',
+      avatarUrl: ApiConfig.resolveUrl(json['avatarUrl']?.toString() ?? ''),
+
       countryFlag: json['countryFlag']?.toString() ?? '',
       nativeLang: json['nativeLang']?.toString() ?? '',
       learningLang: json['learningLang']?.toString() ?? '',

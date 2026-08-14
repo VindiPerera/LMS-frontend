@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../../models/moment.dart';
@@ -31,14 +30,15 @@ class _MomentsScreenState extends State<MomentsScreen> {
 
   final Set<String> _hiddenPostIds = {}; // reported this session
   Set<String> _blockedIds = {};
-  Set<String> _friendIds = {};
+
+  // Set on any failure loading/streaming the feed (e.g. a missing Firestore
+  // index or a permission-denied) so the UI can show a retry state instead
+  // of spinning forever or silently staying empty.
+  Object? _loadError;
 
   final _scrollController = ScrollController();
   StreamSubscription<List<Moment>>? _liveSub;
   StreamSubscription<Set<String>>? _blockedSub;
-  StreamSubscription<Set<String>>? _friendSub;
-
-  String? get _uid => FirebaseAuth.instance.currentUser?.uid;
 
   @override
   void initState() {
@@ -46,9 +46,6 @@ class _MomentsScreenState extends State<MomentsScreen> {
     _scrollController.addListener(_onScroll);
     _blockedSub = FriendService.instance.streamBlockedIds().listen((ids) {
       if (mounted) setState(() => _blockedIds = ids);
-    });
-    _friendSub = FriendService.instance.streamFriendIds().listen((ids) {
-      if (mounted) setState(() => _friendIds = ids);
     });
     _loadFirstPage();
     _subscribeLiveWindow();
@@ -59,7 +56,6 @@ class _MomentsScreenState extends State<MomentsScreen> {
     _scrollController.dispose();
     _liveSub?.cancel();
     _blockedSub?.cancel();
-    _friendSub?.cancel();
     super.dispose();
   }
 
@@ -72,16 +68,26 @@ class _MomentsScreenState extends State<MomentsScreen> {
   }
 
   Future<void> _loadFirstPage() async {
-    final page = await MomentService.fetchPage(startAfter: null);
-    if (!mounted) return;
-    setState(() {
-      _posts
-        ..clear()
-        ..addAll(page.moments);
-      _lastDoc = page.lastDoc;
-      _hasMore = page.hasMore;
-      _initialLoading = false;
-    });
+    try {
+      final page = await MomentService.fetchPage(startAfter: null);
+      if (!mounted) return;
+      setState(() {
+        _posts
+          ..clear()
+          ..addAll(page.moments);
+        _lastDoc = page.lastDoc;
+        _hasMore = page.hasMore;
+        _initialLoading = false;
+        _loadError = null;
+      });
+    } catch (e, st) {
+      debugPrint('MomentsScreen: failed to load feed: $e\n$st');
+      if (!mounted) return;
+      setState(() {
+        _initialLoading = false;
+        _loadError = e;
+      });
+    }
   }
 
   /// Live view of the newest ~15 posts, merged into [_posts] by id so
@@ -89,23 +95,36 @@ class _MomentsScreenState extends State<MomentsScreen> {
   /// pagination cursor (which only ever advances from one-time
   /// [MomentService.fetchPage] reads — see class docs on MomentService).
   void _subscribeLiveWindow() {
-    _liveSub = MomentService.streamFirstPage().listen((livePosts) {
-      if (!mounted) return;
-      setState(() {
-        _initialLoading = false;
-        final liveIds = livePosts.map((m) => m.id).toSet();
-        _posts.removeWhere((p) => _knownLiveIds.contains(p.id) && !liveIds.contains(p.id));
-        for (final post in livePosts.reversed) {
-          final idx = _posts.indexWhere((p) => p.id == post.id);
-          if (idx >= 0) {
-            _posts[idx] = post;
-          } else {
-            _posts.insert(0, post);
+    _liveSub = MomentService.streamFirstPage().listen(
+      (livePosts) {
+        if (!mounted) return;
+        setState(() {
+          _initialLoading = false;
+          _loadError = null;
+          final liveIds = livePosts.map((m) => m.id).toSet();
+          _posts.removeWhere((p) => _knownLiveIds.contains(p.id) && !liveIds.contains(p.id));
+          for (final post in livePosts.reversed) {
+            final idx = _posts.indexWhere((p) => p.id == post.id);
+            if (idx >= 0) {
+              _posts[idx] = post;
+            } else {
+              _posts.insert(0, post);
+            }
           }
-        }
-        _knownLiveIds = liveIds;
-      });
-    });
+          _knownLiveIds = liveIds;
+        });
+      },
+      onError: (Object e, StackTrace st) {
+        // Most commonly a missing composite Firestore index or a rules
+        // rejection on the `audience` filter — see MomentService docs.
+        debugPrint('MomentsScreen: live feed stream error: $e\n$st');
+        if (!mounted) return;
+        setState(() {
+          _initialLoading = false;
+          _loadError = e;
+        });
+      },
+    );
   }
 
   Set<String> _knownLiveIds = {};
@@ -113,18 +132,24 @@ class _MomentsScreenState extends State<MomentsScreen> {
   Future<void> _loadMore() async {
     if (_loadingMore || !_hasMore || _lastDoc == null) return;
     setState(() => _loadingMore = true);
-    final page = await MomentService.fetchPage(startAfter: _lastDoc);
-    if (!mounted) return;
-    setState(() {
-      for (final post in page.moments) {
-        if (!_posts.any((p) => p.id == post.id)) {
-          _posts.add(post);
+    try {
+      final page = await MomentService.fetchPage(startAfter: _lastDoc);
+      if (!mounted) return;
+      setState(() {
+        for (final post in page.moments) {
+          if (!_posts.any((p) => p.id == post.id)) {
+            _posts.add(post);
+          }
         }
-      }
-      _lastDoc = page.lastDoc;
-      _hasMore = page.hasMore;
-      _loadingMore = false;
-    });
+        _lastDoc = page.lastDoc;
+        _hasMore = page.hasMore;
+        _loadingMore = false;
+      });
+    } catch (e, st) {
+      debugPrint('MomentsScreen: failed to load more: $e\n$st');
+      if (!mounted) return;
+      setState(() => _loadingMore = false);
+    }
   }
 
   Future<void> _refresh() async {
@@ -133,19 +158,16 @@ class _MomentsScreenState extends State<MomentsScreen> {
     await _loadFirstPage();
   }
 
+  // Visibility (public/friends/onlyMe) is already enforced server-side via
+  // each moment's `audience` field (see MomentService/firestore.rules) —
+  // every post reaching `_posts` is one this user is allowed to see. This
+  // only needs to cover the two purely-client-side, instantly-toggleable
+  // concerns: this session's own reports, and live block status.
   List<Moment> get _visiblePosts {
-    final uid = _uid;
     return _posts.where((moment) {
       if (_hiddenPostIds.contains(moment.id)) return false;
       if (_blockedIds.contains(moment.user.id)) return false;
-      switch (moment.visibility) {
-        case MomentVisibility.public:
-          return true;
-        case MomentVisibility.friends:
-          return moment.user.id == uid || _friendIds.contains(moment.user.id);
-        case MomentVisibility.onlyMe:
-          return moment.user.id == uid;
-      }
+      return true;
     }).toList();
   }
 
@@ -161,7 +183,7 @@ class _MomentsScreenState extends State<MomentsScreen> {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 5,
+      length: 2,
       child: Scaffold(
         appBar: AppBar(
           titleSpacing: 12,
@@ -207,18 +229,14 @@ class _MomentsScreenState extends State<MomentsScreen> {
             ),
           ],
           bottom: const TabBar(
-            isScrollable: true,
+            isScrollable: false,
             indicatorColor: AppColors.primaryPurple,
             labelColor: AppColors.textPrimary,
             unselectedLabelColor: AppColors.textSecondary,
             labelStyle: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5),
-            tabAlignment: TabAlignment.start,
             tabs: [
               Tab(text: 'Recent'),
-              Tab(text: 'Help'),
               Tab(text: 'Following'),
-              Tab(text: 'Learn'),
-              Tab(text: 'Selfie'),
             ],
           ),
         ),
@@ -230,22 +248,14 @@ class _MomentsScreenState extends State<MomentsScreen> {
                 children: [
                   _buildRecentTab(),
                   const Center(
-                    child: Text('Help posts', style: TextStyle(color: AppColors.textTertiary)),
-                  ),
-                  const Center(
                     child: Text('Following posts', style: TextStyle(color: AppColors.textTertiary)),
-                  ),
-                  const Center(
-                    child: Text('Learn posts', style: TextStyle(color: AppColors.textTertiary)),
-                  ),
-                  const Center(
-                    child: Text('Selfie posts', style: TextStyle(color: AppColors.textTertiary)),
                   ),
                 ],
               ),
             ),
           ],
         ),
+
         floatingActionButton: FloatingActionButton(
           onPressed: _openCreateMoment,
           backgroundColor: AppColors.primaryPurple,
@@ -265,6 +275,46 @@ class _MomentsScreenState extends State<MomentsScreen> {
     }
 
     final posts = _visiblePosts;
+
+    if (posts.isEmpty && _loadError != null) {
+      return RefreshIndicator(
+        onRefresh: _refresh,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            const SizedBox(height: 60),
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32),
+                child: Column(
+                  children: [
+                    const Icon(Icons.error_outline_rounded, size: 48, color: AppColors.textTertiary),
+                    const SizedBox(height: 14),
+                    const Text(
+                      "Couldn't load moments",
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: AppColors.textPrimary),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '$_loadError',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 11.5, color: AppColors.textTertiary),
+                    ),
+                    const SizedBox(height: 16),
+                    ElevatedButton(
+                      onPressed: _refresh,
+                      style: ElevatedButton.styleFrom(backgroundColor: AppColors.primaryPurple),
+                      child: const Text('Retry'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
 
     if (posts.isEmpty) {
       return RefreshIndicator(

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import '../../models/user.dart';
 import '../../services/partner_service.dart';
+import '../../services/teacher_service.dart';
 import '../../theme/app_colors.dart';
+
 import '../../widgets/app_avatar.dart';
 import '../hellotalk/add_contact_screen.dart';
 import '../hellotalk/chat_detail_screen.dart';
@@ -108,12 +110,13 @@ class _ConnectScreenState extends State<ConnectScreen>
             onRetry: _loadPartners,
           ),
           const _EmptyTab(icon: Icons.groups_rounded, label: 'No groups yet'),
-          const _EmptyTab(icon: Icons.school_rounded, label: 'No teachers yet'),
+          const _TeachersTab(),
         ],
       ),
     );
   }
 }
+
 
 class _PartnersTab extends StatelessWidget {
   final List<String> filters;
@@ -375,17 +378,19 @@ class _PartnerListTile extends StatelessWidget {
               child: Container(
                 width: 44,
                 height: 44,
-                decoration: const BoxDecoration(
-                  color: AppColors.primaryPurple,
+                padding: const EdgeInsets.all(7),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF3EFFF),
                   shape: BoxShape.circle,
+                  border: Border.all(color: AppColors.primaryPurple.withValues(alpha: 0.18), width: 1),
                 ),
-                child: const Icon(
-                  Icons.front_hand_rounded,
-                  color: Colors.white,
-                  size: 20,
+                child: Image.asset(
+                  'assets/images/say_hi_hand.png',
+                  fit: BoxFit.contain,
                 ),
               ),
             ),
+
           ],
         ),
       ),
@@ -452,3 +457,262 @@ class _EmptyTab extends StatelessWidget {
     );
   }
 }
+
+class _TeachersTab extends StatefulWidget {
+  const _TeachersTab();
+
+  @override
+  State<_TeachersTab> createState() => _TeachersTabState();
+}
+
+class _TeachersTabState extends State<_TeachersTab> {
+  List<AppUser>? _teachers;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTeachers();
+  }
+
+  Future<void> _loadTeachers() async {
+    final teachers = await TeacherService.fetchTeachers();
+    if (!mounted) return;
+    setState(() {
+      _teachers = teachers;
+      _loading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Center(
+        child: CircularProgressIndicator(
+          strokeWidth: 2.4,
+          color: AppColors.primaryPurple,
+        ),
+      );
+    }
+
+    final teachers = _teachers ?? const [];
+    if (teachers.isEmpty) {
+      return const Center(
+        child: Text(
+          'No teachers available right now.',
+          style: TextStyle(color: AppColors.textTertiary),
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadTeachers,
+      child: ListView.separated(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 24),
+        itemCount: teachers.length,
+        separatorBuilder: (_, _) => const SizedBox(height: 12),
+
+        itemBuilder: (context, i) => _TeacherCard(teacher: teachers[i]),
+      ),
+    );
+  }
+}
+
+class _TeacherCard extends StatelessWidget {
+  final AppUser teacher;
+  const _TeacherCard({required this.teacher});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => PartnerProfileScreen(initial: teacher)),
+        );
+      },
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.divider),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.03),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AppAvatar.forUser(teacher, size: 54, showFlag: true),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              teacher.name,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 16.5,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF6B47EB),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: const Text(
+                              'TEACHER',
+                              style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w800,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        teacher.detail.isNotEmpty ? teacher.detail : 'English Tutor',
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          color: AppColors.primaryPurple,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          const Icon(Icons.star_rounded, size: 15, color: Color(0xFFFFB300)),
+                          const SizedBox(width: 3),
+                          const Text(
+                            '4.9 (120+ lessons)',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            '• ${teacher.activeLabel.isNotEmpty ? teacher.activeLabel : "Active now"}',
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              color: AppColors.textTertiary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            if (teacher.bio.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Text(
+                teacher.bio,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  color: AppColors.textSecondary,
+                  height: 1.3,
+                ),
+              ),
+            ],
+            const SizedBox(height: 12),
+            const Divider(height: 1, color: AppColors.divider),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                // Say Hi Button with waving hand asset
+                GestureDetector(
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => ChatDetailScreen(user: teacher)),
+                    );
+                  },
+                  child: Container(
+                    height: 38,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF3EFFF),
+                      borderRadius: BorderRadius.circular(19),
+                      border: Border.all(
+                        color: AppColors.primaryPurple.withValues(alpha: 0.18),
+                        width: 1,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Image.asset(
+                          'assets/images/say_hi_hand.png',
+                          width: 20,
+                          height: 20,
+                        ),
+                        const SizedBox(width: 6),
+                        const Text(
+                          'Say Hi',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.primaryPurple,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                const Spacer(),
+
+                // Book Tutor Button
+                ElevatedButton.icon(
+                  onPressed: () {
+                    TeacherService.bookTutor(context, teacher: teacher);
+                  },
+                  icon: const Icon(Icons.calendar_month_rounded, size: 16),
+                  label: const Text(
+                    'Book Tutor',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF6B47EB),
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+

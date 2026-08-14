@@ -1,7 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:timeago/timeago.dart' as timeago;
 
+import '../config/api_config.dart';
 import 'user.dart';
+
 
 /// What kind of media (if any) a moment carries. Drives which layout
 /// [PostImageGrid]/[MomentCard] picks.
@@ -123,17 +125,24 @@ class Moment {
   /// document id into the map first (as `'id'`).
   factory Moment.fromJson(Map<String, dynamic> json) {
     final userMap = json['user'] as Map<String, dynamic>? ?? const {};
+    final likesList = _asStringList(json['likes']);
+    final parsedLikeCount = _asInt(json['likeCount']);
+    final effectiveLikeCount = parsedLikeCount > 0 ? parsedLikeCount : likesList.length;
+
     return Moment(
       id: json['id']?.toString() ?? '',
       user: AppUser.fromJson({...userMap, 'id': userMap['id'] ?? json['userId']}),
       text: json['text']?.toString() ?? '',
-      imageUrls: _asStringList(json['imageUrls']),
-      videoUrl: json['videoUrl']?.toString(),
-      videoThumbnailUrl: json['videoThumbnailUrl']?.toString(),
+      imageUrls: _asStringList(json['imageUrls']).map(ApiConfig.resolveUrl).toList(),
+      videoUrl: json['videoUrl'] != null ? ApiConfig.resolveUrl(json['videoUrl'].toString()) : null,
+      videoThumbnailUrl: json['videoThumbnailUrl'] != null
+          ? ApiConfig.resolveUrl(json['videoThumbnailUrl'].toString())
+          : null,
+
       mediaType: MomentMediaType.fromStorage(json['mediaType']),
-      likes: _asStringList(json['likes']),
+      likes: likesList,
       reactions: _asReactionsMap(json['reactions']),
-      likeCount: _asInt(json['likeCount']),
+      likeCount: effectiveLikeCount,
       commentCount: _asInt(json['commentCount']),
       reshareCount: _asInt(json['reshareCount']),
       reportCount: _asInt(json['reportCount']),

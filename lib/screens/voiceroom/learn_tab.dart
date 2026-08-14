@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import '../../data/mock_data.dart';
 import '../../models/learn_item.dart';
+import '../../services/teacher_service.dart';
 import '../../theme/app_colors.dart';
+
 import '../../widgets/app_avatar.dart';
 import 'english_courses_screen.dart';
 
@@ -531,7 +533,7 @@ class _TutorCard extends StatelessWidget {
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: () {},
+              onPressed: () => TeacherService.bookTutor(context, teacher: tutorToAppUser(tutor)),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFFFFE9D9),
                 foregroundColor: const Color(0xFFD9722E),
@@ -547,6 +549,7 @@ class _TutorCard extends StatelessWidget {
               ),
             ),
           ),
+
         ],
       ),
     );

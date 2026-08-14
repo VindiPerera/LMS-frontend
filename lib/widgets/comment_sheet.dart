@@ -136,14 +136,16 @@ class _CommentSheetState extends State<CommentSheet> {
         _mentionSuggestions = const [];
       });
       Future.delayed(const Duration(milliseconds: 150), _scrollToBottom);
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() => _posting = false);
+      final msg = e.toString().replaceFirst('Exception: ', '').replaceFirst('StateError: ', '');
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not post your comment. Try again.')),
+        SnackBar(content: Text(msg.isNotEmpty ? msg : 'Could not post your comment. Try again.')),
       );
     }
   }
+
 
   Future<void> _openMention(String handle) async {
     final uid = await CommentService.findUserIdByHandle(handle);
@@ -259,13 +261,66 @@ class _CommentSheetState extends State<CommentSheet> {
                       }
                       final comments = snapshot.data ?? const [];
                       if (comments.isEmpty) {
-                        return const Center(
-                          child: Text(
-                            'No comments yet. Be the first to reply!',
-                            style: TextStyle(color: AppColors.textTertiary),
+                        return Center(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 24),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.chat_bubble_outline_rounded,
+                                  size: 44,
+                                  color: AppColors.textTertiary,
+                                ),
+                                const SizedBox(height: 10),
+                                const Text(
+                                  'No comments yet',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 15,
+                                    color: AppColors.textPrimary,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                const Text(
+                                  'Be the first to post a comment!',
+                                  style: TextStyle(
+                                    color: AppColors.textTertiary,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                                const SizedBox(height: 14),
+                                OutlinedButton.icon(
+                                  onPressed: () {
+                                    _focusNode.requestFocus();
+                                  },
+                                  icon: const Icon(
+                                    Icons.edit_outlined,
+                                    size: 16,
+                                    color: AppColors.primaryPurple,
+                                  ),
+                                  label: const Text(
+                                    'Post your first comment',
+                                    style: TextStyle(
+                                      color: AppColors.primaryPurple,
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                  style: OutlinedButton.styleFrom(
+                                    side: const BorderSide(color: AppColors.primaryPurple),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         );
                       }
+
                       return ListView.builder(
                         controller: _listController,
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),

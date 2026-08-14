@@ -45,7 +45,9 @@ dependencies:
   # "Continue with Google" on non-web platforms (web uses FirebaseAuth's
   # signInWithPopup directly, no separate package needed there).
   google_sign_in: ^6.2.2
-  # Avatar picking, for Firebase Cloud Storage uploads.
+  http: ^1.2.0
+  http_parser: ^4.1.0
+  # Avatar picking, for backend and storage uploads.
   image_picker: ^1.1.2
 
   # Add Friend via QR Code: generating/rendering the code, scanning it back,

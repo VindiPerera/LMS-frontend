@@ -33,39 +33,47 @@ class ChatService {
   /// chat with the same person twice reuses one thread instead of creating
   /// duplicates.
   static String chatIdFor(String otherUid) {
-    final ids = [_uid(), otherUid]..sort();
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? 'guest_user';
+    final targetId = otherUid.isNotEmpty ? otherUid : 'target_user';
+    final ids = [uid, targetId]..sort();
     return ids.join('_');
   }
 
   /// Live list of the current user's chat threads for
   /// hellotalk/chat_list_screen.dart, newest message first.
   static Stream<List<ChatPreview>> streamChatPreviews() {
-    final uid = _uid();
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return const Stream.empty();
     return _chats
         .where('participants', arrayContains: uid)
         .orderBy('lastMessageAt', descending: true)
         .snapshots()
         .map(
           (snap) => snap.docs.map((doc) => _previewFromDoc(doc, uid)).toList(),
-        );
+        )
+        .handleError((_) => <ChatPreview>[]);
   }
 
   /// Sum of unread counts across every thread, for the bottom nav badge.
   static Stream<int> streamTotalUnread() {
-    final uid = _uid();
-    return _chats.where('participants', arrayContains: uid).snapshots().map((
-      snap,
-    ) {
-      return snap.docs.fold<int>(0, (total, doc) {
-        final unread = (doc.data()['unread'] as Map?)?[uid];
-        return total + ((unread as num?)?.toInt() ?? 0);
-      });
-    });
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return Stream.value(0);
+    return _chats
+        .where('participants', arrayContains: uid)
+        .snapshots()
+        .map((snap) {
+          return snap.docs.fold<int>(0, (total, doc) {
+            final unread = (doc.data()['unread'] as Map?)?[uid];
+            return total + ((unread as num?)?.toInt() ?? 0);
+          });
+        })
+        .handleError((_) => 0);
   }
 
   /// Live messages for one thread, oldest first, for
   /// hellotalk/chat_detail_screen.dart.
   static Stream<List<ChatMessage>> streamMessages(String chatId) {
+    if (chatId.isEmpty) return const Stream.empty();
     return _chats
         .doc(chatId)
         .collection('messages')
@@ -80,8 +88,10 @@ class ChatService {
             return aTime.compareTo(bTime);
           });
           return messages;
-        });
+        })
+        .handleError((_) => <ChatMessage>[]);
   }
+
 
   /// Sends a text message, creating or updating the thread document on contact
   /// between these two users using a WriteBatch for instant optimistic updates

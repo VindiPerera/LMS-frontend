@@ -118,25 +118,35 @@ class _CreateMomentScreenState extends State<CreateMomentScreen> {
 
   Future<void> _pickImage(ImageSource source) async {
     if (_video != null) return;
-    final file = await MediaService.pickImage(source);
-    if (file == null) return;
-    final rawBytes = await file.readAsBytes();
-    final compressed = await MediaService.compressImageBytes(rawBytes);
-    if (!mounted) return;
-    setState(() => _images.add(_ImageItem.picked(compressed)));
+    try {
+      final file = await MediaService.pickImage(source);
+      if (file == null) return;
+      final rawBytes = await file.readAsBytes();
+      final compressed = await MediaService.compressImageBytes(rawBytes);
+      if (!mounted) return;
+      setState(() => _images.add(_ImageItem.picked(compressed)));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = 'Failed to select image: $e');
+    }
   }
 
   Future<void> _pickVideo(ImageSource source) async {
     if (_images.isNotEmpty) return;
-    final file = await MediaService.pickVideo(source);
-    if (file == null) return;
+    try {
+      final file = await MediaService.pickVideo(source);
+      if (file == null) return;
 
-    if (!mounted) return;
-    setState(() => _error = null);
-    final compressed = await MediaService.compressVideo(File(file.path));
-    final thumb = await MediaService.generateVideoThumbnail(compressed.path);
-    if (!mounted) return;
-    setState(() => _video = _VideoItem.picked(file: compressed, thumbBytes: thumb));
+      if (!mounted) return;
+      setState(() => _error = null);
+      final compressed = await MediaService.compressVideo(File(file.path));
+      final thumb = await MediaService.generateVideoThumbnail(compressed.path);
+      if (!mounted) return;
+      setState(() => _video = _VideoItem.picked(file: compressed, thumbBytes: thumb));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = 'Failed to select video: $e');
+    }
   }
 
   void _removeImage(_ImageItem item) => setState(() => _images.remove(item));
@@ -303,11 +313,12 @@ class _CreateMomentScreenState extends State<CreateMomentScreen> {
         });
       }
       return true;
-    } catch (_) {
+    } catch (e) {
       if (mounted) {
         setState(() {
           item.uploading = false;
           item.failed = true;
+          _error = e.toString().replaceFirst('Exception: ', '');
         });
       }
       return false;
@@ -334,7 +345,9 @@ class _CreateMomentScreenState extends State<CreateMomentScreen> {
       );
       String? thumbUrl;
       if (video.thumbBytes != null) {
-        thumbUrl = await MediaService.uploadVideoThumbnail(bytes: video.thumbBytes!, uid: uid, postId: postId);
+        try {
+          thumbUrl = await MediaService.uploadVideoThumbnail(bytes: video.thumbBytes!, uid: uid, postId: postId);
+        } catch (_) {}
       }
       if (mounted) {
         setState(() {
@@ -344,16 +357,18 @@ class _CreateMomentScreenState extends State<CreateMomentScreen> {
         });
       }
       return true;
-    } catch (_) {
+    } catch (e) {
       if (mounted) {
         setState(() {
           video.uploading = false;
           video.failed = true;
+          _error = e.toString().replaceFirst('Exception: ', '');
         });
       }
       return false;
     }
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -500,27 +515,27 @@ class _CreateMomentScreenState extends State<CreateMomentScreen> {
         children: [
           ..._images.map((item) => _MediaThumb(
                 key: ValueKey(item.key),
-                child: item.existingUrl != null && item.bytes == null
-                    ? CachedNetworkImage(imageUrl: item.existingUrl!, fit: BoxFit.cover, width: 88, height: 88)
-                    : Image.memory(item.bytes!, fit: BoxFit.cover, width: 88, height: 88),
                 progress: item.uploading ? item.progress : null,
                 failed: item.failed,
                 onRemove: () => _removeImage(item),
                 onRetry: () => _uploadImage(item, AuthService.instance.currentUser!.id, _postId),
+                child: item.existingUrl != null && item.bytes == null
+                    ? CachedNetworkImage(imageUrl: item.existingUrl!, fit: BoxFit.cover, width: 88, height: 88)
+                    : Image.memory(item.bytes!, fit: BoxFit.cover, width: 88, height: 88),
               )),
           if (_video != null)
             _MediaThumb(
               key: const ValueKey('video'),
-              child: _video!.thumbBytes != null
-                  ? Image.memory(_video!.thumbBytes!, fit: BoxFit.cover, width: 88, height: 88)
-                  : _video!.existingThumbUrl != null
-                      ? CachedNetworkImage(imageUrl: _video!.existingThumbUrl!, fit: BoxFit.cover, width: 88, height: 88)
-                      : Container(color: Colors.black, width: 88, height: 88),
               isVideo: true,
               progress: _video!.uploading ? _video!.progress : null,
               failed: _video!.failed,
               onRemove: _removeVideo,
               onRetry: () => _uploadPendingVideo(AuthService.instance.currentUser!.id, _postId),
+              child: _video!.thumbBytes != null
+                  ? Image.memory(_video!.thumbBytes!, fit: BoxFit.cover, width: 88, height: 88)
+                  : _video!.existingThumbUrl != null
+                      ? CachedNetworkImage(imageUrl: _video!.existingThumbUrl!, fit: BoxFit.cover, width: 88, height: 88)
+                      : Container(color: Colors.black, width: 88, height: 88),
             ),
         ],
       ),

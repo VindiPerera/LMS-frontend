@@ -1,22 +1,18 @@
+import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
-import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 import 'package:video_compress/video_compress.dart';
 import 'package:video_thumbnail/video_thumbnail.dart' as vt;
 
-/// Picking, compressing, and uploading Moments media. All Storage calls
-/// live here so create_moment_screen.dart never touches
-/// firebase_storage/image_picker/video_compress directly.
-///
-/// Upload path convention: `moments/{uid}/{postId}/{uuid}.{ext}`. This lets
-/// functions/index.js's onPostDelete clean up an entire post's media with a
-/// single prefix delete instead of parsing each download URL. Because of
-/// this, [MomentService.newPostId] must be called (to pre-allocate the
-/// Firestore doc id) *before* any upload starts on the create flow.
+import '../config/api_config.dart';
+
+/// Picking, compressing, and uploading Moments media to hello-backend (persisted in MySQL).
 class MediaService {
   static const _uuid = Uuid();
   static final _picker = ImagePicker();
@@ -47,6 +43,7 @@ class MediaService {
         quality: 80,
         format: CompressFormat.jpeg,
       );
+      if (compressed.isEmpty) return bytes;
       return compressed;
     } catch (_) {
       // Compression is a nice-to-have — never block a post over it.
@@ -55,8 +52,7 @@ class MediaService {
   }
 
   /// Compresses a picked video with video_compress. Returns the original
-  /// [file] unchanged if compression fails for any reason (unmaintained
-  /// plugin — see pubspec.yaml's note on video_compress) so a post never
+  /// [file] unchanged if compression fails for any reason so a post never
   /// gets stuck just because compression didn't work on this device.
   static Future<File> compressVideo(File file) async {
     try {
@@ -73,13 +69,17 @@ class MediaService {
 
   /// First frame of [videoPath] as JPEG bytes, for the feed/thumbnail-row
   /// preview and as the `videoThumbnailUrl` upload.
-  static Future<Uint8List?> generateVideoThumbnail(String videoPath) {
-    return vt.VideoThumbnail.thumbnailData(
-      video: videoPath,
-      imageFormat: vt.ImageFormat.JPEG,
-      maxWidth: 480,
-      quality: 70,
-    );
+  static Future<Uint8List?> generateVideoThumbnail(String videoPath) async {
+    try {
+      return await vt.VideoThumbnail.thumbnailData(
+        video: videoPath,
+        imageFormat: vt.ImageFormat.JPEG,
+        maxWidth: 480,
+        quality: 70,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   // --------------------------------------------------------------------
@@ -92,10 +92,14 @@ class MediaService {
     required String postId,
     void Function(double progress)? onProgress,
   }) {
-    return _upload(
+    return _uploadToBackend(
       bytes: bytes,
-      path: 'moments/$uid/$postId/${_uuid.v4()}.jpg',
-      contentType: 'image/jpeg',
+      filename: '${_uuid.v4()}.jpg',
+      extension: 'jpg',
+      contentType: MediaType('image', 'jpeg'),
+      uid: uid,
+      postId: postId,
+      type: 'image',
       onProgress: onProgress,
     );
   }
@@ -107,10 +111,14 @@ class MediaService {
     void Function(double progress)? onProgress,
   }) async {
     final bytes = await file.readAsBytes();
-    return _upload(
+    return _uploadToBackend(
       bytes: bytes,
-      path: 'moments/$uid/$postId/${_uuid.v4()}.mp4',
-      contentType: 'video/mp4',
+      filename: '${_uuid.v4()}.mp4',
+      extension: 'mp4',
+      contentType: MediaType('video', 'mp4'),
+      uid: uid,
+      postId: postId,
+      type: 'video',
       onProgress: onProgress,
     );
   }
@@ -120,35 +128,106 @@ class MediaService {
     required String uid,
     required String postId,
   }) {
-    return _upload(
+    return _uploadToBackend(
       bytes: bytes,
-      path: 'moments/$uid/$postId/${_uuid.v4()}_thumb.jpg',
-      contentType: 'image/jpeg',
+      filename: '${_uuid.v4()}_thumb.jpg',
+      extension: 'jpg',
+      contentType: MediaType('image', 'jpeg'),
+      uid: uid,
+      postId: postId,
+      type: 'thumbnail',
     );
   }
 
-  static Future<String> _upload({
+  static Future<String> _uploadToBackend({
     required Uint8List bytes,
-    required String path,
-    required String contentType,
+    required String filename,
+    required String extension,
+    required MediaType contentType,
+    required String uid,
+    required String postId,
+    required String type,
     void Function(double progress)? onProgress,
   }) async {
-    final ref = FirebaseStorage.instance.ref(path);
-    final task = ref.putData(bytes, SettableMetadata(contentType: contentType));
+    final candidateUrls = ApiConfig.candidateUploadUrls;
+    String lastServerError = '';
 
-    final subscription = onProgress == null
-        ? null
-        : task.snapshotEvents.listen((snap) {
-            if (snap.totalBytes > 0) {
-              onProgress(snap.bytesTransferred / snap.totalBytes);
-            }
-          });
+    for (final uploadUrl in candidateUrls) {
+      // 1. Try base64 direct payload first (100% reliable across all PHP/server/temp configs)
+      try {
+        onProgress?.call(0.2);
+        final uri = Uri.parse(uploadUrl);
+        final base64String = base64Encode(bytes);
 
-    try {
-      final snapshot = await task;
-      return await snapshot.ref.getDownloadURL();
-    } finally {
-      await subscription?.cancel();
+        final response = await http.post(
+          uri,
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          body: jsonEncode({
+            'user_id': uid,
+            'post_id': postId,
+            'type': type,
+            'extension': extension,
+            'file_base64': base64String,
+          }),
+        ).timeout(const Duration(seconds: 45));
+
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          final data = jsonDecode(response.body) as Map<String, dynamic>;
+          if (data['success'] == true && data['url'] != null) {
+            onProgress?.call(1.0);
+            return data['url'] as String;
+          }
+        } else {
+          lastServerError = 'HTTP ${response.statusCode}: ${response.body}';
+          debugPrint('Base64 upload to $uploadUrl returned status ${response.statusCode}: ${response.body}');
+        }
+      } catch (e) {
+        lastServerError = e.toString();
+        debugPrint('Base64 upload to $uploadUrl failed: $e. Trying multipart...');
+      }
+
+      // 2. Fallback: Try multipart form-data upload
+      try {
+        onProgress?.call(0.5);
+        final uri = Uri.parse(uploadUrl);
+        final request = http.MultipartRequest('POST', uri);
+
+        request.fields['user_id'] = uid;
+        request.fields['post_id'] = postId;
+        request.fields['type'] = type;
+
+        final multipartFile = http.MultipartFile.fromBytes(
+          'file',
+          bytes,
+          filename: filename,
+          contentType: contentType,
+        );
+        request.files.add(multipartFile);
+
+        final streamedResponse = await request.send().timeout(const Duration(seconds: 45));
+        final response = await http.Response.fromStream(streamedResponse);
+
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          final data = jsonDecode(response.body) as Map<String, dynamic>;
+          if (data['success'] == true && data['url'] != null) {
+            onProgress?.call(1.0);
+            return data['url'] as String;
+          }
+        } else {
+          lastServerError = 'HTTP ${response.statusCode}: ${response.body}';
+          debugPrint('Multipart upload to $uploadUrl returned status ${response.statusCode}: ${response.body}');
+        }
+      } catch (e) {
+        lastServerError = e.toString();
+        debugPrint('Multipart upload to $uploadUrl failed: $e');
+      }
     }
+
+    throw Exception(
+      'Failed to upload media to backend ($candidateUrls): ${lastServerError.isNotEmpty ? lastServerError : "Server rejected file."}',
+    );
   }
 }

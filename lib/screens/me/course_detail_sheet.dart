@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import '../../data/mock_data.dart' as mock;
 import '../../models/learn_item.dart';
+import '../../services/teacher_service.dart';
 import '../../theme/app_colors.dart';
+
 import '../../widgets/app_avatar.dart';
 
 /// Bottom sheet shown when tapping Teachers / LiveClass / Idioms /
@@ -79,7 +81,7 @@ class CourseDetailSheet extends StatelessWidget {
     switch (courseName) {
       case 'Teachers':
         return _TeachersBody(
-          onBook: (name) => _comingSoon(context, name),
+          onBook: (tutor) => TeacherService.bookTutor(context, teacher: mock.tutorToAppUser(tutor)),
         );
       case 'LiveClass':
         return _LiveClassBody(
@@ -99,12 +101,13 @@ class CourseDetailSheet extends StatelessWidget {
         );
       case 'Flashcards':
         return _PackListBody(
-          subtitle: 'Quick flashcard decks to build vocabulary',
+          subtitle: 'Expand your vocabulary daily',
           packs: const [
-            WordPack(title: 'Travel Words', progress: '0/15', badge: 'New'),
-            WordPack(title: 'Food & Dining', progress: '0/12'),
-            WordPack(title: 'Numbers', progress: '0/10'),
-            WordPack(title: 'Advanced Vocabulary', progress: 'Locked', locked: true),
+            WordPack(title: 'Essential 500 Words', progress: '12/500'),
+            WordPack(title: 'Travel English', progress: '0/150', badge: 'Popular'),
+            WordPack(title: 'Food & Dining', progress: '0/120'),
+            WordPack(title: 'Business Basics', progress: 'Locked', locked: true),
+            WordPack(title: 'Academic Words', progress: 'Locked', locked: true),
           ],
           onTapPack: (title) => _comingSoon(context, title),
         );
@@ -120,7 +123,7 @@ class CourseDetailSheet extends StatelessWidget {
 }
 
 class _TeachersBody extends StatelessWidget {
-  final ValueChanged<String> onBook;
+  final ValueChanged<Tutor> onBook;
   const _TeachersBody({required this.onBook});
 
   @override
@@ -138,7 +141,7 @@ class _TeachersBody extends StatelessWidget {
         final tutor = mock.speakingTutors[i];
         return _TutorTile(
           tutor: tutor,
-          onBook: () => onBook('Book ${tutor.name}'),
+          onBook: () => onBook(tutor),
         );
       },
     );

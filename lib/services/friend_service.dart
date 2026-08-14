@@ -193,9 +193,7 @@ class FriendService {
   }
 
   /// uids of everyone with an active `friends` friendship with the current
-  /// user. Used by MomentsScreen to resolve `visibility: "friends"` posts
-  /// client-side (Firestore can't express that OR across a joined
-  /// collection in a single query).
+  /// user.
   Stream<Set<String>> streamFriendIds() {
     final uid = _currentUid;
     if (uid == null || uid.isEmpty) return Stream.value(const <String>{});
@@ -208,6 +206,25 @@ class FriendService {
             .map((d) => _otherParticipant(d.data(), uid))
             .where((id) => id.isNotEmpty)
             .toSet());
+  }
+
+  /// One-time fetch of [streamFriendIds]'s current value. Used by
+  /// MomentService to snapshot the owner's friend list into a moment's
+  /// `audience` field when a `friends`-visibility post is created/edited —
+  /// a stream would outlive the write it's needed for, and MomentService
+  /// has no widget lifecycle to tie a subscription to.
+  Future<Set<String>> getFriendIds() async {
+    final uid = _currentUid;
+    if (uid == null || uid.isEmpty) return const <String>{};
+    final snap = await _firestore
+        .collection('friendships')
+        .where('userIds', arrayContains: uid)
+        .get();
+    return snap.docs
+        .where((d) => d.data()['status'] == 'friends')
+        .map((d) => _otherParticipant(d.data(), uid))
+        .where((id) => id.isNotEmpty)
+        .toSet();
   }
 
   /// uids the current user is in a `blocked` friendship with (either

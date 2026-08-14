@@ -51,31 +51,72 @@ class CommentService {
     String? parentCommentId,
   }) async {
     if (postId.isEmpty) return;
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    final currentUser = AuthService.instance.currentUser;
+    final firebaseUser = FirebaseAuth.instance.currentUser;
     final cleanText = text.trim();
-    if (uid == null || currentUser == null || cleanText.isEmpty) return;
+    if (firebaseUser == null || cleanText.isEmpty) {
+      throw StateError('You must be signed in to post a comment.');
+    }
+    final uid = firebaseUser.uid;
+
+
+    var currentUser = AuthService.instance.currentUser;
+    currentUser ??= await AuthService.instance.refreshCurrentUser();
+
+    final userDisplayName = firebaseUser.displayName;
+    final userEmail = firebaseUser.email;
+    final userPhoto = firebaseUser.photoURL;
+
+    final userName = (currentUser != null && currentUser.name.isNotEmpty)
+        ? currentUser.name
+        : (userDisplayName != null && userDisplayName.isNotEmpty)
+            ? userDisplayName
+            : (userEmail != null && userEmail.isNotEmpty)
+                ? userEmail.split('@').first
+                : 'User';
+    final userAvatar = currentUser?.avatarUrl ?? userPhoto ?? '';
+
 
     final mentionedUserIds = await _resolveMentions(cleanText);
 
     final comment = CommentModel(
       userId: uid,
-      userName: currentUser.name,
-      userAvatar: currentUser.avatarUrl,
+      userName: userName,
+      userAvatar: userAvatar,
       text: cleanText,
       parentCommentId: parentCommentId,
       mentionedUserIds: mentionedUserIds,
     );
 
-    await _comments(postId).add(comment.toMap());
+    final batch = FirebaseFirestore.instance.batch();
+    final newCommentRef = _comments(postId).doc();
+    batch.set(newCommentRef, comment.toMap());
+
+    final postRef = FirebaseFirestore.instance.collection('moments').doc(postId);
+    batch.update(postRef, {
+      'commentCount': FieldValue.increment(1),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    await batch.commit();
   }
+
 
   static Future<void> deleteComment({
     required String postId,
     required String commentId,
   }) async {
     if (postId.isEmpty || commentId.isEmpty) return;
-    await _comments(postId).doc(commentId).delete();
+    final batch = FirebaseFirestore.instance.batch();
+    final commentRef = _comments(postId).doc(commentId);
+    batch.delete(commentRef);
+
+    final postRef = FirebaseFirestore.instance.collection('moments').doc(postId);
+    batch.update(postRef, {
+      'commentCount': FieldValue.increment(-1),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    await batch.commit();
   }
 
   /// Prefix search over `users.handle`, for the "@username" typeahead in

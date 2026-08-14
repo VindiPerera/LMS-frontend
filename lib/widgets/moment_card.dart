@@ -97,13 +97,16 @@ class _MomentCardState extends State<MomentCard> {
   @override
   void didUpdateWidget(covariant MomentCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // A newer snapshot from the feed stream should win over our optimistic
-    // local copy once it arrives (e.g. commentCount catching up after the
-    // Cloud Function runs).
-    if (oldWidget.moment.updatedAt != widget.moment.updatedAt ||
+    if (oldWidget.moment.id != widget.moment.id ||
+        oldWidget.moment.updatedAt != widget.moment.updatedAt ||
+        oldWidget.moment.likeCount != widget.moment.likeCount ||
         oldWidget.moment.commentCount != widget.moment.commentCount ||
-        oldWidget.moment.reshareCount != widget.moment.reshareCount) {
-      _moment = widget.moment;
+        oldWidget.moment.reshareCount != widget.moment.reshareCount ||
+        oldWidget.moment.likes.length != widget.moment.likes.length ||
+        oldWidget.moment.reactions != widget.moment.reactions) {
+      setState(() {
+        _moment = widget.moment;
+      });
     }
   }
 
@@ -111,6 +114,7 @@ class _MomentCardState extends State<MomentCard> {
     final uid = _uid;
     if (uid == null) return;
     final wasLiked = _moment.isLikedBy(uid);
+    final prevMoment = _moment;
 
     setState(() {
       final likes = List<String>.from(_moment.likes);
@@ -130,12 +134,18 @@ class _MomentCardState extends State<MomentCard> {
     });
 
     HapticFeedback.lightImpact();
-    MomentService.toggleLike(postId: _moment.id, uid: uid);
+    MomentService.toggleLike(postId: _moment.id, uid: uid).catchError((e) {
+      debugPrint('Error toggling like: $e');
+      if (mounted) {
+        setState(() => _moment = prevMoment);
+      }
+    });
   }
 
   void _setReaction(String emoji) {
     final uid = _uid;
     if (uid == null) return;
+    final prevMoment = _moment;
 
     setState(() {
       final likes = List<String>.from(_moment.likes);
@@ -158,7 +168,12 @@ class _MomentCardState extends State<MomentCard> {
       _moment = _moment.copyWith(likes: likes, reactions: reactions, likeCount: likes.length);
     });
 
-    MomentService.setReaction(postId: _moment.id, uid: uid, emoji: emoji);
+    MomentService.setReaction(postId: _moment.id, uid: uid, emoji: emoji).catchError((e) {
+      debugPrint('Error setting reaction: $e');
+      if (mounted) {
+        setState(() => _moment = prevMoment);
+      }
+    });
   }
 
   Map<String, List<String>> _cloneReactions() =>

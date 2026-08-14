@@ -123,19 +123,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             child: StreamBuilder<List<ChatMessage>>(
               stream: _messagesStream,
               builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 32),
-                      child: Text(
-                        'Could not load messages: ${snapshot.error}',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(color: AppColors.textTertiary),
-                      ),
-                    ),
-                  );
-                }
-                if (!snapshot.hasData) {
+                if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
                   return const Center(
                     child: CircularProgressIndicator(
                       strokeWidth: 2.4,
@@ -144,15 +132,50 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   );
                 }
 
-                final messages = snapshot.data!;
+                final messages = snapshot.data ?? const [];
                 if (messages.isEmpty) {
                   return Center(
-                    child: Text(
-                      'Say hi to ${widget.user.name} 👋',
-                      style: const TextStyle(color: AppColors.textTertiary),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 68,
+                            height: 68,
+                            padding: const EdgeInsets.all(12),
+                            decoration: const BoxDecoration(
+                              color: Color(0xFFF3EFFF),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Image.asset(
+                              'assets/images/say_hi_hand.png',
+                              fit: BoxFit.contain,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'Say hi to ${widget.user.name} 👋',
+                            style: const TextStyle(
+                              color: AppColors.textPrimary,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 16,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          const Text(
+                            'Start practicing languages and chat together!',
+                            style: TextStyle(
+                              color: AppColors.textTertiary,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   );
                 }
+
 
                 _scrollToBottom();
                 return ListView.builder(

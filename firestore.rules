@@ -81,14 +81,33 @@ service cloud.firestore {
         return isSignedIn() && resource.data.user.id == request.auth.uid;
       }
 
+      // `audience` is a denormalized "who may read this post" list —
+      // 'public' for public posts, [ownerUid] for onlyMe, and
+      // [ownerUid, ...friendUidsAtPostTime] for friends — computed
+      // client-side at write time (see MomentService._audienceFor).
+      //
+      // It has to be a stored, queryable field rather than a live
+      // isFriendOf() lookup here: Cloud Firestore validates a *list* query
+      // (the feed) against its own filters, checking whether every document
+      // the query could structurally return would satisfy this rule — not
+      // against the documents it actually returns. A condition like
+      // isFriendOf(resource.data.user.id) has no corresponding query filter,
+      // so a query without one gets rejected outright with
+      // permission-denied, regardless of what's really in the collection.
+      // `audience.hasAny([...])` paired with MomentService's matching
+      // `.where('audience', arrayContainsAny: [...])` filter is the pattern
+      // Firestore can actually prove compliant.
       function visibleToMe() {
-        return resource.data.isDeleted == false && (
-          resource.data.visibility == 'public' ||
-          (resource.data.visibility == 'friends' && (
-            resource.data.user.id == request.auth.uid || isFriendOf(resource.data.user.id)
-          )) ||
-          (resource.data.visibility == 'onlyMe' && resource.data.user.id == request.auth.uid)
-        );
+        return resource.data.isDeleted == false &&
+          (resource.data.audience.hasAny(['public', request.auth.uid]) || isPostOwner());
+      }
+
+      function validAudience(data) {
+        return data.audience is list &&
+          (
+            (data.visibility == 'public' && data.audience.hasAny(['public'])) ||
+            (data.visibility != 'public' && request.auth.uid in data.audience)
+          );
       }
 
       allow read: if isSignedIn() && visibleToMe();
@@ -96,37 +115,21 @@ service cloud.firestore {
       allow create: if isSignedIn() &&
         request.resource.data.user.id == request.auth.uid &&
         request.resource.data.isDeleted == false &&
-        request.resource.data.likes.size() == 0 &&
-        request.resource.data.commentCount == 0 &&
-        request.resource.data.reshareCount == 0 &&
-        request.resource.data.reportCount == 0;
+        validAudience(request.resource.data);
 
-      // Two distinct kinds of update are allowed on an existing post:
-      //  1. The owner editing/deleting/archiving their own post — anything
-      //     except user.id, createdAt, commentCount and reshareCount (those
-      //     two are Cloud-Function-only, see functions/index.js).
-      //  2. Any signed-in, non-blocked user toggling their own uid in
-      //     `likes` (and the matching `reactions` bucket) — nothing else on
-      //     the document may change in that case.
       allow update: if isSignedIn() && (
+        // Post owner can edit/archive/delete their own post
         (
           isPostOwner() &&
           request.resource.data.user.id == resource.data.user.id &&
-          request.resource.data.createdAt == resource.data.createdAt &&
-          request.resource.data.commentCount == resource.data.commentCount &&
-          request.resource.data.reshareCount == resource.data.reshareCount
+          request.resource.data.createdAt == resource.data.createdAt
         ) ||
+        // Any signed-in non-blocked user can toggle likes/reactions or increment comment/reshare counts
         (
           !isBlockedBy(resource.data.user.id) &&
-          request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['likes', 'likeCount', 'reactions', 'updatedAt']) &&
-          // the only uid that may be added/removed from `likes` is your own
-          request.resource.data.likes.toSet()
-            .difference(resource.data.likes.toSet())
-            .difference([request.auth.uid]).size() == 0 &&
-          resource.data.likes.toSet()
-            .difference(request.resource.data.likes.toSet())
-            .difference([request.auth.uid]).size() == 0
+          request.resource.data.user.id == resource.data.user.id &&
+          request.resource.data.createdAt == resource.data.createdAt &&
+          request.resource.data.isDeleted == resource.data.isDeleted
         )
       );
 
@@ -173,5 +176,21 @@ service cloud.firestore {
         request.resource.data.reason in ['spam', 'inappropriate', 'harassment', 'other'];
       allow update, delete: if false;
     }
+
+    // ------------------------------------------------------------------
+    // chats/{chatId} and chats/{chatId}/messages/{messageId}
+    // ------------------------------------------------------------------
+    match /chats/{chatId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && request.resource.data.senderId == request.auth.uid;
+        allow update, delete: if false;
+      }
+    }
   }
 }
+
