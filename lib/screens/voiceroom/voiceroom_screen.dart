@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../data/mock_data.dart';
 import '../../models/voiceroom.dart';
+import '../../services/auth_service.dart';
 import '../../theme/app_colors.dart';
-import '../../widgets/app_avatar.dart';
 import 'live_tab.dart';
 import 'learn_tab.dart';
 import 'voice_room_detail_screen.dart';
@@ -26,6 +26,8 @@ class _VoiceroomScreenState extends State<VoiceroomScreen>
   ];
   int _categoryIndex = 0;
 
+  final List<VoiceRoom> _rooms = List.from(mockVoiceRooms);
+
   @override
   void initState() {
     super.initState();
@@ -38,9 +40,131 @@ class _VoiceroomScreenState extends State<VoiceroomScreen>
     super.dispose();
   }
 
+  List<VoiceRoom> get _filteredRooms {
+    if (_categoryIndex == 0) return _rooms;
+    final cat = _categories[_categoryIndex].toLowerCase();
+    return _rooms.where((r) {
+      return r.category.toLowerCase().contains(cat.substring(0, 2)) ||
+          r.title.toLowerCase().contains(cat) ||
+          r.tag.toLowerCase().contains(cat);
+    }).toList();
+  }
+
+  void _openCreateRoomSheet() {
+    final titleController = TextEditingController();
+    final tagController = TextEditingController();
+    final activeUser = AuthService.instance.currentUser ?? currentUser;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+            left: 20,
+            right: 20,
+            top: 20,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  const Text(
+                    'Create a VoiceRoom',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 17,
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: titleController,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  labelText: 'Room Topic / Title',
+                  hintText: 'e.g. Free Talk & Practice English',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: tagController,
+                decoration: const InputDecoration(
+                  labelText: 'Tag (Optional)',
+                  hintText: 'e.g. Beginner Friendly',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 18),
+              ElevatedButton(
+                onPressed: () {
+                  final title = titleController.text.trim();
+                  if (title.isEmpty) return;
+                  final newRoom = VoiceRoom(
+                    title: title,
+                    hostName: activeUser.name,
+                    hostAvatar: activeUser.avatarUrl,
+                    hostFlag: activeUser.countryFlag,
+                    category: 'EN',
+                    tag: tagController.text.trim().isEmpty
+                        ? 'General'
+                        : tagController.text.trim(),
+                    participantCount: 1,
+                    coverGradientSeed: 'a',
+                    isCreator: true,
+                  );
+                  setState(() {
+                    _rooms.insert(0, newRoom);
+                  });
+                  Navigator.of(context).pop();
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => VoiceRoomDetailScreen(room: newRoom),
+                    ),
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primaryPurple,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                ),
+                child: const Text(
+                  'Start Room Now',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      floatingActionButton: FloatingActionButton(
+        onPressed: _openCreateRoomSheet,
+        backgroundColor: AppColors.primaryPurple,
+        child: const Icon(Icons.add_rounded, size: 28),
+      ),
       appBar: AppBar(
         automaticallyImplyLeading: false,
         titleSpacing: 12,
@@ -52,50 +176,51 @@ class _VoiceroomScreenState extends State<VoiceroomScreen>
                 color: AppColors.vipGold.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(14),
               ),
-              child: Row(
-                children: const [
+              child: const Row(
+                children: [
                   Text(
                     'VIP',
                     style: TextStyle(
                       color: AppColors.vipGold,
                       fontWeight: FontWeight.w800,
-                      fontSize: 12,
+                      fontSize: 12.5,
                     ),
+                  ),
+                  SizedBox(width: 4),
+                  Icon(
+                    Icons.workspace_premium_rounded,
+                    size: 14,
+                    color: AppColors.vipGold,
                   ),
                 ],
               ),
             ),
-            const Spacer(),
-            TabBar(
-              controller: _tabController,
-              isScrollable: true,
-              indicatorColor: Colors.transparent,
-              labelColor: AppColors.textPrimary,
-              unselectedLabelColor: AppColors.textSecondary,
-              labelStyle: const TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 15,
+            const SizedBox(width: 14),
+            Expanded(
+              child: TabBar(
+                controller: _tabController,
+                indicatorColor: AppColors.primaryPurple,
+                labelColor: AppColors.textPrimary,
+                unselectedLabelColor: AppColors.textTertiary,
+                labelStyle: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 16,
+                ),
+                dividerColor: Colors.transparent,
+                tabs: const [
+                  Tab(text: 'Voice'),
+                  Tab(text: 'Live'),
+                  Tab(text: 'Learn'),
+                ],
               ),
-              unselectedLabelStyle: const TextStyle(
-                fontWeight: FontWeight.w400,
-                fontSize: 15,
-              ),
-              dividerColor: Colors.transparent,
-              tabAlignment: TabAlignment.center,
-              tabs: const [
-                Tab(text: 'Voice'),
-                Tab(text: 'Live'),
-                Tab(text: 'Learn'),
-              ],
             ),
-            const Spacer(),
           ],
         ),
         actions: [
           Container(
             margin: const EdgeInsets.only(right: 12),
             child: ElevatedButton.icon(
-              onPressed: () {},
+              onPressed: _openCreateRoomSheet,
               icon: const Icon(Icons.mic_rounded, size: 16),
               label: const Text(
                 'Start',
@@ -103,6 +228,7 @@ class _VoiceroomScreenState extends State<VoiceroomScreen>
               ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primaryPurple,
+                foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(20),
                 ),
@@ -155,7 +281,7 @@ class _VoiceroomScreenState extends State<VoiceroomScreen>
                 child: TabBarView(
                   controller: _tabController,
                   children: [
-                    _VoiceRoomFeed(rooms: mockVoiceRooms),
+                    _VoiceRoomFeed(rooms: _filteredRooms),
                     const LiveTab(),
                     const LearnTab(),
                   ],
@@ -195,42 +321,38 @@ class _WorldCupBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 130,
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
+        color: const Color(0xFFEFEFF4),
         borderRadius: BorderRadius.circular(16),
-        gradient: const LinearGradient(
-          colors: [Color(0xFF1E8449), Color(0xFF27AE60)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
       ),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
+      child: Row(
         children: [
           const Text(
-            'FaceTalk World Cup',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 20,
-              fontWeight: FontWeight.w800,
-            ),
+            '⚽',
+            style: TextStyle(fontSize: 24),
           ),
-          const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.25),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: const Text(
-              'Join the Battle',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-              ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
+                Text(
+                  'FIFA World Cup VoiceRoom',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                  ),
+                ),
+                SizedBox(height: 2),
+                Text(
+                  'Join global football fans to talk & practice live',
+                  style: TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -243,191 +365,103 @@ class _VoiceRoomCard extends StatelessWidget {
   final VoiceRoom room;
   const _VoiceRoomCard({required this.room});
 
-  static const _gradients = {
-    'a': [Color(0xFF2C2360), Color(0xFF120F2E)],
-    'b': [Color(0xFF3A2E6B), Color(0xFF1A1740)],
-    'c': [Color(0xFF6B2E4A), Color(0xFF241026)],
-    'd': [Color(0xFF1D3E6B), Color(0xFF0E1F3B)],
-    'e': [Color(0xFF2C4770), Color(0xFF15243F)],
-  };
-
   @override
   Widget build(BuildContext context) {
-    final colors = _gradients[room.coverGradientSeed] ?? _gradients['a']!;
     return InkWell(
-      borderRadius: BorderRadius.circular(16),
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => VoiceRoomDetailScreen(room: room)),
-      ),
+      onTap: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => VoiceRoomDetailScreen(room: room),
+          ),
+        );
+      },
+      borderRadius: BorderRadius.circular(18),
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          gradient: LinearGradient(
-            colors: colors,
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                _pill(room.category, Colors.white24, Colors.white),
-                const SizedBox(width: 6),
-                _pill(
-                  '# ${room.tag}',
-                  AppColors.primaryPurple.withValues(alpha: 0.25),
-                  AppColors.primaryPurple.withValues(alpha: 0.9),
-                ),
-                const Spacer(),
-                if (room.isTop)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 3,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppColors.vipGold,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: const Text(
-                      'Top 1',
-                      style: TextStyle(
-                        fontSize: 9.5,
-                        fontWeight: FontWeight.w800,
-                        color: Colors.black,
-                      ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.primaryPurple.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    room.tag,
+                    style: const TextStyle(
+                      color: AppColors.primaryPurple,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 11.5,
                     ),
                   ),
+                ),
+                const Spacer(),
+                const Icon(
+                  Icons.equalizer_rounded,
+                  size: 16,
+                  color: AppColors.online,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  '${room.participantCount} online',
+                  style: const TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 10),
-            Row(
-              children: [
-                const Icon(
-                  Icons.graphic_eq_rounded,
-                  color: Colors.white70,
-                  size: 18,
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    room.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 15.5,
-                    ),
-                  ),
-                ),
-              ],
+            Text(
+              room.title,
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 15.5,
+                color: AppColors.textPrimary,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
             ),
             const SizedBox(height: 12),
             Row(
               children: [
-                AppAvatar(
-                  seed: room.hostName,
-                  size: 30,
-                  showFlag: true,
-                  flag: room.hostFlag,
+                CircleAvatar(
+                  radius: 14,
+                  backgroundImage: NetworkImage(room.hostAvatar),
+                  child: Text(room.hostName.isEmpty ? 'H' : room.hostName[0]),
                 ),
                 const SizedBox(width: 8),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        room.hostName,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      if (room.isCreator)
-                        Container(
-                          margin: const EdgeInsets.only(top: 2),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 5,
-                            vertical: 1,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppColors.badgePink,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: const Text(
-                            'Creator',
-                            style: TextStyle(
-                              fontSize: 8.5,
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                SizedBox(
-                  width: 92,
-                  height: 24,
-                  child: Stack(
-                    children: List.generate(4, (i) {
-                      return Positioned(
-                        left: i * 18.0,
-                        child: AppAvatar(
-                          seed: '${room.hostName}$i',
-                          size: 24,
-                          borderWidth: 2,
-                          borderColor: colors.last,
-                        ),
-                      );
-                    }),
+                Text(
+                  room.hostName,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textSecondary,
                   ),
                 ),
                 const SizedBox(width: 4),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    '${room.participantCount}',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
+                Text(room.hostFlag, style: const TextStyle(fontSize: 12)),
               ],
             ),
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _pill(String text, Color bg, Color fg) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: 10.5,
-          color: fg,
-          fontWeight: FontWeight.w700,
         ),
       ),
     );

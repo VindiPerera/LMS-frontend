@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
-import '../../data/mock_data.dart';
 import '../../models/user.dart';
+import '../../services/partner_service.dart';
+import '../../services/teacher_service.dart';
 import '../../theme/app_colors.dart';
+
 import '../../widgets/app_avatar.dart';
+import '../hellotalk/add_contact_screen.dart';
+import '../hellotalk/chat_detail_screen.dart';
+import 'partner_profile_screen.dart';
 
 class ConnectScreen extends StatefulWidget {
   const ConnectScreen({super.key});
@@ -11,15 +16,32 @@ class ConnectScreen extends StatefulWidget {
   State<ConnectScreen> createState() => _ConnectScreenState();
 }
 
-class _ConnectScreenState extends State<ConnectScreen> with SingleTickerProviderStateMixin {
+class _ConnectScreenState extends State<ConnectScreen>
+    with SingleTickerProviderStateMixin {
   late final TabController _tabController;
   final _filters = const ['Recommended', 'Nearby', 'New Users', 'Same City'];
   int _filterIndex = 0;
+
+  List<AppUser>? _partners;
+  String? _error;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    _loadPartners();
+  }
+
+  Future<void> _loadPartners() async {
+    setState(() => _error = null);
+    try {
+      final partners = await PartnerService.fetchPartners();
+      if (!mounted) return;
+      setState(() => _partners = partners);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _partners = []);
+    }
   }
 
   @override
@@ -35,19 +57,28 @@ class _ConnectScreenState extends State<ConnectScreen> with SingleTickerProvider
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('Add Friends', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 19)),
+            const Text(
+              'Add Friends',
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 19),
+            ),
             const SizedBox(width: 6),
             IconButton(
               icon: const Icon(Icons.add_rounded, size: 20),
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(),
-              onPressed: () {},
+              onPressed: () => AddContactScreen.show(context),
             ),
           ],
         ),
         actions: [
-          IconButton(icon: const Icon(Icons.tune_rounded), onPressed: () {}),
-          IconButton(icon: const Icon(Icons.search_rounded), onPressed: () {}),
+          IconButton(
+            icon: const Icon(Icons.tune_rounded),
+            onPressed: () => AddContactScreen.show(context),
+          ),
+          IconButton(
+            icon: const Icon(Icons.search_rounded),
+            onPressed: () => AddContactScreen.show(context),
+          ),
         ],
         bottom: TabBar(
           controller: _tabController,
@@ -55,7 +86,10 @@ class _ConnectScreenState extends State<ConnectScreen> with SingleTickerProvider
           indicatorColor: AppColors.primaryPurple,
           labelColor: AppColors.primaryPurple,
           unselectedLabelColor: AppColors.textSecondary,
-          labelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5),
+          labelStyle: const TextStyle(
+            fontWeight: FontWeight.w600,
+            fontSize: 14.5,
+          ),
           tabAlignment: TabAlignment.start,
           tabs: const [
             Tab(text: 'Partners'),
@@ -67,21 +101,39 @@ class _ConnectScreenState extends State<ConnectScreen> with SingleTickerProvider
       body: TabBarView(
         controller: _tabController,
         children: [
-          _PartnersTab(filters: _filters, filterIndex: _filterIndex, onFilter: (i) => setState(() => _filterIndex = i)),
+          _PartnersTab(
+            filters: _filters,
+            filterIndex: _filterIndex,
+            onFilter: (i) => setState(() => _filterIndex = i),
+            partners: _partners,
+            error: _error,
+            onRetry: _loadPartners,
+          ),
           const _EmptyTab(icon: Icons.groups_rounded, label: 'No groups yet'),
-          const _EmptyTab(icon: Icons.school_rounded, label: 'No teachers yet'),
+          const _TeachersTab(),
         ],
       ),
     );
   }
 }
 
+
 class _PartnersTab extends StatelessWidget {
   final List<String> filters;
   final int filterIndex;
   final ValueChanged<int> onFilter;
+  final List<AppUser>? partners;
+  final String? error;
+  final VoidCallback onRetry;
 
-  const _PartnersTab({required this.filters, required this.filterIndex, required this.onFilter});
+  const _PartnersTab({
+    required this.filters,
+    required this.filterIndex,
+    required this.onFilter,
+    required this.partners,
+    required this.error,
+    required this.onRetry,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -109,20 +161,73 @@ class _PartnersTab extends StatelessWidget {
                 backgroundColor: AppColors.surfaceLight,
                 selectedColor: AppColors.primaryPurple,
                 side: BorderSide.none,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
               );
             },
           ),
         ),
-        Expanded(
-          child: ListView.separated(
-            padding: const EdgeInsets.fromLTRB(14, 6, 14, 16),
-            itemCount: mockUsers.length,
-            separatorBuilder: (context, i) => const Divider(height: 1, color: AppColors.divider),
-            itemBuilder: (context, i) => _PartnerListTile(user: mockUsers[i]),
-          ),
-        ),
+        Expanded(child: _buildBody()),
       ],
+    );
+  }
+
+  Widget _buildBody() {
+    if (error != null) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.cloud_off_rounded,
+              size: 42,
+              color: AppColors.textTertiary,
+            ),
+            const SizedBox(height: 10),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Text(
+                error!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: AppColors.textTertiary),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextButton(onPressed: onRetry, child: const Text('Retry')),
+          ],
+        ),
+      );
+    }
+
+    final users = partners;
+    if (users == null) {
+      return const Center(
+        child: CircularProgressIndicator(
+          strokeWidth: 2.4,
+          color: AppColors.primaryPurple,
+        ),
+      );
+    }
+
+    if (users.isEmpty) {
+      return const Center(
+        child: Text(
+          'No partners yet — check back soon!',
+          style: TextStyle(color: AppColors.textTertiary),
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: () async => onRetry(),
+      child: ListView.separated(
+        padding: const EdgeInsets.fromLTRB(14, 6, 14, 16),
+        itemCount: users.length,
+        separatorBuilder: (context, i) =>
+            const Divider(height: 1, color: AppColors.divider),
+        itemBuilder: (context, i) => _PartnerListTile(user: users[i]),
+      ),
     );
   }
 }
@@ -131,103 +236,163 @@ class _PartnerListTile extends StatelessWidget {
   final AppUser user;
   const _PartnerListTile({required this.user});
 
+  void _openProfile(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => PartnerProfileScreen(initial: user)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Column(
-            children: [
-              AppAvatar.forUser(user, size: 60, showFlag: true),
-              const SizedBox(height: 6),
-              if (user.activeLabel.isNotEmpty)
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (user.isOnline) ...[
-                      Container(
-                        width: 6,
-                        height: 6,
-                        decoration: const BoxDecoration(color: AppColors.online, shape: BoxShape.circle),
-                      ),
-                      const SizedBox(width: 3),
-                    ],
-                    Flexible(
-                      child: Text(
-                        user.activeLabel,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 10, color: AppColors.textTertiary),
-                      ),
-                    ),
-                  ],
-                ),
-            ],
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+    return InkWell(
+      onTap: () => _openProfile(context),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Column(
               children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        user.name,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16.5),
-                      ),
-                    ),
-                    if (user.isVip) ...[
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(color: AppColors.vipGold, borderRadius: BorderRadius.circular(6)),
-                        child: const Text('VIP', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: Colors.black)),
+                AppAvatar.forUser(user, size: 60, showFlag: true),
+                const SizedBox(height: 6),
+                if (user.activeLabel.isNotEmpty)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (user.isOnline) ...[
+                        Container(
+                          width: 6,
+                          height: 6,
+                          decoration: const BoxDecoration(
+                            color: AppColors.online,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 3),
+                      ],
+                      Flexible(
+                        child: Text(
+                          user.activeLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 10,
+                            color: AppColors.textTertiary,
+                          ),
+                        ),
                       ),
                     ],
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    _langPill(user.nativeLang.substring(0, 2).toUpperCase(), AppColors.perfectGreen),
-                    const SizedBox(width: 6),
-                    const Icon(Icons.sync_alt_rounded, size: 13, color: AppColors.textTertiary),
-                    const SizedBox(width: 6),
-                    _langPill(user.learningLang.substring(0, 2).toUpperCase(), AppColors.primaryPurple, dotted: true),
-                  ],
-                ),
-                if (user.bio.isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  Text(
-                    user.bio,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 13, color: AppColors.textSecondary, height: 1.3),
                   ),
-                ],
-                if (user.tags.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: user.tags.map((t) => _tagChip(t)).toList(),
-                  ),
-                ],
               ],
             ),
-          ),
-          const SizedBox(width: 8),
-          Container(
-            width: 44,
-            height: 44,
-            decoration: const BoxDecoration(color: AppColors.primaryPurple, shape: BoxShape.circle),
-            child: const Icon(Icons.front_hand_rounded, color: Colors.white, size: 20),
-          ),
-        ],
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          user.name,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 16.5,
+                          ),
+                        ),
+                      ),
+                      if (user.isVip) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.vipGold,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Text(
+                            'VIP',
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.black,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      _langPill(
+                        user.nativeLang.languageCode,
+                        AppColors.perfectGreen,
+                      ),
+                      const SizedBox(width: 6),
+                      const Icon(
+                        Icons.sync_alt_rounded,
+                        size: 13,
+                        color: AppColors.textTertiary,
+                      ),
+                      const SizedBox(width: 6),
+                      _langPill(
+                        user.learningLang.languageCode,
+                        AppColors.primaryPurple,
+                        dotted: true,
+                      ),
+                    ],
+                  ),
+                  if (user.bio.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      user.bio,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: AppColors.textSecondary,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+                  if (user.tags.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: user.tags.map((t) => _tagChip(t)).toList(),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => ChatDetailScreen(user: user)),
+              ),
+              child: Container(
+                width: 44,
+                height: 44,
+                padding: const EdgeInsets.all(7),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF3EFFF),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppColors.primaryPurple.withValues(alpha: 0.18), width: 1),
+                ),
+                child: Image.asset(
+                  'assets/images/say_hi_hand.png',
+                  fit: BoxFit.contain,
+                ),
+              ),
+            ),
+
+          ],
+        ),
       ),
     );
   }
@@ -239,12 +404,20 @@ class _PartnerListTile extends StatelessWidget {
         border: Border.all(color: color, width: 1),
         borderRadius: BorderRadius.circular(4),
       ),
-      child: Text(text, style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.w800)),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 10,
+          color: color,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
     );
   }
 
   Widget _tagChip(String text) {
-    final isHighlight = text.contains('both like') || text == 'New' || text == 'Free to Chat';
+    final isHighlight =
+        text.contains('both like') || text == 'New' || text == 'Free to Chat';
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
@@ -255,7 +428,9 @@ class _PartnerListTile extends StatelessWidget {
         text,
         style: TextStyle(
           fontSize: 11.5,
-          color: isHighlight ? const Color(0xFFD9722E) : AppColors.textSecondary,
+          color: isHighlight
+              ? const Color(0xFFD9722E)
+              : AppColors.textSecondary,
           fontWeight: FontWeight.w600,
         ),
       ),
@@ -282,3 +457,262 @@ class _EmptyTab extends StatelessWidget {
     );
   }
 }
+
+class _TeachersTab extends StatefulWidget {
+  const _TeachersTab();
+
+  @override
+  State<_TeachersTab> createState() => _TeachersTabState();
+}
+
+class _TeachersTabState extends State<_TeachersTab> {
+  List<AppUser>? _teachers;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTeachers();
+  }
+
+  Future<void> _loadTeachers() async {
+    final teachers = await TeacherService.fetchTeachers();
+    if (!mounted) return;
+    setState(() {
+      _teachers = teachers;
+      _loading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Center(
+        child: CircularProgressIndicator(
+          strokeWidth: 2.4,
+          color: AppColors.primaryPurple,
+        ),
+      );
+    }
+
+    final teachers = _teachers ?? const [];
+    if (teachers.isEmpty) {
+      return const Center(
+        child: Text(
+          'No teachers available right now.',
+          style: TextStyle(color: AppColors.textTertiary),
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadTeachers,
+      child: ListView.separated(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 24),
+        itemCount: teachers.length,
+        separatorBuilder: (_, _) => const SizedBox(height: 12),
+
+        itemBuilder: (context, i) => _TeacherCard(teacher: teachers[i]),
+      ),
+    );
+  }
+}
+
+class _TeacherCard extends StatelessWidget {
+  final AppUser teacher;
+  const _TeacherCard({required this.teacher});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => PartnerProfileScreen(initial: teacher)),
+        );
+      },
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.divider),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.03),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AppAvatar.forUser(teacher, size: 54, showFlag: true),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              teacher.name,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 16.5,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF6B47EB),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: const Text(
+                              'TEACHER',
+                              style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w800,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        teacher.detail.isNotEmpty ? teacher.detail : 'English Tutor',
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          color: AppColors.primaryPurple,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          const Icon(Icons.star_rounded, size: 15, color: Color(0xFFFFB300)),
+                          const SizedBox(width: 3),
+                          const Text(
+                            '4.9 (120+ lessons)',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            '• ${teacher.activeLabel.isNotEmpty ? teacher.activeLabel : "Active now"}',
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              color: AppColors.textTertiary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            if (teacher.bio.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Text(
+                teacher.bio,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  color: AppColors.textSecondary,
+                  height: 1.3,
+                ),
+              ),
+            ],
+            const SizedBox(height: 12),
+            const Divider(height: 1, color: AppColors.divider),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                // Say Hi Button with waving hand asset
+                GestureDetector(
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => ChatDetailScreen(user: teacher)),
+                    );
+                  },
+                  child: Container(
+                    height: 38,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF3EFFF),
+                      borderRadius: BorderRadius.circular(19),
+                      border: Border.all(
+                        color: AppColors.primaryPurple.withValues(alpha: 0.18),
+                        width: 1,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Image.asset(
+                          'assets/images/say_hi_hand.png',
+                          width: 20,
+                          height: 20,
+                        ),
+                        const SizedBox(width: 6),
+                        const Text(
+                          'Say Hi',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.primaryPurple,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                const Spacer(),
+
+                // Book Tutor Button
+                ElevatedButton.icon(
+                  onPressed: () {
+                    TeacherService.bookTutor(context, teacher: teacher);
+                  },
+                  icon: const Icon(Icons.calendar_month_rounded, size: 16),
+                  label: const Text(
+                    'Book Tutor',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF6B47EB),
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+

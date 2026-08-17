@@ -43,7 +43,11 @@ class _LiveCard extends StatelessWidget {
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
-        gradient: LinearGradient(colors: colors, begin: Alignment.topLeft, end: Alignment.bottomRight),
+        gradient: LinearGradient(
+          colors: colors,
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -53,49 +57,85 @@ class _LiveCard extends StatelessWidget {
               _pill('EN', Colors.white24, Colors.white),
               const SizedBox(width: 5),
               Flexible(
-                child: _pill('# ${stream.tag}', AppColors.primaryPurple.withValues(alpha: 0.3),
-                    AppColors.primaryPurple.withValues(alpha: 0.95),
-                    ellipsis: true),
+                child: _pill(
+                  '# ${stream.tag}',
+                  AppColors.primaryPurple.withValues(alpha: 0.3),
+                  AppColors.primaryPurple.withValues(alpha: 0.95),
+                  ellipsis: true,
+                ),
               ),
               const Spacer(),
-              const Icon(Icons.graphic_eq_rounded, size: 14, color: Colors.white70),
+              const Icon(
+                Icons.graphic_eq_rounded,
+                size: 14,
+                color: Colors.white70,
+              ),
             ],
           ),
           const Spacer(),
           Center(
-            child: AppAvatar(seed: stream.hostName, size: 56, showFlag: true, flag: stream.hostFlag),
+            child: AppAvatar(
+              seed: stream.hostName,
+              size: 56,
+              showFlag: true,
+              flag: stream.hostFlag,
+            ),
           ),
           const Spacer(),
           Text(
             stream.hostName,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Colors.white, fontSize: 12.5, fontWeight: FontWeight.w600),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+            ),
           ),
           const SizedBox(height: 2),
           Text(
             stream.title,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.w700),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 13.5,
+              fontWeight: FontWeight.w700,
+            ),
           ),
           const SizedBox(height: 8),
           Row(
             children: [
-              const Icon(Icons.remove_red_eye_outlined, size: 13, color: Colors.white60),
+              const Icon(
+                Icons.remove_red_eye_outlined,
+                size: 13,
+                color: Colors.white60,
+              ),
               const SizedBox(width: 4),
-              Text('${stream.viewers}', style: const TextStyle(color: Colors.white60, fontSize: 11.5)),
+              Text(
+                '${stream.viewers}',
+                style: const TextStyle(color: Colors.white60, fontSize: 11.5),
+              ),
               const Spacer(),
               if (stream.badgeLabel.isNotEmpty)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
-                    color: stream.badgeLabel == 'Hot' ? AppColors.vipGold : AppColors.badgePink,
+                    color: stream.badgeLabel == 'Hot'
+                        ? AppColors.vipGold
+                        : AppColors.badgePink,
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
                     stream.badgeLabel == 'Hot' ? '🔥 Hot' : '★ Creator',
-                    style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: Colors.white),
+                    style: const TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                    ),
                   ),
                 ),
             ],
@@ -108,7 +148,10 @@ class _LiveCard extends StatelessWidget {
   Widget _pill(String text, Color bg, Color fg, {bool ellipsis = false}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(5)),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(5),
+      ),
       child: Text(
         text,
         maxLines: 1,

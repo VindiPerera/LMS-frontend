@@ -8,7 +8,10 @@ class EnglishCoursesScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('English Courses', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
+        title: const Text(
+          'English Courses',
+          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 17),
+        ),
         centerTitle: true,
       ),
       body: ListView(
@@ -16,7 +19,10 @@ class EnglishCoursesScreen extends StatelessWidget {
         children: [
           _HotPickBanner(),
           const SizedBox(height: 22),
-          const Text('AI Talk', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+          const Text(
+            'AI Talk',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          ),
           const SizedBox(height: 10),
           const _CourseSection(
             title: 'English Ai',
@@ -25,7 +31,10 @@ class EnglishCoursesScreen extends StatelessWidget {
             heading: "Let's Speak\nEnglish",
           ),
           const SizedBox(height: 22),
-          const Text('Speaking', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+          const Text(
+            'Speaking',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          ),
           const SizedBox(height: 10),
           const _CourseSection(
             title: 'Personalized Live Class',
@@ -36,14 +45,18 @@ class EnglishCoursesScreen extends StatelessWidget {
             ctaLabel: '🔥 Buy Now!',
           ),
           const SizedBox(height: 22),
-          const Text('English Pro Partner', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+          const Text(
+            'English Pro Partner',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          ),
           const SizedBox(height: 10),
           const _CourseSection(
             title: 'English Pro Partner',
             subtitle: '',
             gradient: [Color(0xFFE8A23C), Color(0xFFE87A3C)],
             heading: 'English Pro Partner',
-            caption: 'Abundant topics to choose from\nChat freely with native partners',
+            caption:
+                'Abundant topics to choose from\nChat freely with native partners',
             ctaLabel: 'Book now',
           ),
         ],
@@ -75,9 +88,24 @@ class _HotPickBanner extends StatelessWidget {
             child: Transform.rotate(
               angle: -0.35,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(color: const Color(0xFFFFC9E8), borderRadius: BorderRadius.circular(6)),
-                child: const Text('Hot\nPick', textAlign: TextAlign.center, style: TextStyle(color: Color(0xFFB4008C), fontSize: 10, fontWeight: FontWeight.w800, height: 1.1)),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFC9E8),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Text(
+                  'Hot\nPick',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Color(0xFFB4008C),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    height: 1.1,
+                  ),
+                ),
               ),
             ),
           ),
@@ -87,13 +115,21 @@ class _HotPickBanner extends StatelessWidget {
               padding: const EdgeInsets.only(left: 18),
               child: Text(
                 '1-on-1 English LiveClass',
-                style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ),
           ),
           const Align(
             alignment: Alignment.centerRight,
-            child: Icon(Icons.emoji_emotions_rounded, color: Colors.white38, size: 56),
+            child: Icon(
+              Icons.emoji_emotions_rounded,
+              color: Colors.white38,
+              size: 56,
+            ),
           ),
         ],
       ),
@@ -122,14 +158,26 @@ class _CourseSection extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: AppColors.card, borderRadius: BorderRadius.circular(18)),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(18),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+          Text(
+            title,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+          ),
           if (subtitle.isNotEmpty) ...[
             const SizedBox(height: 2),
-            Text(subtitle, style: const TextStyle(color: AppColors.textTertiary, fontSize: 12.5)),
+            Text(
+              subtitle,
+              style: const TextStyle(
+                color: AppColors.textTertiary,
+                fontSize: 12.5,
+              ),
+            ),
           ],
           const SizedBox(height: 12),
           Container(
@@ -138,7 +186,11 @@ class _CourseSection extends StatelessWidget {
             padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(14),
-              gradient: LinearGradient(colors: gradient, begin: Alignment.topLeft, end: Alignment.bottomRight),
+              gradient: LinearGradient(
+                colors: gradient,
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -147,23 +199,51 @@ class _CourseSection extends StatelessWidget {
               children: [
                 Text(
                   heading,
-                  style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800, height: 1.15),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    height: 1.15,
+                  ),
                 ),
                 if (caption.isNotEmpty) ...[
                   const SizedBox(height: 8),
-                  Text(caption, style: const TextStyle(color: Colors.white70, fontSize: 12.5)),
+                  Text(
+                    caption,
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 12.5,
+                    ),
+                  ),
                 ],
                 if (ctaLabel.isNotEmpty) ...[
                   const SizedBox(height: 12),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 9,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(ctaLabel, style: const TextStyle(color: Colors.black, fontSize: 13, fontWeight: FontWeight.w700)),
+                        Text(
+                          ctaLabel,
+                          style: const TextStyle(
+                            color: Colors.black,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                         const SizedBox(width: 4),
-                        const Icon(Icons.play_arrow_rounded, size: 14, color: Colors.black),
+                        const Icon(
+                          Icons.play_arrow_rounded,
+                          size: 14,
+                          color: Colors.black,
+                        ),
                       ],
                     ),
                   ),

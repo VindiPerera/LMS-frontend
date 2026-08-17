@@ -1,4 +1,9 @@
+import 'dart:typed_data';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import '../../services/auth_service.dart';
+import '../../services/storage_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
 import '../../widgets/auth_widgets.dart';
@@ -21,8 +26,18 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
   String _nativeLang = 'English';
   String _learningLang = 'Spanish';
   bool _loading = false;
+  bool _uploadingPhoto = false;
+  String? _avatarUrl;
 
-  static const _languages = ['English', 'Spanish', 'Sinhala', 'Japanese', 'French', 'German', 'Chinese'];
+  static const _languages = [
+    'English',
+    'Spanish',
+    'Sinhala',
+    'Japanese',
+    'French',
+    'German',
+    'Chinese',
+  ];
 
   @override
   void dispose() {
@@ -34,24 +49,83 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
 
   bool get _isTeacher => widget.role == FaceTalkRole.teacher;
 
-  void _finish() {
-    setState(() => _loading = true);
-    Future.delayed(const Duration(milliseconds: 500), () {
-      if (!mounted) return;
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const MainShell()),
-        (route) => false,
+  void _showError(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(content: Text(message), backgroundColor: AppColors.badgeRed),
       );
-    });
+  }
+
+  Future<void> _pickPhoto() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    final picked = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 512,
+      imageQuality: 85,
+    );
+    if (picked == null) return;
+
+    setState(() => _uploadingPhoto = true);
+    try {
+      final Uint8List bytes = await picked.readAsBytes();
+      final url = await StorageService.uploadAvatar(uid, bytes);
+      if (mounted) setState(() => _avatarUrl = url);
+    } catch (_) {
+      _showError('Could not upload photo. Please try again.');
+    } finally {
+      if (mounted) setState(() => _uploadingPhoto = false);
+    }
+  }
+
+  Future<void> _finish() async {
+    setState(() => _loading = true);
+    try {
+      // Persists profileCompleted = true, so a restored session (see
+      // splash_screen.dart) goes straight into the app next time instead of
+      // looping back here.
+      await AuthService.instance.updateProfile({
+        if (_nameController.text.trim().isNotEmpty)
+          'name': _nameController.text.trim(),
+        'bio': _bioController.text.trim(),
+        if (_isTeacher) 'detail': _detailController.text.trim(),
+        'nativeLang': _nativeLang,
+        'learningLang': _learningLang,
+        if (_avatarUrl != null) 'avatarUrl': _avatarUrl,
+      });
+    } on FirebaseException catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      _showError(e.message ?? 'Could not save your profile.');
+      return;
+    } catch (_) {
+      // Firebase unreachable — still let the user into the app locally
+      // rather than blocking them; profile just won't be saved yet.
+    }
+
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const MainShell()),
+      (route) => false,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final displayName = _nameController.text.trim().isEmpty ? '?' : _nameController.text.trim();
+    final displayName = _nameController.text.trim().isEmpty
+        ? '?'
+        : _nameController.text.trim();
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(title: const Text('Create Profile', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18))),
+      appBar: AppBar(
+        title: const Text(
+          'Create Profile',
+          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18),
+        ),
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
@@ -59,34 +133,67 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Center(
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    AppAvatar(seed: displayName, size: 92),
-                    Positioned(
-                      right: -2,
-                      bottom: -2,
-                      child: Container(
-                        padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(
-                          color: AppColors.primaryPurple,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: AppColors.background, width: 2.5),
-                        ),
-                        child: const Icon(Icons.camera_alt_rounded, size: 15, color: Colors.white),
+                child: GestureDetector(
+                  onTap: _uploadingPhoto ? null : _pickPhoto,
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      AppAvatar(
+                        seed: displayName,
+                        size: 92,
+                        imageUrl: _avatarUrl,
                       ),
-                    ),
-                  ],
+                      Positioned(
+                        right: -2,
+                        bottom: -2,
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: AppColors.primaryPurple,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: AppColors.background,
+                              width: 2.5,
+                            ),
+                          ),
+                          child: _uploadingPhoto
+                              ? const SizedBox(
+                                  width: 15,
+                                  height: 15,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Icon(
+                                  Icons.camera_alt_rounded,
+                                  size: 15,
+                                  color: Colors.white,
+                                ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
               const SizedBox(height: 10),
               Center(
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(color: AppColors.surfaceLight, borderRadius: BorderRadius.circular(12)),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceLight,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                   child: Text(
                     _isTeacher ? '🧑‍🏫  Teacher' : '🎓  Student',
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textSecondary,
+                    ),
                   ),
                 ),
               ),
@@ -100,67 +207,55 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
               const SizedBox(height: 16),
               AuthTextField(
                 label: 'Short Bio',
-                hint: _isTeacher ? 'Tell students about your teaching style' : 'Tell others what you want to learn',
+                hint: _isTeacher
+                    ? 'Tell students about your teaching style'
+                    : 'Tell others what you want to learn',
                 icon: Icons.edit_note_rounded,
                 controller: _bioController,
               ),
-              const SizedBox(height: 16),
-              AuthTextField(
-                label: _isTeacher ? 'Subject you teach' : 'Interests / Grade',
-                hint: _isTeacher ? 'e.g. English Conversation' : 'e.g. High School English',
-                icon: _isTeacher ? Icons.menu_book_outlined : Icons.school_outlined,
-                controller: _detailController,
-              ),
+              // Teachers still list their subject; students no longer have
+              // an "Interests / Grade" field here.
+              if (_isTeacher) ...[
+                const SizedBox(height: 16),
+                AuthTextField(
+                  label: 'Subject you teach',
+                  hint: 'e.g. English Conversation',
+                  icon: Icons.menu_book_outlined,
+                  controller: _detailController,
+                ),
+              ],
               const SizedBox(height: 16),
               Row(
                 children: [
-                  Expanded(child: _LanguageDropdown(label: 'Native Language', value: _nativeLang, options: _languages, onChanged: (v) => setState(() => _nativeLang = v))),
+                  Expanded(
+                    child: LanguageDropdown(
+                      label: 'Native Language',
+                      value: _nativeLang,
+                      options: _languages,
+                      onChanged: (v) => setState(() => _nativeLang = v),
+                    ),
+                  ),
                   const SizedBox(width: 12),
-                  Expanded(child: _LanguageDropdown(label: 'Learning', value: _learningLang, options: _languages, onChanged: (v) => setState(() => _learningLang = v))),
+                  Expanded(
+                    child: LanguageDropdown(
+                      label: 'Learning',
+                      value: _learningLang,
+                      options: _languages,
+                      onChanged: (v) => setState(() => _learningLang = v),
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 28),
-              AuthPrimaryButton(label: 'Finish & Continue', onPressed: _finish, loading: _loading),
+              AuthPrimaryButton(
+                label: 'Finish & Continue',
+                onPressed: _finish,
+                loading: _loading,
+              ),
             ],
           ),
         ),
       ),
-    );
-  }
-}
-
-class _LanguageDropdown extends StatelessWidget {
-  final String label;
-  final String value;
-  final List<String> options;
-  final ValueChanged<String> onChanged;
-
-  const _LanguageDropdown({required this.label, required this.value, required this.options, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-        const SizedBox(height: 8),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          decoration: BoxDecoration(color: AppColors.surfaceLight, borderRadius: BorderRadius.circular(14)),
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<String>(
-              value: value,
-              isExpanded: true,
-              icon: const Icon(Icons.keyboard_arrow_down_rounded, color: AppColors.textTertiary),
-              style: const TextStyle(fontSize: 14, color: AppColors.textPrimary, fontWeight: FontWeight.w500),
-              items: options.map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
-              onChanged: (v) {
-                if (v != null) onChanged(v);
-              },
-            ),
-          ),
-        ),
-      ],
     );
   }
 }

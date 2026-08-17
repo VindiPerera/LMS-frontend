@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 import '../models/user.dart';
-import '../models/chat_message.dart';
-import '../models/moment.dart';
 import '../models/voiceroom.dart';
 import '../models/live_stream.dart';
 import '../models/learn_item.dart';
@@ -140,95 +138,10 @@ final List<Color> avatarPalette = [
 ];
 
 Color avatarColorFor(String seed) {
-  final idx = seed.codeUnits.fold<int>(0, (a, b) => a + b) % avatarPalette.length;
+  final idx =
+      seed.codeUnits.fold<int>(0, (a, b) => a + b) % avatarPalette.length;
   return avatarPalette[idx];
 }
-
-final List<ChatPreview> mockChats = [
-  ChatPreview(
-    user: mockUsers[4],
-    lastMessage: 'Welcome to FaceTalk! Tap here to get started 🎉',
-    time: '12:26 PM',
-    unreadCount: 2,
-  ),
-  ChatPreview(
-    user: mockUsers[0],
-    lastMessage: '[Photo] My first post 🌸',
-    time: '4h',
-    unreadCount: 1,
-  ),
-  ChatPreview(
-    user: mockUsers[1],
-    lastMessage: 'Cover... translate this for me?',
-    time: 'Yesterday',
-    isTyping: true,
-  ),
-  ChatPreview(
-    user: mockUsers[5],
-    lastMessage: '¡Hola! ¿Cómo estás hoy?',
-    time: 'Yesterday',
-  ),
-  ChatPreview(
-    user: mockUsers[6],
-    lastMessage: '[Voice message] 0:12',
-    time: '2 days ago',
-    isMuted: true,
-  ),
-];
-
-final List<ChatMessage> mockConversation = [
-  ChatMessage(text: 'Hi! Nice to meet you 😊', isMe: false, time: '12:20 PM'),
-  ChatMessage(text: 'Hello! Nice to meet you too!', isMe: true, time: '12:21 PM'),
-  ChatMessage(
-    text: 'I am learning English, could you correct my sentence?',
-    isMe: false,
-    time: '12:22 PM',
-  ),
-  ChatMessage(
-    text: 'Of course! Send it over.',
-    isMe: true,
-    time: '12:23 PM',
-    type: MessageType.correction,
-  ),
-  ChatMessage(text: '', isMe: false, time: '12:24 PM', type: MessageType.voice, voiceSeconds: 12),
-  ChatMessage(text: 'Sounds great, thank you! 🙏', isMe: true, time: '12:26 PM'),
-];
-
-final List<Moment> mockMoments = [
-  Moment(
-    user: mockUsers[0],
-    timeAgo: '4 hours ago',
-    text: 'My first post',
-    imageUrl: 'flowers',
-    likes: 7,
-    comments: 2,
-  ),
-  Moment(
-    user: mockUsers[1],
-    timeAgo: 'Yesterday',
-    text: 'Cover... could someone translate this sentence into Sinhala for me? 🙏',
-    tag: '#topik hangat',
-    likes: 12,
-    comments: 5,
-    isTranslatable: true,
-  ),
-  Moment(
-    user: mockUsers[3],
-    timeAgo: '2 days ago',
-    text: 'Anyone up for a music-themed voiceroom tonight? 🎶 Come practice English with me!',
-    tag: '#FIFA World Cup',
-    likes: 21,
-    comments: 9,
-  ),
-  Moment(
-    user: mockUsers[5],
-    timeAgo: '3 days ago',
-    text: '¿Alguien puede corregir mi español? Estoy practicando todos los días.',
-    likes: 15,
-    comments: 4,
-    isTranslatable: true,
-  ),
-];
 
 final List<VoiceRoom> mockVoiceRooms = [
   VoiceRoom(
@@ -287,14 +200,30 @@ final List<VoiceRoom> mockVoiceRooms = [
 ];
 
 const languageCourses = [
-  {'name': 'HelloWords', 'icon': Icons.grid_view_rounded, 'color': Color(0xFF2ECC71), 'badge': true},
-  {'name': 'LiveClass', 'icon': Icons.menu_book_rounded, 'color': Color(0xFF4FA8FF), 'badge': false},
-  {'name': 'Pro Partner', 'icon': Icons.people_alt_rounded, 'color': Color(0xFFFF4D8D), 'badge': false},
-  {'name': 'HelloEnglish', 'icon': Icons.chat_bubble_rounded, 'color': Color(0xFF4FA8FF), 'badge': false},
-  {'name': 'Podcast', 'icon': Icons.podcasts_rounded, 'color': Color(0xFF2E3A8C), 'badge': true},
-  {'name': 'Grammar', 'icon': Icons.spellcheck_rounded, 'color': Color(0xFFFF7A45), 'badge': false},
-  {'name': 'Idioms', 'icon': Icons.menu_book_rounded, 'color': Color(0xFFE84393), 'badge': false},
-  {'name': 'Flashcards', 'icon': Icons.style_rounded, 'color': Color(0xFF00CEC9), 'badge': false},
+    {
+    'name': 'Teachers',
+    'icon': Icons.school_rounded,
+    'color': Color(0xFFFF4D8D),
+    'badge': false,
+  },
+  {
+    'name': 'LiveClass',
+    'icon': Icons.menu_book_rounded,
+    'color': Color(0xFF4FA8FF),
+    'badge': false,
+  },
+  {
+    'name': 'Idioms',
+    'icon': Icons.menu_book_rounded,
+    'color': Color(0xFFE84393),
+    'badge': false,
+  },
+  {
+    'name': 'Flashcards',
+    'icon': Icons.style_rounded,
+    'color': Color(0xFF00CEC9),
+    'badge': false,
+  },
 ];
 
 final List<LiveStream> mockLiveStreams = [
@@ -422,8 +351,8 @@ const liveClassBanner = CourseBanner(
 
 const proPartnerBanner = CourseBanner(
   tagline: '',
-  title: 'English Pro Partner',
-  subtitle: 'Abundant topics to choose from\nChat freely with native partners',
+  title: 'Teachers',
+  subtitle: 'Abundant topics to choose from\nChat freely with native teachers',
   ctaLabel: 'Book now',
   coverSeed: 'propartner',
 );
@@ -451,59 +380,196 @@ const roomOthersCount = 13;
 
 const speakingTutors = [
   Tutor(
+    id: 'teacher_den',
     name: 'Den',
     flag: '🇺🇸',
     languages: 'English/Russian',
-    bio: 'Hello friends! 👋',
+    bio: 'Hello friends! 👋 Certified TEFL teacher from the USA. I focus on pronunciation, casual conversation, and boosting your fluency!',
+    isPro: false,
+    age: 31,
+    gender: 'male',
+    handle: 'den_tutor',
+    rating: 4.9,
+    reviewCount: 142,
+    studentsCount: 310,
+    lessonsCount: 890,
   ),
   Tutor(
+    id: 'teacher_sajida',
     name: 'Sajida',
     flag: '🇬🇧',
-    languages: 'English',
-    bio: "Im sajida from England. I'm a graduate in Biomed...",
+    languages: 'English/Spanish',
+    bio: "I'm Sajida from England. I'm a graduate in Biomedicine and certified TESOL English teacher helping students speak fluently.",
+    isPro: false,
+    age: 28,
+    gender: 'female',
+    handle: 'sajida_uk',
+    rating: 5.0,
+    reviewCount: 98,
+    studentsCount: 220,
+    lessonsCount: 650,
   ),
   Tutor(
-    name: 'KIRSTIN',
+    id: 'teacher_kirstin',
+    name: 'Kirstin',
     flag: '🇨🇦',
-    languages: 'English',
-    bio: '💎 PRO PARTNER ENGLISH TUTOR 💎',
+    languages: 'English/French',
+    bio: '💎 PRO PARTNER ENGLISH TUTOR 💎 Specializing in business English, daily conversations, and natural idioms.',
     isPro: true,
+    age: 29,
+    gender: 'female',
+    handle: 'kirstin_ca',
+    rating: 4.9,
+    reviewCount: 215,
+    studentsCount: 480,
+    lessonsCount: 1420,
   ),
   Tutor(
+    id: 'teacher_paul',
     name: 'Paul Charles',
     flag: '🇬🇧',
-    languages: 'English',
-    bio: '*Note - I teach adults only, intermediate level and ab...',
+    languages: 'English/German',
+    bio: '*Note - I teach adults only, intermediate level and above. Focused on public speaking and workplace confidence.',
+    isPro: true,
+    age: 42,
+    gender: 'male',
+    handle: 'paul_charles',
+    rating: 4.8,
+    reviewCount: 86,
+    studentsCount: 190,
+    lessonsCount: 540,
+  ),
+  Tutor(
+    id: 'teacher_elena',
+    name: 'Elena Rostova',
+    flag: '🇷🇺',
+    languages: 'Russian/English',
+    bio: 'Native Russian speaker and language enthusiast. Let\'s practice daily dialogues and cultural insights!',
+    isPro: false,
+    age: 26,
+    gender: 'female',
+    handle: 'elena_r',
+    rating: 4.9,
+    reviewCount: 64,
+    studentsCount: 130,
+    lessonsCount: 380,
+  ),
+  Tutor(
+    id: 'teacher_hiroshi',
+    name: 'Hiroshi Tanaka',
+    flag: '🇯🇵',
+    languages: 'Japanese/English',
+    bio: 'Tokyo native teaching practical Japanese from beginner JLPT N5 to natural business conversation.',
+    isPro: true,
+    age: 34,
+    gender: 'male',
+    handle: 'hiroshi_jp',
+    rating: 5.0,
+    reviewCount: 175,
+    studentsCount: 390,
+    lessonsCount: 990,
   ),
 ];
 
+AppUser tutorToAppUser(Tutor tutor) {
+  return AppUser(
+    id: tutor.id.isNotEmpty
+        ? tutor.id
+        : 'teacher_${tutor.name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '_')}',
+    name: tutor.name,
+    handle: tutor.handle.isNotEmpty
+        ? tutor.handle
+        : 'teacher_${tutor.name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '')}',
+    avatarUrl: tutor.avatarUrl,
+    countryFlag: tutor.flag,
+    nativeLang: tutor.languages.split('/').first.trim(),
+    learningLang: tutor.languages.contains('/')
+        ? tutor.languages.split('/').last.trim()
+        : 'English',
+    isOnline: true,
+    isVip: tutor.isPro,
+    age: tutor.age,
+    gender: tutor.gender,
+    bio: tutor.bio,
+    activeLabel: 'Active now',
+    tags: [
+      tutor.isPro ? 'Pro Partner' : 'Certified Tutor',
+      '1v1 LiveClass',
+      '★ ${tutor.rating}',
+    ],
+    role: 'teacher',
+    detail: tutor.languages,
+  );
+}
+
+final List<AppUser> fixedTeacherUsers =
+    speakingTutors.map(tutorToAppUser).toList();
+
+
 const classCategories = [
-  {'name': '1v1 LiveClass', 'icon': Icons.chat_bubble_rounded, 'color': Color(0xFF7B4FE0), 'badge': 'HOT'},
-  {'name': 'Speaking', 'icon': Icons.forum_rounded, 'color': Color(0xFFE8A23C), 'badge': ''},
-  {'name': 'Pro Partner', 'icon': Icons.people_alt_rounded, 'color': Color(0xFFFF4D8D), 'badge': ''},
-  {'name': 'Popular Host Class', 'icon': Icons.ondemand_video_rounded, 'color': Color(0xFF2CB5C0), 'badge': ''},
+  {
+    'name': '1v1 LiveClass',
+    'icon': Icons.chat_bubble_rounded,
+    'color': Color(0xFF7B4FE0),
+    'badge': 'HOT',
+  },
+  {
+    'name': 'Speaking',
+    'icon': Icons.forum_rounded,
+    'color': Color(0xFFE8A23C),
+    'badge': '',
+  },
+  {
+    'name': 'Pro Partner',
+    'icon': Icons.people_alt_rounded,
+    'color': Color(0xFFFF4D8D),
+    'badge': '',
+  },
+  {
+    'name': 'Popular Host Class',
+    'icon': Icons.ondemand_video_rounded,
+    'color': Color(0xFF2CB5C0),
+    'badge': '',
+  },
 ];
 
 const roomChatLog = [
   RoomChatMessage(sender: 'Jeffrey', text: 'Long time no see Leo!'),
-  RoomChatMessage(sender: 'Lina', senderBadge: '20', text: '好喜欢你的英文口音!', isTranslated: true, icon: RoomMessageIcon.translate),
+  RoomChatMessage(
+    sender: 'Lina',
+    senderBadge: '20',
+    text: '好喜欢你的英文口音!',
+    isTranslated: true,
+    icon: RoomMessageIcon.translate,
+  ),
   RoomChatMessage(
     sender: 'Tommy',
     senderBadge: '10',
-    text: "Welcome to the English Chit-chat! We're talking about family expectations in our country",
+    text:
+        "Welcome to the English Chit-chat! We're talking about family expectations in our country",
     icon: RoomMessageIcon.gift,
   ),
   RoomChatMessage(
     sender: 'Notice',
-    text: 'Welcome to the Voiceroom! Please remember to be respectful, inclusive, and of course have fun!',
+    text:
+        'Welcome to the Voiceroom! Please remember to be respectful, inclusive, and of course have fun!',
     isSystem: true,
     icon: RoomMessageIcon.notice,
   ),
-  RoomChatMessage(sender: '好多鱼的界', text: 'Happy New Year !', icon: RoomMessageIcon.gift),
-  RoomChatMessage(sender: 'Tommy', text: '我只会一点中文 在大学有学过', icon: RoomMessageIcon.translate),
+  RoomChatMessage(
+    sender: '好多鱼的界',
+    text: 'Happy New Year !',
+    icon: RoomMessageIcon.gift,
+  ),
   RoomChatMessage(
     sender: 'Tommy',
-    text: "I stopped learning Chinese when my family moved to the US for my dad's job",
+    text: '我只会一点中文 在大学有学过',
+    icon: RoomMessageIcon.translate,
+  ),
+  RoomChatMessage(
+    sender: 'Tommy',
+    text:
+        "I stopped learning Chinese when my family moved to the US for my dad's job",
     icon: RoomMessageIcon.star,
   ),
 ];
@@ -524,9 +590,20 @@ const boardSpeakers = [
     nativeLanguageFull: 'English',
     learningLanguagesFull: ['Sinhalese'],
     hobbies: [
-      'Traveling', 'Reading', 'Movies', 'TV-series', 'Music',
-      'Fitness', 'Swimming', 'Camping', 'Fashion', 'Gardning',
-      'Photography', 'Dancing', 'Foot ball', 'Cricket',
+      'Traveling',
+      'Reading',
+      'Movies',
+      'TV-series',
+      'Music',
+      'Fitness',
+      'Swimming',
+      'Camping',
+      'Fashion',
+      'Gardning',
+      'Photography',
+      'Dancing',
+      'Foot ball',
+      'Cricket',
     ],
   ),
   RoomParticipant(name: '', flag: '', isEmptySeat: true),
