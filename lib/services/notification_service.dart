@@ -56,4 +56,24 @@ class NotificationService {
     }
     await batch.commit();
   }
+
+  /// Sends a voice room notification to [recipientId].
+  static Future<void> sendVoiceRoomNotification({
+    required String recipientId,
+    required String roomId,
+    required String hostName,
+    String hostAvatar = '',
+  }) async {
+    final items = _items(recipientId);
+    if (items == null) return;
+    final notif = NotificationModel(
+      type: NotificationType.voiceroom,
+      actorId: _currentUid ?? '',
+      actorName: hostName,
+      actorAvatar: hostAvatar,
+      postId: roomId,
+      createdAt: DateTime.now(),
+    );
+    await items.add(notif.toMap());
+  }
 }

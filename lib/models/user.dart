@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 import '../config/api_config.dart';
 
 class AppUser {
@@ -12,6 +14,11 @@ class AppUser {
   final String learningLang;
   final bool isOnline;
   final bool isVip;
+  // When the current VIP subscription lapses — null if not VIP, or if VIP
+  // but no purchase flow has ever set it yet (there isn't one wired up
+  // yet; see vip_calendar_screen.dart, which falls back to a 30-day window
+  // starting today so the calendar still has something meaningful to show).
+  final DateTime? vipExpiresAt;
   final int age;
   final String gender;
   final String bio;
@@ -34,6 +41,7 @@ class AppUser {
     required this.learningLang,
     this.isOnline = false,
     this.isVip = false,
+    this.vipExpiresAt,
     this.age = 0,
     this.gender = 'other',
     this.bio = '',
@@ -60,6 +68,7 @@ class AppUser {
       learningLang: json['learningLang']?.toString() ?? '',
       isOnline: json['isOnline'] == true,
       isVip: json['isVip'] == true,
+      vipExpiresAt: _asDateTime(json['vipExpiresAt']),
       age: _asInt(json['age']),
       gender: json['gender']?.toString() ?? 'other',
       bio: json['bio']?.toString() ?? '',
@@ -77,6 +86,12 @@ class AppUser {
   static int _asInt(Object? value) {
     if (value is int) return value;
     return int.tryParse('$value') ?? 0;
+  }
+
+  static DateTime? _asDateTime(Object? value) {
+    if (value is Timestamp) return value.toDate();
+    if (value is DateTime) return value;
+    return null;
   }
 }
 

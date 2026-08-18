@@ -2,15 +2,19 @@ import 'package:flutter/material.dart';
 import '../../data/mock_data.dart' as mock;
 import '../../models/moment.dart';
 import '../../models/user.dart';
+import '../../models/voiceroom.dart';
 import '../../services/auth_service.dart';
 import '../../services/moment_service.dart';
+import '../../services/voice_room_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
 import '../auth/splash_screen.dart';
 import '../friends/my_qr_code_screen.dart';
 import '../moments/user_moments_screen.dart';
+import '../voiceroom/voice_room_detail_screen.dart';
 import 'course_detail_sheet.dart';
 import 'edit_profile_screen.dart';
+import 'vip_calendar_screen.dart';
 
 class MeScreen extends StatefulWidget {
   const MeScreen({super.key});
@@ -56,6 +60,7 @@ class _MeScreenState extends State<MeScreen> {
             const SizedBox(height: 18),
             _ProfileHeader(user: user, onEdit: _editProfile),
             const SizedBox(height: 18),
+            _MyVoiceRoomBanner(),
             Row(
               children: [
                 Expanded(
@@ -74,6 +79,10 @@ class _MeScreenState extends State<MeScreen> {
             ),
             const SizedBox(height: 12),
             _MomentsRow(user: user),
+            if (user.isVip) ...[
+              const SizedBox(height: 12),
+              _VipCalendarRow(user: user),
+            ],
             // const SizedBox(height: 18),
             // _VipBenefitsCard(),
             const SizedBox(height: 22),
@@ -525,6 +534,58 @@ class _MomentsRow extends StatelessWidget {
   }
 }
 
+class _VipCalendarRow extends StatelessWidget {
+  final AppUser user;
+  const _VipCalendarRow({required this.user});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => VipCalendarScreen(user: user)),
+        );
+      },
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: AppColors.card,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: AppColors.vipGold.withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.calendar_month_rounded,
+                color: AppColors.vipGold,
+                size: 18,
+              ),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'VIP Calendar',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+              ),
+            ),
+            const Icon(
+              Icons.chevron_right_rounded,
+              color: AppColors.textTertiary,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _VipBenefitsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -788,6 +849,127 @@ class _SettingsList extends StatelessWidget {
           );
         }),
       ),
+    );
+  }
+}
+
+/// Banner that appears on the Me tab when the signed-in user is currently
+/// hosting a Voice Room — shows a gradient live card with "End Room" option.
+class _MyVoiceRoomBanner extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<VoiceRoom?>(
+      stream: VoiceRoomService.streamMyActiveRoom(),
+      builder: (context, snapshot) {
+        final room = snapshot.data;
+        if (room == null) return const SizedBox.shrink();
+        return Container(
+          margin: const EdgeInsets.only(bottom: 16),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF8E2DE2), Color(0xFF4A00E0)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF8E2DE2).withValues(alpha: 0.35),
+                blurRadius: 12,
+                offset: const Offset(0, 5),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              // Pulsing mic icon
+              const CircleAvatar(
+                radius: 22,
+                backgroundColor: Colors.white24,
+                child: Icon(Icons.mic_rounded, color: Colors.white, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.redAccent,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Text(
+                            '● LIVE',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '${room.participantCount} listener${room.participantCount == 1 ? '' : 's'}',
+                          style: const TextStyle(color: Colors.white70, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      room.title,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Column(
+                children: [
+                  ElevatedButton(
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => VoiceRoomDetailScreen(room: room),
+                        ),
+                      );
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: AppColors.primaryPurple,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      minimumSize: Size.zero,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text('Go Live', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                  ),
+                  const SizedBox(height: 4),
+                  GestureDetector(
+                    onTap: () async {
+                      await VoiceRoomService.endRoom(room.id);
+                    },
+                    child: const Text(
+                      'End Room',
+                      style: TextStyle(color: Colors.white60, fontSize: 11, decoration: TextDecoration.underline, decorationColor: Colors.white60),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

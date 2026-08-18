@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../../data/mock_data.dart';
 import '../../models/moment.dart';
 import '../../models/user.dart';
 import '../../models/voiceroom.dart';
 import '../../services/moment_service.dart';
 import '../../services/partner_service.dart';
 import '../../services/teacher_service.dart';
+import '../../services/voice_room_service.dart';
 import '../../theme/app_colors.dart';
 import '../../utils/location_helper.dart';
 import '../../widgets/app_avatar.dart';
@@ -40,38 +40,12 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
   bool _isLiked = false;
   bool _isFollowing = false;
   int _selectedTab = 0; // 0: About Me, 1: Moments, 2: Achievements
-  VoiceRoom? _userVoiceRoom;
 
   @override
   void initState() {
     super.initState();
     _user = widget.initial;
-    _findUserVoiceRoom();
     _refresh();
-  }
-
-  void _findUserVoiceRoom() {
-    // Check if the user has an active or created voice room
-    final match = mockVoiceRooms.where((r) =>
-        r.hostName.toLowerCase() == _user.name.toLowerCase() ||
-        r.hostName.toLowerCase().contains(_user.name.toLowerCase()) ||
-        r.isCreator);
-
-    if (match.isNotEmpty) {
-      _userVoiceRoom = match.first;
-    } else if (_user.role == 'teacher' || _user.name.toLowerCase().contains('nushan')) {
-      // Provide active room for demo/teachers
-      _userVoiceRoom = VoiceRoom(
-        title: 'english',
-        hostName: _user.name,
-        hostAvatar: _user.avatarUrl.isNotEmpty ? _user.avatarUrl : _user.name[0],
-        hostFlag: _user.countryFlag.isNotEmpty ? _user.countryFlag : '🇨🇦',
-        category: 'Learning',
-        tag: 'English',
-        participantCount: 14,
-        isCreator: true,
-      );
-    }
   }
 
   Future<void> _refresh() async {
@@ -328,11 +302,22 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
 
                         const SizedBox(height: 16),
 
-                        // 6. Created VoiceRoom Card (if user has active/created room)
-                        if (_userVoiceRoom != null) ...[
-                          _buildVoiceRoomCard(_userVoiceRoom!),
-                          const SizedBox(height: 16),
-                        ],
+                        // 6. Created VoiceRoom Card (Firestore live stream)
+                        StreamBuilder<VoiceRoom?>(
+                          stream: VoiceRoomService.streamActiveRoomForUser(
+                            user.id.isNotEmpty ? user.id : '',
+                          ),
+                          builder: (context, snap) {
+                            final room = snap.data;
+                            if (room == null) return const SizedBox.shrink();
+                            return Column(
+                              children: [
+                                _buildVoiceRoomCard(room),
+                                const SizedBox(height: 16),
+                              ],
+                            );
+                          },
+                        ),
 
                         // 7. Self-introduction / Bio
                         Text(

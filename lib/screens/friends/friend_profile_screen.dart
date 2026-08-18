@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import '../../models/moment.dart';
 import '../../models/user.dart';
+import '../../models/voiceroom.dart';
 import '../../services/friend_service.dart';
 import '../../services/moment_service.dart';
+import '../../services/voice_room_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
 import '../hellotalk/chat_detail_screen.dart';
 import '../moments/user_moments_screen.dart';
+import '../voiceroom/voice_room_detail_screen.dart';
 
 class FriendProfileScreen extends StatefulWidget {
   final String friendId;
@@ -344,6 +347,112 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
                               ],
                             ),
                             const SizedBox(height: 18),
+
+                            // Active Voice Room Card (if currently hosting)
+                            StreamBuilder<VoiceRoom?>(
+                              stream: VoiceRoomService.streamActiveRoomForUser(
+                                widget.friendId.isNotEmpty ? widget.friendId : _user!.id,
+                              ),
+                              builder: (context, snapshot) {
+                                final room = snapshot.data;
+                                if (room == null) return const SizedBox.shrink();
+                                return Container(
+                                  margin: const EdgeInsets.only(bottom: 16),
+                                  padding: const EdgeInsets.all(14),
+                                  decoration: BoxDecoration(
+                                    gradient: const LinearGradient(
+                                      colors: [Color(0xFF8E2DE2), Color(0xFF4A00E0)],
+                                      begin: Alignment.topLeft,
+                                      end: Alignment.bottomRight,
+                                    ),
+                                    borderRadius: BorderRadius.circular(16),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: const Color(0xFF8E2DE2).withValues(alpha: 0.3),
+                                        blurRadius: 10,
+                                        offset: const Offset(0, 4),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      const CircleAvatar(
+                                        backgroundColor: Colors.white24,
+                                        child: Icon(Icons.mic_rounded, color: Colors.white),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Row(
+                                              children: [
+                                                Container(
+                                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                  decoration: BoxDecoration(
+                                                    color: Colors.redAccent,
+                                                    borderRadius: BorderRadius.circular(8),
+                                                  ),
+                                                  child: const Text(
+                                                    'LIVE NOW',
+                                                    style: TextStyle(
+                                                      color: Colors.white,
+                                                      fontSize: 10,
+                                                      fontWeight: FontWeight.w900,
+                                                    ),
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 6),
+                                                Text(
+                                                  room.category,
+                                                  style: const TextStyle(
+                                                    color: Colors.white70,
+                                                    fontSize: 11,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              room.title,
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 14,
+                                              ),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      ElevatedButton(
+                                        onPressed: () {
+                                          Navigator.of(context).push(
+                                            MaterialPageRoute(
+                                              builder: (_) => VoiceRoomDetailScreen(room: room),
+                                            ),
+                                          );
+                                        },
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: Colors.white,
+                                          foregroundColor: AppColors.primaryPurple,
+                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(12),
+                                          ),
+                                        ),
+                                        child: const Text(
+                                          'Join',
+                                          style: TextStyle(fontWeight: FontWeight.bold),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
 
                             // Moments Card Button
                             StreamBuilder<List<Moment>>(

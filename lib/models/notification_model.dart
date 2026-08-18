@@ -5,7 +5,8 @@ enum NotificationType {
   like,
   comment,
   reshare,
-  mention;
+  mention,
+  voiceroom;
 
   String get storageValue => name;
 
@@ -26,6 +27,8 @@ enum NotificationType {
         return 'reshared your moment';
       case NotificationType.mention:
         return 'mentioned you';
+      case NotificationType.voiceroom:
+        return 'started a Voice Room';
     }
   }
 }

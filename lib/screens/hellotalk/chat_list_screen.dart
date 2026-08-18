@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 import '../../data/mock_data.dart' as mock;
 import '../../models/chat_message.dart';
 import '../../models/user.dart';
+import '../../models/voiceroom.dart';
 import '../../services/chat_service.dart';
 import '../../services/partner_service.dart';
+import '../../services/voice_room_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
 import 'add_contact_screen.dart';
 import 'chat_detail_screen.dart';
+import '../voiceroom/voice_room_detail_screen.dart';
 
 class ChatListScreen extends StatefulWidget {
   const ChatListScreen({super.key});
@@ -19,6 +22,7 @@ class ChatListScreen extends StatefulWidget {
 class _ChatListScreenState extends State<ChatListScreen> {
   late final Stream<List<ChatPreview>> _chatsStream =
       ChatService.streamChatPreviews();
+  late final Stream<VoiceRoom?> _myVoiceRoomStream = VoiceRoomService.streamMyActiveRoom();
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   List<AppUser> _onlinePartners = [];
@@ -113,6 +117,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
           return CustomScrollView(
             slivers: [
+              // Live Voice Room banner (only shown if user is hosting)
+              SliverToBoxAdapter(
+                child: _LiveVoiceRoomBanner(roomStream: _myVoiceRoomStream),
+              ),
+
               // Search Bar
               SliverToBoxAdapter(
                 child: Padding(
@@ -507,3 +516,87 @@ class _ChatListTile extends StatelessWidget {
     );
   }
 }
+
+/// Shows a compact purple banner at the top of Chat when the signed-in user
+/// is currently hosting an active Voice Room, with "Return to Room" button.
+class _LiveVoiceRoomBanner extends StatelessWidget {
+  final Stream<VoiceRoom?> roomStream;
+  const _LiveVoiceRoomBanner({required this.roomStream});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<VoiceRoom?>(
+      stream: roomStream,
+      builder: (context, snapshot) {
+        final room = snapshot.data;
+        if (room == null) return const SizedBox.shrink();
+        return GestureDetector(
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => VoiceRoomDetailScreen(room: room)),
+            );
+          },
+          child: Container(
+            margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF8E2DE2), Color(0xFF4A00E0)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF8E2DE2).withValues(alpha: 0.3),
+                  blurRadius: 8,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.mic_rounded, color: Colors.white, size: 18),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: Colors.redAccent,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Text(
+                    'LIVE',
+                    style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w900),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    room.title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Text(
+                  'Return to Room ›',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+

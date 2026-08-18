@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../data/mock_data.dart';
 import '../../models/voiceroom.dart';
-import '../../services/auth_service.dart';
+import '../../services/voice_room_service.dart';
 import '../../theme/app_colors.dart';
 import 'live_tab.dart';
 import 'learn_tab.dart';
@@ -26,7 +26,10 @@ class _VoiceroomScreenState extends State<VoiceroomScreen>
   ];
   int _categoryIndex = 0;
 
-  final List<VoiceRoom> _rooms = List.from(mockVoiceRooms);
+  // Real, user-created rooms (see VoiceRoomService) come first; the mock
+  // entries just keep the browse feed looking populated in a fresh project
+  // with no live rooms yet.
+  late final Stream<List<VoiceRoom>> _liveRoomsStream = VoiceRoomService.streamActiveRooms();
 
   @override
   void initState() {
@@ -40,10 +43,10 @@ class _VoiceroomScreenState extends State<VoiceroomScreen>
     super.dispose();
   }
 
-  List<VoiceRoom> get _filteredRooms {
-    if (_categoryIndex == 0) return _rooms;
+  List<VoiceRoom> _filteredRooms(List<VoiceRoom> rooms) {
+    if (_categoryIndex == 0) return rooms;
     final cat = _categories[_categoryIndex].toLowerCase();
-    return _rooms.where((r) {
+    return rooms.where((r) {
       return r.category.toLowerCase().contains(cat.substring(0, 2)) ||
           r.title.toLowerCase().contains(cat) ||
           r.tag.toLowerCase().contains(cat);
@@ -53,7 +56,6 @@ class _VoiceroomScreenState extends State<VoiceroomScreen>
   void _openCreateRoomSheet() {
     final titleController = TextEditingController();
     final tagController = TextEditingController();
-    final activeUser = AuthService.instance.currentUser ?? currentUser;
 
     showModalBottomSheet(
       context: context,
@@ -111,31 +113,38 @@ class _VoiceroomScreenState extends State<VoiceroomScreen>
               ),
               const SizedBox(height: 18),
               ElevatedButton(
-                onPressed: () {
+                onPressed: () async {
                   final title = titleController.text.trim();
                   if (title.isEmpty) return;
-                  final newRoom = VoiceRoom(
-                    title: title,
-                    hostName: activeUser.name,
-                    hostAvatar: activeUser.avatarUrl,
-                    hostFlag: activeUser.countryFlag,
-                    category: 'EN',
-                    tag: tagController.text.trim().isEmpty
-                        ? 'General'
-                        : tagController.text.trim(),
-                    participantCount: 1,
-                    coverGradientSeed: 'a',
-                    isCreator: true,
-                  );
-                  setState(() {
-                    _rooms.insert(0, newRoom);
-                  });
-                  Navigator.of(context).pop();
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => VoiceRoomDetailScreen(room: newRoom),
-                    ),
-                  );
+                  final tag = tagController.text.trim().isEmpty
+                      ? 'General'
+                      : tagController.text.trim();
+                  final sheetContext = context;
+                  try {
+                    final newRoom = await VoiceRoomService.createRoom(
+                      title: title,
+                      tag: tag,
+                      category: 'EN',
+                    );
+                    if (!sheetContext.mounted) return;
+                    Navigator.of(sheetContext).pop();
+                    Navigator.of(sheetContext).push(
+                      MaterialPageRoute(
+                        builder: (_) => VoiceRoomDetailScreen(room: newRoom),
+                      ),
+                    );
+                  } catch (e) {
+                    // Deliberately NOT falling back to a local-only room
+                    // here — a room nobody else can ever see (it was never
+                    // written to Firestore) is worse than a clear error,
+                    // since it looks like it worked while silently not
+                    // showing up anywhere else in the app (profile, Chat's
+                    // "you're hosting" banner, etc).
+                    if (!sheetContext.mounted) return;
+                    ScaffoldMessenger.of(sheetContext).showSnackBar(
+                      SnackBar(content: Text('Could not start room: ${e.toString().replaceFirst('Exception: ', '')}')),
+                    );
+                  }
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primaryPurple,
@@ -281,7 +290,14 @@ class _VoiceroomScreenState extends State<VoiceroomScreen>
                 child: TabBarView(
                   controller: _tabController,
                   children: [
-                    _VoiceRoomFeed(rooms: _filteredRooms),
+                    StreamBuilder<List<VoiceRoom>>(
+                      stream: _liveRoomsStream,
+                      builder: (context, snapshot) {
+                        final liveRooms = snapshot.data ?? const [];
+                        final rooms = [...liveRooms, ...mockVoiceRooms];
+                        return _VoiceRoomFeed(rooms: _filteredRooms(rooms));
+                      },
+                    ),
                     const LiveTab(),
                     const LearnTab(),
                   ],

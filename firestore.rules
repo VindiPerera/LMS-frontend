@@ -5,9 +5,9 @@ rules_version = '2';
 // ============================================================================
 // SCOPE WARNING: this file only covers the collections the Moments feature
 // touches — moments/{postId} (+ comments subcollection), notifications,
-// reports, users (read/own-write only), and friendships (read/own-write
-// only, needed for the "friends"-visibility check below). It does NOT cover
-// chats/messages, voicerooms, or partner/connect data used elsewhere in the
+// reports, users (read/own-write only), friendships (read/own-write only,
+// needed for the "friends"-visibility check below), chats/messages, and
+// voiceRooms. It does NOT cover partner/connect data used elsewhere in the
 // app. Firestore rules are deny-by-default outside matched paths, so if this
 // project currently has no firestore.rules deployed (it didn't at the time
 // this file was written — Firestore was presumably running on its default
@@ -190,6 +190,26 @@ service cloud.firestore {
         allow create: if isSignedIn() && request.resource.data.senderId == request.auth.uid;
         allow update, delete: if false;
       }
+    }
+
+    // ------------------------------------------------------------------
+    // voiceRooms/{roomId} — a user's live/active voice room. Readable by
+    // any signed-in user (the browse feed, plus the profile/chat-top
+    // "is this person live" checks); only the host may create/update their
+    // own room. "Ending" a room is a soft update (isActive: false), never a
+    // delete — see lib/services/voice_room_service.dart.
+    // ------------------------------------------------------------------
+    match /voiceRooms/{roomId} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn() && request.resource.data.hostId == request.auth.uid;
+
+      allow update: if isSignedIn() &&
+        resource.data.hostId == request.auth.uid &&
+        request.resource.data.hostId == resource.data.hostId &&
+        request.resource.data.createdAt == resource.data.createdAt;
+
+      allow delete: if false;
     }
   }
 }
