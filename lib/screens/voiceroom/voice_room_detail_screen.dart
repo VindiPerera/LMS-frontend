@@ -1,7 +1,13 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../../data/mock_data.dart';
 import '../../models/room_participant.dart';
+import '../../models/user.dart';
 import '../../models/voiceroom.dart';
+import '../../services/friend_service.dart';
+import '../../services/notification_service.dart';
+import '../../services/partner_service.dart';
+import '../../services/voice_room_service.dart';
 import '../../widgets/app_avatar.dart';
 import 'room_profile_sheet.dart';
 
@@ -16,9 +22,58 @@ class VoiceRoomDetailScreen extends StatefulWidget {
 class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
   final _controller = TextEditingController();
   bool _subtitlesOn = false;
+  bool _ending = false;
 
   static const bg = Color(0xFF1B1B3A);
   static const bubble = Color(0xFF272753);
+
+  // Only a room with a real Firestore id/hostId (i.e. not one of the
+  // decorative mock_data.dart entries) can actually be ended or invited to.
+  bool get _isHost =>
+      widget.room.id.isNotEmpty &&
+      widget.room.hostId.isNotEmpty &&
+      widget.room.hostId == FirebaseAuth.instance.currentUser?.uid;
+
+  Future<void> _confirmEndRoom() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('End this room?'),
+        content: const Text('Everyone listening will be disconnected. This cannot be undone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('End Room', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _ending = true);
+    try {
+      await VoiceRoomService.endRoom(widget.room.id);
+      if (!mounted) return;
+      Navigator.of(context).pop();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _ending = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to end room: ${e.toString().replaceFirst('Exception: ', '')}')),
+      );
+    }
+  }
+
+  Future<void> _openInviteSheet() async {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: bubble,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => _InviteFriendsSheet(roomId: widget.room.id),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -46,6 +101,18 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                   const SizedBox(width: 8),
                   _actionChip('Type text', Icons.text_fields_rounded),
                   const Spacer(),
+                  if (_isHost) ...[
+                    _actionChip('Invite', Icons.person_add_alt_1_rounded, onTap: _openInviteSheet),
+                    const SizedBox(width: 8),
+                    _ending
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white70),
+                          )
+                        : _actionChip('End Room', Icons.call_end_rounded, onTap: _confirmEndRoom),
+                    const SizedBox(width: 8),
+                  ],
                   Container(
                     width: 30,
                     height: 30,
@@ -254,23 +321,134 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
     );
   }
 
-  Widget _actionChip(String label, IconData icon) {
-    return Container(
+  Widget _actionChip(String label, IconData icon, {VoidCallback? onTap}) {
+    final isDanger = onTap != null && icon == Icons.call_end_rounded;
+    final chip = Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.08),
+        color: isDanger ? Colors.red.withValues(alpha: 0.18) : Colors.white.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(16),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 14, color: Colors.white54),
+          Icon(icon, size: 14, color: isDanger ? Colors.redAccent : Colors.white54),
           const SizedBox(width: 5),
           Text(
             label,
-            style: const TextStyle(fontSize: 12, color: Colors.white54),
+            style: TextStyle(fontSize: 12, color: isDanger ? Colors.redAccent : Colors.white54),
           ),
         ],
+      ),
+    );
+    if (onTap == null) return chip;
+    return GestureDetector(onTap: onTap, child: chip);
+  }
+}
+
+/// Bottom sheet listing the host's friends, each with an "Invite" button
+/// that writes a `voiceRoomInvites` doc — functions/index.js's
+/// onVoiceRoomInviteCreate turns that into a real push + in-app
+/// notification for the invited friend. See NotificationService.inviteToVoiceRoom.
+class _InviteFriendsSheet extends StatefulWidget {
+  final String roomId;
+  const _InviteFriendsSheet({required this.roomId});
+
+  @override
+  State<_InviteFriendsSheet> createState() => _InviteFriendsSheetState();
+}
+
+class _InviteFriendsSheetState extends State<_InviteFriendsSheet> {
+  late final Future<List<AppUser>> _friendsFuture = _loadFriends();
+  final Set<String> _invited = {};
+
+  Future<List<AppUser>> _loadFriends() async {
+    final friendIds = await FriendService.instance.getFriendIds();
+    final users = await Future.wait(
+      friendIds.map((id) async {
+        try {
+          return await PartnerService.fetchPartner(id);
+        } catch (_) {
+          return null;
+        }
+      }),
+    );
+    return users.whereType<AppUser>().toList();
+  }
+
+  Future<void> _invite(AppUser friend) async {
+    setState(() => _invited.add(friend.id));
+    try {
+      await NotificationService.inviteToVoiceRoom(recipientId: friend.id, roomId: widget.roomId);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _invited.remove(friend.id));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not invite ${friend.name}: ${e.toString().replaceFirst('Exception: ', '')}')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Invite friends',
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16),
+            ),
+            const SizedBox(height: 14),
+            SizedBox(
+              height: 320,
+              child: FutureBuilder<List<AppUser>>(
+                future: _friendsFuture,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white70),
+                    );
+                  }
+                  final friends = snapshot.data ?? const [];
+                  if (friends.isEmpty) {
+                    return const Center(
+                      child: Text(
+                        'Add some friends first to invite them here.',
+                        style: TextStyle(color: Colors.white54, fontSize: 13),
+                        textAlign: TextAlign.center,
+                      ),
+                    );
+                  }
+                  return ListView.separated(
+                    itemCount: friends.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 4),
+                    itemBuilder: (context, i) {
+                      final friend = friends[i];
+                      final invited = _invited.contains(friend.id);
+                      return ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: AppAvatar(seed: friend.name, size: 40, imageUrl: friend.avatarUrl),
+                        title: Text(friend.name, style: const TextStyle(color: Colors.white, fontSize: 14)),
+                        trailing: TextButton(
+                          onPressed: invited ? null : () => _invite(friend),
+                          child: Text(
+                            invited ? 'Invited' : 'Invite',
+                            style: TextStyle(color: invited ? Colors.white38 : const Color(0xFF7B68F4)),
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

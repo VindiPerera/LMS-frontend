@@ -6,7 +6,9 @@ enum NotificationType {
   comment,
   reshare,
   mention,
-  voiceroom;
+  voiceroom,
+  friendRequest,
+  friendAccept;
 
   String get storageValue => name;
 
@@ -16,6 +18,13 @@ enum NotificationType {
       orElse: () => NotificationType.like,
     );
   }
+
+  /// True for types that point at a moment (`postId`) rather than a person
+  /// or a voice room — drives whether notification_screen.dart bothers
+  /// fetching/showing a post thumbnail.
+  bool get isMomentType =>
+      this == NotificationType.like || this == NotificationType.comment ||
+      this == NotificationType.reshare || this == NotificationType.mention;
 
   String get verb {
     switch (this) {
@@ -28,7 +37,11 @@ enum NotificationType {
       case NotificationType.mention:
         return 'mentioned you';
       case NotificationType.voiceroom:
-        return 'started a Voice Room';
+        return 'invited you to a Voice Room';
+      case NotificationType.friendRequest:
+        return 'sent you a friend request';
+      case NotificationType.friendAccept:
+        return 'accepted your friend request';
     }
   }
 }
@@ -41,6 +54,9 @@ class NotificationModel {
   final String actorId;
   final String actorName;
   final String actorAvatar;
+  // Meaning depends on `type`: a moments postId for like/comment/reshare/
+  // mention, a voiceRooms roomId for voiceroom, or empty for friend
+  // request/accept (those only ever need `actorId`, to open a profile).
   final String postId;
   final bool isRead;
   final DateTime? createdAt;
@@ -51,7 +67,7 @@ class NotificationModel {
     required this.actorId,
     required this.actorName,
     this.actorAvatar = '',
-    required this.postId,
+    this.postId = '',
     this.isRead = false,
     this.createdAt,
   });

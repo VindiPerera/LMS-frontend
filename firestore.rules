@@ -60,6 +60,32 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow create, update: if isOwner(uid);
       allow delete: if false;
+
+      // ----------------------------------------------------------------
+      // users/{uid}/friend_requests/{requestId} — written under the
+      // RECIPIENT's uid (`uid` here) by the SENDER (`fromUserId`) — see
+      // FriendService.sendFriendRequest/cancelRequest. Both sides need
+      // some access: the recipient to read/accept/decline their inbox,
+      // the sender to write the initial request and cancel it later.
+      // ------------------------------------------------------------------
+      match /friend_requests/{requestId} {
+        allow read: if isOwner(uid);
+
+        // Without checking fromUserId here, any signed-in user could drop
+        // a friend_requests doc into ANY user's inbox claiming to be from
+        // someone else (spoofing who the request is "from").
+        allow create: if isSignedIn() && request.auth.uid == request.resource.data.fromUserId;
+
+        allow update: if isOwner(uid);
+
+        // The recipient can delete when declining; the original sender
+        // needs this too for "cancel" (FriendService.cancelRequest) —
+        // restricting delete to just the recipient silently breaks
+        // canceling an outgoing request (the whole batch, including the
+        // friendships doc update, fails since batches are all-or-nothing).
+        allow delete: if isOwner(uid) ||
+          (resource != null && request.auth.uid == resource.data.fromUserId);
+      }
     }
 
     // ------------------------------------------------------------------
@@ -210,6 +236,22 @@ service cloud.firestore {
         request.resource.data.createdAt == resource.data.createdAt;
 
       allow delete: if false;
+    }
+
+    // ------------------------------------------------------------------
+    // voiceRoomInvites/{inviteId} — a host inviting one specific friend to
+    // their live room. This is a client-writable trigger doc only, not the
+    // notification itself: functions/index.js's onVoiceRoomInviteCreate
+    // turns it into a real notifications/{recipientId}/items entry (Admin
+    // SDK, bypasses rules) — a client can never write directly into
+    // someone else's notification feed, matching every other notification
+    // type in this app.
+    // ------------------------------------------------------------------
+    match /voiceRoomInvites/{inviteId} {
+      allow read: if isSignedIn() &&
+        (request.auth.uid == resource.data.hostId || request.auth.uid == resource.data.recipientId);
+      allow create: if isSignedIn() && request.resource.data.hostId == request.auth.uid;
+      allow update, delete: if false;
     }
   }
 }

@@ -5,13 +5,17 @@ import '../../models/moment.dart';
 import '../../models/notification_model.dart';
 import '../../services/moment_service.dart';
 import '../../services/notification_service.dart';
+import '../../services/voice_room_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
+import '../friends/friend_profile_screen.dart';
+import '../voiceroom/voice_room_detail_screen.dart';
 import 'post_detail_screen.dart';
 
 /// Notification feed: `notifications/{uid}/items` ordered newest first.
 /// Unread rows get a subtle highlight; tapping one marks it read and opens
-/// the relevant post.
+/// whatever the notification is about — a post, a voice room, or a
+/// person's profile, depending on `type`.
 class NotificationScreen extends StatelessWidget {
   const NotificationScreen({super.key});
 
@@ -73,9 +77,39 @@ class _NotificationTile extends StatelessWidget {
 
   Future<void> _open(BuildContext context) async {
     NotificationService.markAsRead(notification.id);
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => PostDetailScreen(postId: notification.postId)),
-    );
+
+    switch (notification.type) {
+      case NotificationType.friendRequest:
+      case NotificationType.friendAccept:
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => FriendProfileScreen(friendId: notification.actorId, source: 'notification'),
+          ),
+        );
+        return;
+
+      case NotificationType.voiceroom:
+        final room = await VoiceRoomService.fetchRoom(notification.postId);
+        if (!context.mounted) return;
+        if (room == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('This Voice Room has ended.')),
+          );
+          return;
+        }
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => VoiceRoomDetailScreen(room: room)),
+        );
+        return;
+
+      case NotificationType.like:
+      case NotificationType.comment:
+      case NotificationType.reshare:
+      case NotificationType.mention:
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => PostDetailScreen(postId: notification.postId)),
+        );
+    }
   }
 
   @override
@@ -111,22 +145,47 @@ class _NotificationTile extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            FutureBuilder<Moment?>(
-              future: MomentService.fetchMoment(notification.postId),
-              builder: (context, snapshot) {
-                final thumbUrl = snapshot.data?.imageUrls.isNotEmpty == true
-                    ? snapshot.data!.imageUrls.first
-                    : snapshot.data?.videoThumbnailUrl;
-                if (thumbUrl == null) return const SizedBox.shrink();
-                return ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: CachedNetworkImage(imageUrl: thumbUrl, width: 44, height: 44, fit: BoxFit.cover),
-                );
-              },
-            ),
+            _buildTrailing(),
           ],
         ),
       ),
     );
+  }
+
+  Widget _buildTrailing() {
+    switch (notification.type) {
+      case NotificationType.like:
+      case NotificationType.comment:
+      case NotificationType.reshare:
+      case NotificationType.mention:
+        return FutureBuilder<Moment?>(
+          future: MomentService.fetchMoment(notification.postId),
+          builder: (context, snapshot) {
+            final thumbUrl = snapshot.data?.imageUrls.isNotEmpty == true
+                ? snapshot.data!.imageUrls.first
+                : snapshot.data?.videoThumbnailUrl;
+            if (thumbUrl == null) return const SizedBox.shrink();
+            return ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: CachedNetworkImage(imageUrl: thumbUrl, width: 44, height: 44, fit: BoxFit.cover),
+            );
+          },
+        );
+
+      case NotificationType.voiceroom:
+        return Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            color: AppColors.primaryPurple.withValues(alpha: 0.12),
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(Icons.mic_rounded, color: AppColors.primaryPurple, size: 16),
+        );
+
+      case NotificationType.friendRequest:
+      case NotificationType.friendAccept:
+        return const Icon(Icons.chevron_right_rounded, color: AppColors.textTertiary);
+    }
   }
 }

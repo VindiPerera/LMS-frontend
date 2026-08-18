@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../models/chat_message.dart';
 import '../../models/user.dart';
 import '../../services/chat_service.dart';
+import '../../services/push_notification_service.dart';
 import '../../theme/app_colors.dart';
 import '../../utils/chat_time.dart';
 import '../../widgets/app_avatar.dart';
@@ -28,10 +29,17 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     // Fire-and-forget: clears my unread count for this thread now that
     // it's open. Silently no-ops if the thread doesn't exist yet.
     ChatService.markRead(_chatId);
+    // While this thread is open, a "new message" push for it would just be
+    // a redundant banner on top of the message already appearing live in
+    // the list below — see push_notification_service.dart.
+    PushNotificationService.instance.setActiveChat(_chatId);
   }
 
   @override
   void dispose() {
+    if (PushNotificationService.instance.activeChatId == _chatId) {
+      PushNotificationService.instance.setActiveChat(null);
+    }
     _controller.dispose();
     _scrollController.dispose();
     super.dispose();

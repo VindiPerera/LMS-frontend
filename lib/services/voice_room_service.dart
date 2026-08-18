@@ -58,6 +58,17 @@ class VoiceRoomService {
     return streamActiveRoomForUser(uid);
   }
 
+  /// One-time fetch of a single room by id, e.g. hydrating a Voice Room
+  /// invite notification deep link (NavigationService.openVoiceRoom) into
+  /// the full [VoiceRoom] object VoiceRoomDetailScreen needs. Returns null
+  /// if it no longer exists.
+  static Future<VoiceRoom?> fetchRoom(String roomId) async {
+    if (roomId.isEmpty) return null;
+    final doc = await _rooms.doc(roomId).get();
+    if (!doc.exists) return null;
+    return VoiceRoom.fromFirestore(doc);
+  }
+
   /// Creates a new room hosted by the signed-in user.
   static Future<VoiceRoom> createRoom({
     required String title,
