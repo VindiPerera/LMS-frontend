@@ -180,6 +180,9 @@ class AuthService {
   }
 
   Future<void> logout() async {
+    // Before signOut() clears FirebaseAuth.instance.currentUser — otherwise
+    // setOnlineStatus has no uid left to write to.
+    await setOnlineStatus(false);
     await FirebaseAuth.instance.signOut();
     try {
       await GoogleSignIn().signOut();
@@ -195,6 +198,32 @@ class AuthService {
   void _afterSignIn() {
     // ignore: discarded_futures
     PushNotificationService.instance.initialize();
+    // ignore: discarded_futures
+    setOnlineStatus(true);
+  }
+
+  /// Marks the signed-in user online/offline — see main_shell.dart's
+  /// WidgetsBindingObserver, which calls this on every app foreground/
+  /// background transition, plus [_afterSignIn]/[logout] for sign-in/out.
+  ///
+  /// Known gap: Firestore has no built-in "disconnect" detection (unlike
+  /// Realtime Database's onDisconnect()), so an abrupt kill/crash — as
+  /// opposed to a normal background/logout — leaves `isOnline: true`
+  /// stuck until the next lifecycle event flips it back. `lastSeenAt` is
+  /// written alongside it so a "stale after N minutes" check could paper
+  /// over that later if it matters; nothing currently reads it.
+  Future<void> setOnlineStatus(bool online) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      await _users.doc(uid).update({
+        'isOnline': online,
+        'lastSeenAt': FieldValue.serverTimestamp(),
+      });
+    } catch (_) {
+      // Offline, or the profile doc doesn't exist yet — non-critical, the
+      // next successful call catches up.
+    }
   }
 
   /// Build a unique @handle from a display name, e.g. "Vinuk Lakvindu" ->

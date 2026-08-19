@@ -6,10 +6,10 @@ class ApiConfig {
   static String? _customBaseUrl;
 
   /// Default port for hello-backend (port 8001 is dedicated to hello-backend).
-  static int defaultPort = 8001;
+  static int defaultPort = 8000;
 
   /// Candidate ports to try (8001 first, then 8000).
-  static List<int> candidatePorts = [8001, 8000];
+  static List<int> candidatePorts = [8000];
 
   /// Override base URL at runtime (e.g. for testing on physical devices with a local LAN IP).
   static void setBaseUrl(String url) {
@@ -74,8 +74,6 @@ class ApiConfig {
 
     if (kIsWeb) {
       return [
-        'http://127.0.0.1:8001/api/media/upload',
-        'http://localhost:8001/api/media/upload',
         'http://127.0.0.1:8000/api/media/upload',
         'http://localhost:8000/api/media/upload',
       ];

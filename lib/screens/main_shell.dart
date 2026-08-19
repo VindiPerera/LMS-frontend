@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../services/auth_service.dart';
 import '../services/chat_service.dart';
 import '../services/notification_service.dart';
 import '../theme/app_colors.dart';
@@ -15,7 +16,7 @@ class MainShell extends StatefulWidget {
   State<MainShell> createState() => _MainShellState();
 }
 
-class _MainShellState extends State<MainShell> {
+class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   int _index = 0;
   late final Stream<int> _unreadStream = ChatService.streamTotalUnread();
   late final Stream<int> _notificationUnreadStream = NotificationService.streamUnreadCount();
@@ -27,6 +28,42 @@ class _MainShellState extends State<MainShell> {
     VoiceroomScreen(),
     MeScreen(),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    // MainShell only ever mounts post-login, so this covers "already
+    // signed in and the app just launched" — AuthService's own
+    // _afterSignIn() covers the moment of signing in itself.
+    AuthService.instance.setOnlineStatus(true);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // resumed = back in the foreground; everything else (paused, inactive,
+    // hidden, detached) is some flavor of "not actively in front of the
+    // user right now" — see AuthService.setOnlineStatus's doc comment for
+    // the one gap this doesn't cover (an abrupt kill skips this entirely).
+    switch (state) {
+      case AppLifecycleState.resumed:
+        AuthService.instance.setOnlineStatus(true);
+        break;
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+        AuthService.instance.setOnlineStatus(false);
+        break;
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.hidden:
+        break;
+    }
+  }
 
   // The Message tab's unread badge is driven live by _unreadStream below,
   // not part of this static tab list.

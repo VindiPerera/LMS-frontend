@@ -2,11 +2,14 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../../models/chat_message.dart';
 import '../../models/user.dart';
+import '../../models/voiceroom.dart';
 import '../../services/chat_service.dart';
 import '../../services/push_notification_service.dart';
+import '../../services/voice_room_service.dart';
 import '../../theme/app_colors.dart';
 import '../../utils/chat_time.dart';
 import '../../widgets/app_avatar.dart';
+import '../voiceroom/voice_room_detail_screen.dart';
 
 class ChatDetailScreen extends StatefulWidget {
   final AppUser user;
@@ -22,6 +25,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   late final String _chatId = ChatService.chatIdFor(widget.user.id);
   late final Stream<List<ChatMessage>> _messagesStream =
       ChatService.streamMessages(_chatId);
+  // The OTHER person in this thread's live room, if they have one right
+  // now — same "is this person live" check the profile screens use.
+  late final Stream<VoiceRoom?> _theirVoiceRoomStream =
+      VoiceRoomService.streamActiveRoomForUser(widget.user.id);
 
   @override
   void initState() {
@@ -127,6 +134,14 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       ),
       body: Column(
         children: [
+          StreamBuilder<VoiceRoom?>(
+            stream: _theirVoiceRoomStream,
+            builder: (context, snapshot) {
+              final room = snapshot.data;
+              if (room == null) return const SizedBox.shrink();
+              return _PartnerVoiceRoomBanner(hostName: widget.user.name, room: room);
+            },
+          ),
           Expanded(
             child: StreamBuilder<List<ChatMessage>>(
               stream: _messagesStream,
@@ -204,6 +219,108 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           ),
           _Composer(controller: _controller, onSend: _send),
         ],
+      ),
+    );
+  }
+}
+
+/// Banner shown atop a chat thread when the OTHER person is currently
+/// hosting a live Voice Room — same "is this person live right now" check
+/// (and matching gradient/"LIVE" styling) as chat_list_screen.dart's
+/// "you're hosting" banner, just pointed at [widget.user] instead of the
+/// signed-in user.
+class _PartnerVoiceRoomBanner extends StatelessWidget {
+  final String hostName;
+  final VoiceRoom room;
+  const _PartnerVoiceRoomBanner({required this.hostName, required this.room});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => VoiceRoomDetailScreen(room: room)),
+        ),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF8E2DE2), Color(0xFF4A00E0)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF8E2DE2).withValues(alpha: 0.3),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              const CircleAvatar(
+                backgroundColor: Colors.white24,
+                child: Icon(Icons.mic_rounded, color: Colors.white),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.redAccent,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Text(
+                            'LIVE NOW',
+                            style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w900),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            '$hostName is hosting',
+                            style: const TextStyle(color: Colors.white70, fontSize: 11),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      room.title,
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => VoiceRoomDetailScreen(room: room)),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: AppColors.primaryPurple,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: const Text('Join', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

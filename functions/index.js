@@ -39,8 +39,28 @@ async function writeNotification(uid, payload) {
   });
 }
 
+/** Maps a notification `type` to one of the three Android channels created
+ * client-side in push_notification_service.dart (all Importance.high) —
+ * must stay in sync with that file's `_channelFor`. */
+function androidChannelFor(type) {
+  if (type === "chat") return "chat_channel";
+  if (type === "friendRequest" || type === "friendAccept" || type === "voiceroom") {
+    return "social_channel";
+  }
+  return "moments_channel"; // like / comment / reshare / mention
+}
+
 /** Sends an FCM push to a single user's registered token, if any. Never
- * throws — a missing/stale token should not fail the triggering write. */
+ * throws — a missing/stale token should not fail the triggering write.
+ *
+ * The `android` block below is not optional decoration: without an
+ * explicit channelId, a backgrounded/terminated app has this notification
+ * rendered by the OS itself (our own foreground handler in
+ * push_notification_service.dart never runs), which falls back to a
+ * generic low-priority system channel — no heads-up popup, no screen
+ * wake, and default (not lock-screen-visible) visibility. Routing it to
+ * one of our own pre-created high-importance channels is what actually
+ * fixes that. */
 async function sendPushToUser(uid, { title, body, data }) {
   if (!uid) return;
   try {
@@ -51,6 +71,21 @@ async function sendPushToUser(uid, { title, body, data }) {
     await getMessaging().send({
       token,
       notification: { title, body },
+      android: {
+        priority: "high",
+        notification: {
+          channelId: androidChannelFor(data && data.type),
+          priority: "max",
+          visibility: "public",
+          defaultSound: true,
+          defaultVibrateTimings: true,
+        },
+      },
+      apns: {
+        payload: {
+          aps: { sound: "default", contentAvailable: true },
+        },
+      },
       data: Object.fromEntries(
         Object.entries(data || {}).map(([k, v]) => [k, String(v)])
       ),

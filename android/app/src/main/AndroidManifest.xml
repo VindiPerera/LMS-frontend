@@ -48,6 +48,19 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <!-- Fallback channel for any FCM push that somehow arrives without
+             an explicit android.notification.channel_id (functions/
+             index.js's sendPushToUser always sets one — see
+             androidChannelFor — but this is the safety net for a
+             backgrounded/terminated app if that ever changes). Without
+             this, an unrouted push falls back to a generic low-priority
+             system channel: no heads-up popup, no screen wake, no
+             lock-screen visibility. Must match a channel id actually
+             created in push_notification_service.dart. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="moments_channel" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and
