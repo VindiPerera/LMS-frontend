@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/user.dart';
+import 'auth_service.dart';
+import 'notification_api_service.dart';
 import 'partner_service.dart';
 
 enum FriendStatus { none, pending, incoming, friends, blocked }
@@ -56,6 +58,14 @@ class FriendService {
     );
 
     await batch.commit();
+
+    // ignore: discarded_futures
+    NotificationApiService.sendPush(
+      recipientUid: toUserId,
+      title: AuthService.instance.currentUser?.name ?? 'Someone',
+      body: 'sent you a friend request',
+      data: {'type': 'friendRequest', 'actorId': uid},
+    );
   }
 
   /// Accept incoming friend request using batch write
@@ -86,6 +96,14 @@ class FriendService {
     );
 
     await batch.commit();
+
+    // ignore: discarded_futures
+    NotificationApiService.sendPush(
+      recipientUid: fromUserId,
+      title: AuthService.instance.currentUser?.name ?? 'Someone',
+      body: 'accepted your friend request',
+      data: {'type': 'friendAccept', 'actorId': uid},
+    );
   }
 
   /// Decline incoming friend request

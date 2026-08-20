@@ -1,12 +1,17 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../models/comment_model.dart';
 import 'auth_service.dart';
+import 'notification_api_service.dart';
 
 /// All Firestore access for `moments/{postId}/comments`. `commentCount` on
-/// the parent post is never touched here — functions/index.js's
-/// onCommentCreate/onCommentDelete own that counter.
+/// the parent post is maintained client-side here via FieldValue.increment
+/// (this project doesn't deploy Cloud Functions — no Blaze plan — so there's
+/// no server-side counter owner; the same pattern likeCount already used is
+/// applied here and to reshareCount in moment_service.dart's createMoment).
 class CommentService {
   static final RegExp _mentionPattern = RegExp(r'@([a-zA-Z0-9_]{2,30})');
 
@@ -43,8 +48,11 @@ class CommentService {
   }
 
   /// Posts a comment (or, when [parentCommentId] is set, a reply).
-  /// `@handle` mentions inside [text] are resolved to uids and stored on
-  /// the comment so functions/index.js's onCommentCreate can push to them.
+  /// `@handle` mentions inside [text] are resolved to uids, stored on the
+  /// comment for comment_sheet.dart's tappable-mention rendering, and also
+  /// pushed to (along with the post owner) via NotificationApiService —
+  /// see that class's doc comment for why this goes through hello-backend
+  /// rather than a Cloud Function.
   static Future<void> addComment({
     required String postId,
     required String text,
@@ -98,8 +106,59 @@ class CommentService {
     });
 
     await batch.commit();
+
+    // Fire-and-forget: notify the post owner (if it's not their own
+    // comment) and anyone @mentioned. One extra read for the owner's id —
+    // acceptable here, this isn't a hot path like the feed/scroll.
+    unawaited(_notifyAfterComment(
+      postRef: postRef,
+      commenterId: uid,
+      commenterName: userName,
+      text: cleanText,
+      mentionedUserIds: mentionedUserIds,
+    ));
   }
 
+  static Future<void> _notifyAfterComment({
+    required DocumentReference<Map<String, dynamic>> postRef,
+    required String commenterId,
+    required String commenterName,
+    required String text,
+    required List<String> mentionedUserIds,
+  }) async {
+    String? ownerId;
+    try {
+      final postSnap = await postRef.get();
+      ownerId = (postSnap.data()?['user'] as Map?)?['id']?.toString();
+    } catch (_) {
+      return; // Can't notify anyone without knowing the owner — bail quietly.
+    }
+
+    final preview = text.length > 80 ? '${text.substring(0, 80)}…' : text;
+    final alreadyNotified = <String>{};
+
+    if (ownerId != null && ownerId.isNotEmpty && ownerId != commenterId) {
+      alreadyNotified.add(ownerId);
+      // ignore: discarded_futures
+      NotificationApiService.sendPush(
+        recipientUid: ownerId,
+        title: commenterName,
+        body: 'commented: $preview',
+        data: {'type': 'comment', 'postId': postRef.id, 'actorId': commenterId},
+      );
+    }
+
+    for (final mentionedUid in mentionedUserIds) {
+      if (mentionedUid == commenterId || !alreadyNotified.add(mentionedUid)) continue;
+      // ignore: discarded_futures
+      NotificationApiService.sendPush(
+        recipientUid: mentionedUid,
+        title: commenterName,
+        body: 'mentioned you: $preview',
+        data: {'type': 'mention', 'postId': postRef.id, 'actorId': commenterId},
+      );
+    }
+  }
 
   static Future<void> deleteComment({
     required String postId,

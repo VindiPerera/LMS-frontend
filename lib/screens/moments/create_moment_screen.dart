@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -35,26 +33,17 @@ class _ImageItem {
   bool get isDone => finalUrl != null;
 }
 
+/// The composer no longer lets anyone attach a *new* video — moments are
+/// photos-and-text only now. This only reflects a video an existing post
+/// already had, so re-saving edits to an old video moment doesn't silently
+/// strip it.
 class _VideoItem {
-  File? file;
-  Uint8List? thumbBytes;
-  String? existingUrl;
-  String? existingThumbUrl;
-  double progress = 0;
-  bool uploading = false;
-  bool failed = false;
-  String? finalUrl;
-  String? finalThumbUrl;
+  final String existingUrl;
+  final String? existingThumbUrl;
 
   _VideoItem.existing({required String url, String? thumbUrl})
       : existingUrl = url,
-        existingThumbUrl = thumbUrl,
-        finalUrl = url,
-        finalThumbUrl = thumbUrl;
-
-  _VideoItem.picked({required this.file, required this.thumbBytes});
-
-  bool get isDone => finalUrl != null;
+        existingThumbUrl = thumbUrl;
 }
 
 /// Create a new moment, or (when [existing] is passed) edit one. Only newly
@@ -118,8 +107,6 @@ class _CreateMomentScreenState extends State<CreateMomentScreen> {
 
     if (widget.initialPicker == 'image') {
       WidgetsBinding.instance.addPostFrameCallback((_) => _pickImage(ImageSource.gallery));
-    } else if (widget.initialPicker == 'video') {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _pickVideo(ImageSource.gallery));
     }
   }
 
@@ -148,72 +135,7 @@ class _CreateMomentScreenState extends State<CreateMomentScreen> {
     }
   }
 
-  Future<void> _pickVideo(ImageSource source) async {
-    if (_images.isNotEmpty) return;
-    try {
-      final file = await MediaService.pickVideo(source);
-      if (file == null) return;
-
-      if (!mounted) return;
-      setState(() => _error = null);
-      final compressed = await MediaService.compressVideo(File(file.path));
-      final thumb = await MediaService.generateVideoThumbnail(compressed.path);
-      if (!mounted) return;
-      setState(() => _video = _VideoItem.picked(file: compressed, thumbBytes: thumb));
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _error = 'Failed to select video: $e');
-    }
-  }
-
   void _removeImage(_ImageItem item) => setState(() => _images.remove(item));
-  void _removeVideo() => setState(() => _video = null);
-
-  Future<void> _showPickerSheet() async {
-    await showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (sheetContext) => SafeArea(
-        child: Wrap(
-          children: [
-            ListTile(
-              leading: const Icon(Icons.photo_library_outlined, color: AppColors.primaryPurple),
-              title: const Text('Photo from gallery'),
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                _pickImage(ImageSource.gallery);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.camera_alt_outlined, color: AppColors.primaryPurple),
-              title: const Text('Take a photo'),
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                _pickImage(ImageSource.camera);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.video_library_outlined, color: AppColors.primaryPurple),
-              title: const Text('Video from gallery'),
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                _pickVideo(ImageSource.gallery);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.videocam_outlined, color: AppColors.primaryPurple),
-              title: const Text('Record a video'),
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                _pickVideo(ImageSource.camera);
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 
   bool get _canPost {
     final hasText = _textController.text.trim().isNotEmpty;
@@ -243,10 +165,7 @@ class _CreateMomentScreenState extends State<CreateMomentScreen> {
       return;
     }
 
-    final uploadsOk = await Future.wait([
-      _uploadPendingImages(uid, _postId),
-      _uploadPendingVideo(uid, _postId),
-    ]).then((results) => results.every((ok) => ok));
+    final uploadsOk = await _uploadPendingImages(uid, _postId);
 
     if (!uploadsOk) {
       if (!mounted) return;
@@ -270,8 +189,8 @@ class _CreateMomentScreenState extends State<CreateMomentScreen> {
           postId: _postId,
           text: _textController.text,
           imageUrls: imageUrls,
-          videoUrl: _video?.finalUrl,
-          videoThumbnailUrl: _video?.finalThumbUrl,
+          videoUrl: _video?.existingUrl,
+          videoThumbnailUrl: _video?.existingThumbUrl,
           mediaType: mediaType,
           visibility: _visibility,
         );
@@ -280,8 +199,6 @@ class _CreateMomentScreenState extends State<CreateMomentScreen> {
           text: _textController.text,
           postId: _postId,
           imageUrls: imageUrls,
-          videoUrl: _video?.finalUrl,
-          videoThumbnailUrl: _video?.finalThumbUrl,
           mediaType: mediaType,
           visibility: _visibility,
         );
@@ -341,51 +258,6 @@ class _CreateMomentScreenState extends State<CreateMomentScreen> {
       return false;
     }
   }
-
-  Future<bool> _uploadPendingVideo(String uid, String postId) async {
-    final video = _video;
-    if (video == null || video.isDone) return true;
-
-    setState(() {
-      video.uploading = true;
-      video.failed = false;
-      video.progress = 0;
-    });
-    try {
-      final videoUrl = await MediaService.uploadVideoFile(
-        file: video.file!,
-        uid: uid,
-        postId: postId,
-        onProgress: (p) {
-          if (mounted) setState(() => video.progress = p);
-        },
-      );
-      String? thumbUrl;
-      if (video.thumbBytes != null) {
-        try {
-          thumbUrl = await MediaService.uploadVideoThumbnail(bytes: video.thumbBytes!, uid: uid, postId: postId);
-        } catch (_) {}
-      }
-      if (mounted) {
-        setState(() {
-          video.uploading = false;
-          video.finalUrl = videoUrl;
-          video.finalThumbUrl = thumbUrl ?? video.existingThumbUrl;
-        });
-      }
-      return true;
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          video.uploading = false;
-          video.failed = true;
-          _error = e.toString().replaceFirst('Exception: ', '');
-        });
-      }
-      return false;
-    }
-  }
-
 
   @override
   Widget build(BuildContext context) {
@@ -500,21 +372,6 @@ class _CreateMomentScreenState extends State<CreateMomentScreen> {
                     tooltip: 'Take a photo',
                     onPressed: _canAddMore ? () => _pickImage(ImageSource.camera) : null,
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.videocam_outlined, color: AppColors.primaryPurple),
-                    tooltip: 'Record a video',
-                    onPressed: _canAddMore ? () => _pickVideo(ImageSource.camera) : null,
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.video_library_outlined, color: AppColors.primaryPurple),
-                    tooltip: 'Video from gallery',
-                    onPressed: _canAddMore ? () => _pickVideo(ImageSource.gallery) : null,
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    icon: const Icon(Icons.more_horiz_rounded, color: AppColors.textTertiary),
-                    onPressed: _showPickerSheet,
-                  ),
                 ],
               ),
             ),
@@ -540,19 +397,15 @@ class _CreateMomentScreenState extends State<CreateMomentScreen> {
                     ? CachedNetworkImage(imageUrl: item.existingUrl!, fit: BoxFit.cover, width: 88, height: 88)
                     : Image.memory(item.bytes!, fit: BoxFit.cover, width: 88, height: 88),
               )),
+          // Read-only: this is the video an existing post already had.
+          // Video is no longer something the composer can add or replace.
           if (_video != null)
             _MediaThumb(
               key: const ValueKey('video'),
               isVideo: true,
-              progress: _video!.uploading ? _video!.progress : null,
-              failed: _video!.failed,
-              onRemove: _removeVideo,
-              onRetry: () => _uploadPendingVideo(AuthService.instance.currentUser!.id, _postId),
-              child: _video!.thumbBytes != null
-                  ? Image.memory(_video!.thumbBytes!, fit: BoxFit.cover, width: 88, height: 88)
-                  : _video!.existingThumbUrl != null
-                      ? CachedNetworkImage(imageUrl: _video!.existingThumbUrl!, fit: BoxFit.cover, width: 88, height: 88)
-                      : Container(color: Colors.black, width: 88, height: 88),
+              child: _video!.existingThumbUrl != null
+                  ? CachedNetworkImage(imageUrl: _video!.existingThumbUrl!, fit: BoxFit.cover, width: 88, height: 88)
+                  : Container(color: Colors.black, width: 88, height: 88),
             ),
         ],
       ),
@@ -565,8 +418,8 @@ class _MediaThumb extends StatelessWidget {
   final bool isVideo;
   final double? progress;
   final bool failed;
-  final VoidCallback onRemove;
-  final VoidCallback onRetry;
+  final VoidCallback? onRemove;
+  final VoidCallback? onRetry;
 
   const _MediaThumb({
     super.key,
@@ -574,8 +427,8 @@ class _MediaThumb extends StatelessWidget {
     this.isVideo = false,
     this.progress,
     this.failed = false,
-    required this.onRemove,
-    required this.onRetry,
+    this.onRemove,
+    this.onRetry,
   });
 
   @override
@@ -616,18 +469,19 @@ class _MediaThumb extends StatelessWidget {
                   ),
                 ),
               ),
-            Positioned(
-              top: 2,
-              right: 2,
-              child: GestureDetector(
-                onTap: onRemove,
-                child: Container(
-                  padding: const EdgeInsets.all(2),
-                  decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
-                  child: const Icon(Icons.close_rounded, color: Colors.white, size: 14),
+            if (onRemove != null)
+              Positioned(
+                top: 2,
+                right: 2,
+                child: GestureDetector(
+                  onTap: onRemove,
+                  child: Container(
+                    padding: const EdgeInsets.all(2),
+                    decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+                    child: const Icon(Icons.close_rounded, color: Colors.white, size: 14),
+                  ),
                 ),
               ),
-            ),
           ],
         ),
       ),

@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../models/moment.dart';
 import 'auth_service.dart';
 import 'friend_service.dart';
+import 'notification_api_service.dart';
 
 /// One page of the Moments feed, keyed by a [DocumentSnapshot] cursor
 /// (never a raw timestamp — two posts can share a createdAt down to the
@@ -27,9 +28,15 @@ class MomentPage {
 /// `users/{uid}`). Screens/widgets never talk to Firestore directly — see
 /// lib/widgets/moment_card.dart and lib/screens/moments/moments_screen.dart.
 ///
-/// `commentCount`/`reshareCount` are deliberately never written here —
-/// they're Cloud-Function-only (functions/index.js), matching firestore.rules
-/// which reject client updates to those fields.
+/// `likeCount`/`commentCount`/`reshareCount`/`reportCount` are all
+/// maintained client-side via FieldValue.increment (see [createMoment]
+/// below for reshareCount, comment_service.dart for commentCount,
+/// report_service.dart for reportCount, and toggleLike/setReaction below
+/// for likeCount) — this project doesn't deploy Cloud Functions (no Blaze
+/// plan), so there's no server-side owner for these counters.
+/// firestore.rules' moments update rule is written to allow exactly this:
+/// any signed-in, non-blocked user may update a post as long as
+/// `user.id`/`createdAt`/`isDeleted` stay unchanged.
 class MomentService {
   static const int defaultPageSize = 15;
   static const String defaultReactionEmoji = '❤️';
@@ -231,10 +238,23 @@ class MomentService {
 
     if (isReshare && originalPostId != null && originalPostId.isNotEmpty) {
       try {
-        await _moments.doc(originalPostId).update({
+        final originalRef = _moments.doc(originalPostId);
+        await originalRef.update({
           'reshareCount': FieldValue.increment(1),
           'updatedAt': FieldValue.serverTimestamp(),
         });
+
+        final originalSnap = await originalRef.get();
+        final originalOwnerId = (originalSnap.data()?['user'] as Map?)?['id']?.toString();
+        if (originalOwnerId != null && originalOwnerId.isNotEmpty && originalOwnerId != uid) {
+          // ignore: discarded_futures
+          NotificationApiService.sendPush(
+            recipientUid: originalOwnerId,
+            title: currentUser.name,
+            body: 'reshared your moment',
+            data: {'type': 'reshare', 'postId': originalPostId, 'actorId': uid},
+          );
+        }
       } catch (_) {}
     }
 
@@ -392,5 +412,48 @@ class MomentService {
         'updatedAt': FieldValue.serverTimestamp(),
       });
     });
+  }
+
+  // --------------------------------------------------------------------
+  // Profile fan-out
+  // --------------------------------------------------------------------
+
+  /// Updates the denormalized `user.name`/`user.avatarUrl` snapshot on
+  /// every non-deleted moment [uid] has posted — called from
+  /// AuthService.updateProfile() right after a successful name/avatar
+  /// change, so old posts don't keep showing a stale name/photo. (This was
+  /// previously a Cloud Function, functions/index.js's onUserProfileUpdate;
+  /// doing it client-side instead since this project stays on the free
+  /// Spark plan. The owner-only branch of firestore.rules' moments update
+  /// rule permits this — user.id/createdAt/isDeleted all stay unchanged.)
+  ///
+  /// Best-effort: a failure here (offline, a huge post history) shouldn't
+  /// block the profile edit itself from succeeding.
+  static Future<void> updateAuthorInfoAcrossMoments({
+    required String uid,
+    required String name,
+    required String avatarUrl,
+  }) async {
+    if (uid.isEmpty) return;
+    try {
+      final snap = await _moments.where('user.id', isEqualTo: uid).get();
+      if (snap.docs.isEmpty) return;
+
+      // Firestore batches cap at 500 writes; chunk defensively.
+      final docs = snap.docs;
+      for (var i = 0; i < docs.length; i += 500) {
+        final batch = FirebaseFirestore.instance.batch();
+        for (final doc in docs.skip(i).take(500)) {
+          batch.update(doc.reference, {
+            'user.name': name,
+            'user.avatarUrl': avatarUrl,
+          });
+        }
+        await batch.commit();
+      }
+    } catch (_) {
+      // Non-critical — worst case old posts show a stale name/avatar until
+      // the next edit.
+    }
   }
 }

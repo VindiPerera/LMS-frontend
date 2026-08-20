@@ -5,9 +5,11 @@ import '../../models/user.dart';
 import '../../models/voiceroom.dart';
 import '../../services/auth_service.dart';
 import '../../services/moment_service.dart';
+import '../../services/payment_api_service.dart';
 import '../../services/voice_room_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
+import '../../widgets/payment_method_sheet.dart';
 import '../auth/splash_screen.dart';
 import '../friends/my_qr_code_screen.dart';
 import '../moments/user_moments_screen.dart';
@@ -640,7 +642,7 @@ class _VipBenefitsCard extends StatelessWidget {
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: () {},
+              onPressed: () => _subscribe(context),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primaryPurple,
                 padding: const EdgeInsets.symmetric(vertical: 14),
@@ -648,9 +650,9 @@ class _VipBenefitsCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(24),
                 ),
               ),
-              child: const Text(
-                'See all VIP Features',
-                style: TextStyle(
+              child: Text(
+                'Subscribe — \$${VipPlan.thirtyDays.amount.toStringAsFixed(2)} / 30 days',
+                style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.w700,
                   fontSize: 14.5,
@@ -660,6 +662,23 @@ class _VipBenefitsCard extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+
+  Future<void> _subscribe(BuildContext context) async {
+    // Captured before any pop below — a plain `context` variable stops
+    // being safely usable for widget lookups once the sheet that owns it
+    // closes, but this messenger reference stays valid.
+    final messenger = ScaffoldMessenger.of(context);
+
+    final purchased = await PaymentMethodSheet.show(context, plan: VipPlan.thirtyDays);
+    if (purchased != true) return;
+
+    await AuthService.instance.refreshCurrentUser();
+    if (!context.mounted) return;
+    Navigator.of(context).pop(); // close this VIP-benefits sheet too — done.
+    messenger.showSnackBar(
+      const SnackBar(content: Text("🎉 You're VIP for the next 30 days!")),
     );
   }
 

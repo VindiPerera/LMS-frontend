@@ -34,4 +34,19 @@ class PartnerService {
     }
     return AppUser.fromJson({...doc.data()!, 'id': doc.id});
   }
+
+  /// Live online/offline status for one user — used anywhere a green
+  /// indicator needs to actually stay current while it's on screen (e.g.
+  /// chat_detail_screen.dart's header) rather than showing whatever was
+  /// true at the moment that screen happened to open. Backed by
+  /// AuthService.setOnlineStatus/main_shell.dart's app-lifecycle observer,
+  /// which keep `users/{uid}.isOnline` current on the other end.
+  static Stream<bool> streamIsOnline(String uid) {
+    if (uid.isEmpty) return Stream.value(false);
+    return _users
+        .doc(uid)
+        .snapshots()
+        .map((doc) => doc.data()?['isOnline'] == true)
+        .handleError((_) => false);
+  }
 }

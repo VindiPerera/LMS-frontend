@@ -4,6 +4,7 @@ import '../models/chat_message.dart';
 import '../models/user.dart';
 import '../utils/chat_time.dart';
 import 'auth_service.dart';
+import 'notification_api_service.dart';
 
 /// 1:1 chat threads, backed by Firestore:
 ///
@@ -136,6 +137,19 @@ class ChatService {
     });
 
     await batch.commit();
+
+    // Fire-and-forget: notifies the recipient's device even while the app
+    // is backgrounded/locked (the Firestore write above only covers the
+    // in-app unread badge, which nobody sees until they open the app).
+    // See NotificationApiService's class doc for why this goes through
+    // hello-backend rather than a Cloud Function.
+    // ignore: discarded_futures
+    NotificationApiService.sendPush(
+      recipientUid: other.id,
+      title: AuthService.instance.currentUser?.name ?? 'New message',
+      body: text,
+      data: {'type': 'chat', 'chatId': chatId, 'senderId': uid},
+    );
   }
 
   /// Clears the current user's unread count for a thread — call when

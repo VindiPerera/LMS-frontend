@@ -4,9 +4,13 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../models/report_model.dart';
 
 /// Writes to `reports/{reportId}`. Client-side read access is intentionally
-/// not exposed here — firestore.rules restricts reads to admins, and
-/// functions/index.js's onReportCreate keeps `moments/{postId}.reportCount`
-/// in sync, so the app never needs to read reports back.
+/// not exposed here — firestore.rules restricts reads to admins.
+///
+/// `moments/{postId}.reportCount` is bumped client-side alongside the
+/// report itself (this project doesn't deploy Cloud Functions — no Blaze
+/// plan — so there's no onReportCreate to do it server-side). Nothing in
+/// the UI currently displays this count; it's kept accurate anyway for
+/// if/when an admin view or auto-hide-after-N-reports feature reads it.
 class ReportService {
   static Future<void> reportPost({
     required String postId,
@@ -25,6 +29,12 @@ class ReportService {
       details: details,
     );
 
-    await FirebaseFirestore.instance.collection('reports').add(report.toMap());
+    final batch = FirebaseFirestore.instance.batch();
+    batch.set(FirebaseFirestore.instance.collection('reports').doc(), report.toMap());
+    batch.update(FirebaseFirestore.instance.collection('moments').doc(postId), {
+      'reportCount': FieldValue.increment(1),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    await batch.commit();
   }
 }

@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import '../models/notification_model.dart';
 import 'auth_service.dart';
+import 'notification_api_service.dart';
 
 /// Firestore access for `notifications/{uid}/items`. Distinct from
 /// push_notification_service.dart, which owns FCM registration and showing
@@ -60,13 +61,11 @@ class NotificationService {
 
   /// Invites [recipientId] to the signed-in user's live voice room.
   ///
-  /// This does NOT write the notification itself — `notifications/{uid}/
-  /// items` is owner-write-only (see firestore.rules), so no client can
-  /// ever drop something into another user's feed directly, same as every
-  /// other notification type in this app. Instead this writes a
-  /// `voiceRoomInvites` doc; functions/index.js's onVoiceRoomInviteCreate
-  /// (Admin SDK, bypasses rules) turns that into the real notification and
-  /// push for [recipientId].
+  /// Still writes a `voiceRoomInvites` doc (harmless, and picks up
+  /// automatically if Cloud Functions ever get deployed later — see that
+  /// collection's firestore.rules comment), but the actual push now goes
+  /// straight through NotificationApiService/hello-backend, since nothing
+  /// is watching that collection to turn it into a push right now.
   static Future<void> inviteToVoiceRoom({
     required String recipientId,
     required String roomId,
@@ -83,5 +82,13 @@ class NotificationService {
       'roomId': roomId,
       'createdAt': FieldValue.serverTimestamp(),
     });
+
+    // ignore: discarded_futures
+    NotificationApiService.sendPush(
+      recipientUid: recipientId,
+      title: host.name,
+      body: 'invited you to a Voice Room',
+      data: {'type': 'voiceroom', 'roomId': roomId, 'actorId': hostId},
+    );
   }
 }

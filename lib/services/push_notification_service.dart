@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'navigation_service.dart';
+import 'notification_api_service.dart';
 
 /// Web Push certificate key, from Firebase Console → Project settings →
 /// Cloud Messaging → "Web configuration" → Generate key pair. Only needed
@@ -224,5 +225,10 @@ class PushNotificationService {
     } catch (_) {
       // Non-critical — the user just won't be reachable by push yet.
     }
+    // This is the copy that actually matters now — NotificationApiService
+    // (hello-backend) is what sends pushes, not Firestore/Cloud Functions.
+    // The write above is kept too: harmless, and picks up automatically if
+    // Cloud Functions ever get deployed later.
+    await NotificationApiService.saveToken(uid: uid, token: token);
   }
 }

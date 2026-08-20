@@ -1,6 +1,31 @@
 /**
  * Cloud Functions for FaceTalk's Moments feature.
  *
+ * ⚠️ NOT CURRENTLY DEPLOYED. Deploying Cloud Functions requires the project
+ * to be on Firebase's Blaze (pay-as-you-go) plan — Cloud Functions 2nd gen
+ * needs Cloud Run/Cloud Build/Artifact Registry underneath it, which Google
+ * gates behind having a billing account attached, even though actual usage
+ * at this app's scale would land at ~$0/month. The decision was made to
+ * stay on the free Spark plan instead and not attach billing at all, so
+ * this file is kept as reference/for-later but nothing here runs.
+ *
+ * Concretely, that means: `likeCount`/`commentCount`/`reshareCount`/
+ * `reportCount` are all maintained CLIENT-SIDE instead (see
+ * moment_service.dart, comment_service.dart, report_service.dart) — the
+ * onCommentCreate/onCommentDelete/onReshare/onReportCreate functions below
+ * are redundant with that, not a second source of truth. The profile
+ * name/avatar fan-out (onUserProfileUpdate) also has a client-side
+ * equivalent (MomentService.updateAuthorInfoAcrossMoments). Everything
+ * else here — writing to `notifications/{uid}/items` and sending FCM
+ * pushes for likes/comments/reshares/mentions/chat messages/friend
+ * requests/voice room invites — has NO client-side equivalent and simply
+ * doesn't happen: a client can't write into another user's notifications
+ * feed (firestore.rules only allows the owner to), and sending someone
+ * else a push notification fundamentally requires privileged server-side
+ * credentials that can't safely live in the app. If billing ever gets
+ * turned on, `firebase deploy --only functions` makes all of this live
+ * immediately with no further changes needed.
+ *
  * Schema note: unlike a flat `userId`/`userName`/`userAvatar` shape, this
  * app denormalizes the author onto every moments/comments/notifications doc
  * as a `user`/`actor` object ({ id, name, avatarUrl, ... }) — the same shape

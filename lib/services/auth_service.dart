@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:google_sign_in/google_sign_in.dart';
 import '../models/user.dart';
+import 'moment_service.dart';
 import 'push_notification_service.dart';
 
 /// Result of a successful register/login/Google sign-in.
@@ -176,7 +177,22 @@ class AuthService {
     if (uid == null) throw StateError('Not signed in.');
 
     await _users.doc(uid).update({...fields, 'profileCompleted': true});
-    return (await refreshCurrentUser())!;
+    final updated = (await refreshCurrentUser())!;
+
+    // Old posts embed a snapshot of the author's name/avatar — keep it from
+    // going stale. Fire-and-forget: shouldn't block returning the updated
+    // profile, and it's non-critical if it fails (see
+    // MomentService.updateAuthorInfoAcrossMoments's doc comment).
+    if (fields.containsKey('name') || fields.containsKey('avatarUrl')) {
+      // ignore: discarded_futures
+      MomentService.updateAuthorInfoAcrossMoments(
+        uid: uid,
+        name: updated.name,
+        avatarUrl: updated.avatarUrl,
+      );
+    }
+
+    return updated;
   }
 
   Future<void> logout() async {

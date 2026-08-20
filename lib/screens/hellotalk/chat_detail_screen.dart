@@ -4,6 +4,7 @@ import '../../models/chat_message.dart';
 import '../../models/user.dart';
 import '../../models/voiceroom.dart';
 import '../../services/chat_service.dart';
+import '../../services/partner_service.dart';
 import '../../services/push_notification_service.dart';
 import '../../services/voice_room_service.dart';
 import '../../theme/app_colors.dart';
@@ -29,6 +30,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   // now — same "is this person live" check the profile screens use.
   late final Stream<VoiceRoom?> _theirVoiceRoomStream =
       VoiceRoomService.streamActiveRoomForUser(widget.user.id);
+  // Live online/offline for the header — widget.user.isOnline alone would
+  // just be whatever was true the moment this screen opened, never
+  // updating while the chat stays open.
+  late final Stream<bool> _theirOnlineStream = PartnerService.streamIsOnline(widget.user.id);
 
   @override
   void initState() {
@@ -97,32 +102,47 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 0,
-        title: Row(
-          children: [
-            AppAvatar.forUser(widget.user, size: 36, showOnlineDot: true),
-            const SizedBox(width: 10),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+        title: StreamBuilder<bool>(
+          stream: _theirOnlineStream,
+          initialData: widget.user.isOnline,
+          builder: (context, snapshot) {
+            final isOnline = snapshot.data ?? false;
+            return Row(
               children: [
-                Text(
-                  widget.user.name,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                  ),
+                // Built directly (not via AppAvatar.forUser) so the dot
+                // uses the live `isOnline` above instead of the static
+                // widget.user.isOnline snapshot forUser would read.
+                AppAvatar(
+                  seed: widget.user.name,
+                  imageUrl: widget.user.avatarUrl,
+                  size: 36,
+                  showFlag: false,
+                  showOnlineDot: true,
+                  isOnline: isOnline,
                 ),
-                Text(
-                  widget.user.isOnline ? 'Active now' : 'Offline',
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    color: widget.user.isOnline
-                        ? AppColors.online
-                        : AppColors.textTertiary,
-                  ),
+                const SizedBox(width: 10),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.user.name,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Text(
+                      isOnline ? 'Active now' : 'Offline',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: isOnline ? AppColors.online : AppColors.textTertiary,
+                      ),
+                    ),
+                  ],
                 ),
               ],
-            ),
-          ],
+            );
+          },
         ),
         actions: [
           IconButton(icon: const Icon(Icons.call_outlined), onPressed: () {}),

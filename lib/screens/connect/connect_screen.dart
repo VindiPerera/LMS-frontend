@@ -5,7 +5,6 @@ import '../../services/teacher_service.dart';
 import '../../theme/app_colors.dart';
 
 import '../../widgets/app_avatar.dart';
-import '../hellotalk/add_contact_screen.dart';
 import '../hellotalk/chat_detail_screen.dart';
 import 'partner_profile_screen.dart';
 
@@ -54,30 +53,21 @@ class _ConnectScreenState extends State<ConnectScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'Add Friends',
-              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 19),
-            ),
-            const SizedBox(width: 6),
-            IconButton(
-              icon: const Icon(Icons.add_rounded, size: 20),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(),
-              onPressed: () => AddContactScreen.show(context),
-            ),
-          ],
+        // The add-friend entry point now lives only on the Message tab
+        // (chat_list_screen.dart's "Add People" button) — no need for a
+        // second one here too.
+        title: const Text(
+          'Connect',
+          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 19),
         ),
         actions: [
           IconButton(
             icon: const Icon(Icons.tune_rounded),
-            onPressed: () => AddContactScreen.show(context),
+            onPressed: () {},
           ),
           IconButton(
             icon: const Icon(Icons.search_rounded),
-            onPressed: () => AddContactScreen.show(context),
+            onPressed: () {},
           ),
         ],
         bottom: TabBar(

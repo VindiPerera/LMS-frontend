@@ -69,15 +69,11 @@ dependencies:
   cached_network_image: ^3.4.1
   flutter_image_compress: ^2.5.1
   photo_view: ^0.15.0
+  # Playback only — moments can no longer be *created* with a video (see
+  # create_moment_screen.dart), but these still render videos on posts that
+  # already had one before that changed.
   video_player: ^2.14.0
   chewie: ^1.13.1
-  # NOTE: video_compress hasn't been updated in years and is a known risk on
-  # newer Android Gradle/embedding versions. Kept because it was explicitly
-  # requested; if video posting breaks on a real device build, the fix is to
-  # drop the compression step in media_service.dart and upload the picked
-  # file as-is (still works, just larger uploads).
-  video_compress: ^3.1.4
-  video_thumbnail: ^0.5.6
   timeago: ^3.7.1
   shimmer: ^3.0.0
   uuid: ^4.6.0

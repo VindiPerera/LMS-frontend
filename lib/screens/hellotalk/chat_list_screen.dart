@@ -39,17 +39,25 @@ class _ChatListScreenState extends State<ChatListScreen> {
     super.dispose();
   }
 
+  /// "Active Partners" is meant to show who's genuinely online right now —
+  /// filtering by isOnline here is what actually makes that true, instead
+  /// of just showing any 10 partners with a decorative always-green dot.
+  /// fetchPartners already orders online-first, so a higher limit costs
+  /// little even though most of it gets filtered back out.
   Future<void> _loadOnlinePartners() async {
     try {
-      final partners = await PartnerService.fetchPartners(limit: 10);
+      final partners = await PartnerService.fetchPartners(limit: 30);
+      final online = partners.where((p) => p.isOnline).take(10).toList();
       if (!mounted) return;
       setState(() {
-        _onlinePartners = partners.isNotEmpty ? partners : mock.mockUsers;
+        _onlinePartners = online.isNotEmpty
+            ? online
+            : mock.mockUsers.where((u) => u.isOnline).toList();
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
-        _onlinePartners = mock.mockUsers;
+        _onlinePartners = mock.mockUsers.where((u) => u.isOnline).toList();
       });
     }
   }
@@ -216,40 +224,28 @@ class _ChatListScreenState extends State<ChatListScreen> {
                               },
                               child: Column(
                                 children: [
-                                  Stack(
-                                    children: [
-                                      Container(
-                                        padding: const EdgeInsets.all(2),
-                                        decoration: BoxDecoration(
-                                          shape: BoxShape.circle,
-                                          border: Border.all(
-                                            color: AppColors.primaryPurple,
-                                            width: 2,
-                                          ),
-                                        ),
-                                        child: AppAvatar.forUser(
-                                          user,
-                                          size: 46,
-                                          showFlag: false,
-                                        ),
+                                  Container(
+                                    padding: const EdgeInsets.all(2),
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: AppColors.primaryPurple,
+                                        width: 2,
                                       ),
-                                      Positioned(
-                                        right: 2,
-                                        bottom: 2,
-                                        child: Container(
-                                          width: 13,
-                                          height: 13,
-                                          decoration: BoxDecoration(
-                                            color: AppColors.online,
-                                            shape: BoxShape.circle,
-                                            border: Border.all(
-                                              color: Colors.white,
-                                              width: 2,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ],
+                                    ),
+                                    // showOnlineDot ties this to the real
+                                    // users/{uid}.isOnline value (kept live
+                                    // by AuthService.setOnlineStatus/
+                                    // main_shell.dart's app-lifecycle
+                                    // observer) instead of a hardcoded dot
+                                    // that showed every row as "online"
+                                    // regardless of actual status.
+                                    child: AppAvatar.forUser(
+                                      user,
+                                      size: 46,
+                                      showFlag: false,
+                                      showOnlineDot: true,
+                                    ),
                                   ),
                                   const SizedBox(height: 6),
                                   SizedBox(
