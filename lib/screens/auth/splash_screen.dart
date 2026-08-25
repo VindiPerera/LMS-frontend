@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import '../../services/auth_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_logo.dart';
-import '../../widgets/auth_widgets.dart';
 import '../main_shell.dart';
 import 'login_screen.dart';
 
@@ -13,100 +12,63 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> {
-  bool _checkingSession = true;
+class _SplashScreenState extends State<SplashScreen>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _fade;
+  late final Animation<double> _scale;
+
+  static const _minSplashDuration = Duration(milliseconds: 1400);
 
   @override
   void initState() {
     super.initState();
-    _tryResumeSession();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
+    _fade = CurvedAnimation(parent: _controller, curve: Curves.easeOut);
+    _scale = Tween<double>(begin: 0.82, end: 1.0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOutBack),
+    );
+    _controller.forward();
+    _proceed();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
   }
 
   /// Firebase Auth persists sign-in state itself — if it reports an
   /// existing user, skip straight past the auth screens into the app.
-  Future<void> _tryResumeSession() async {
-    final user = await AuthService.instance.init();
+  /// The logo animation and session check run in parallel; navigation
+  /// waits for whichever finishes last so the splash never flashes by.
+  Future<void> _proceed() async {
+    final userFuture = AuthService.instance.init();
+    await Future.delayed(_minSplashDuration);
+    final user = await userFuture;
     if (!mounted) return;
 
-    if (user != null) {
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const MainShell()),
-        (route) => false,
-      );
-      return;
-    }
-
-    setState(() => _checkingSession = false);
-  }
-
-  void _goToLogin(BuildContext context) {
-    Navigator.of(
-      context,
-    ).pushReplacement(MaterialPageRoute(builder: (_) => const LoginScreen()));
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(
+        builder: (_) => user != null ? const MainShell() : const LoginScreen(),
+      ),
+      (route) => false,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32),
-          child: Column(
-            children: [
-              const Spacer(flex: 3),
-              const AppLogo(height: 90),
-              const SizedBox(height: 12),
-              const Text(
-                'Language learning application',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w400,
-                  color: Color(0xFFC62828),
-                ),
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'Talk, learn and grow together',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 15,
-                  color: AppColors.textSecondary,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'A simple space for students and teachers to connect,\npractice conversations and share knowledge.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 13,
-                  height: 1.5,
-                  color: AppColors.textTertiary,
-                ),
-              ),
-              const Spacer(flex: 4),
-              _checkingSession
-                  ? const SizedBox(
-                      height: 48,
-                      child: Center(
-                        child: SizedBox(
-                          width: 22,
-                          height: 22,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2.4,
-                            color: AppColors.primaryPurple,
-                          ),
-                        ),
-                      ),
-                    )
-                  : AuthPrimaryButton(
-                      label: 'Next',
-                      onPressed: () => _goToLogin(context),
-                    ),
-              const SizedBox(height: 40),
-            ],
+      body: Center(
+        child: FadeTransition(
+          opacity: _fade,
+          child: ScaleTransition(
+            scale: _scale,
+            child: const AppLogo(height: 140, isHorizontal: false),
           ),
         ),
       ),
