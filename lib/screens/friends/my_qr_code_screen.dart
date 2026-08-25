@@ -42,7 +42,7 @@ class _MyQRCodeScreenState extends State<MyQRCodeScreen> {
       setState(() => _loading = false);
       return;
     }
-    final link = await FriendLinkService.instance.generateFriendLink(user.id);
+    final link = await FriendLinkService.instance.generateFriendLink(user);
     if (!mounted) return;
     setState(() {
       _friendLink = link;

@@ -47,15 +47,17 @@ class NavigationService {
     }
   }
 
-  /// Deep-links to [uid]'s profile — friend request/accept notifications.
-  /// FriendProfileScreen loads the user itself, so no fetch needed here.
-  static void openFriendProfile(String uid) {
+  /// Deep-links to [uid]'s profile — friend request/accept notifications by
+  /// default ([source] 'notification'), or a QR/link tap (deep_link_service
+  /// .dart passes 'link'). FriendProfileScreen loads the user itself, so no
+  /// fetch needed here.
+  static void openFriendProfile(String uid, {String source = 'notification'}) {
     if (uid.isEmpty) return;
     final navigator = navigatorKey.currentState;
     if (navigator == null) return;
     navigator.push(
       MaterialPageRoute(
-        builder: (_) => FriendProfileScreen(friendId: uid, source: 'notification'),
+        builder: (_) => FriendProfileScreen(friendId: uid, source: source),
       ),
     );
   }

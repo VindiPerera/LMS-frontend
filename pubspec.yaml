@@ -54,12 +54,23 @@ dependencies:
   # and sharing it. NOTE: intentionally NOT using firebase_dynamic_links —
   # Google shut that service down in August 2025, so it can no longer create
   # or resolve links at all. See lib/services/friend_link_service.dart for
-  # what replaces it and how to upgrade once this project has a real domain
-  # for Android App Links / iOS Universal Links.
+  # what replaces it: hello-backend mints/resolves the short codes now.
   qr_flutter: ^4.1.0
   mobile_scanner: ^5.0.0
   share_plus: ^10.1.4
   url_launcher: ^6.2.0
+
+  # Deep linking (Android App Links / iOS Universal Links) for the QR/share
+  # link flow above — see lib/services/deep_link_service.dart.
+  app_links: ^7.2.1
+  # Android-only: lets a fresh install recover the invite code that was in
+  # the Play Store URL that installed it (Case B "not installed" -> auto-
+  # resume on first open). No iOS equivalent exists without a paid service;
+  # see deep_link_service.dart for iOS's best-effort clipboard fallback.
+  play_install_referrer: ^0.5.0
+  # Persists a pending deep link across app restarts between "link tapped"
+  # and "finished signing in" (see deep_link_service.dart).
+  shared_preferences: ^2.5.5
 
   # Moments feed: media, formatting, and connectivity/notification support.
   # No state-management package added here on purpose — the rest of the app

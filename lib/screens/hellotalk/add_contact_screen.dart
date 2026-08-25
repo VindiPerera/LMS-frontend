@@ -59,14 +59,13 @@ class _AddContactScreenState extends State<AddContactScreen> {
     // The QR/link payload must carry the real Firestore uid — that's what
     // getFriendProfile()/scan_qr_screen.dart look up by. Falling back to the
     // handle here would silently generate a code nobody could ever redeem.
-    final userId = _currentUser.id;
-    if (userId.isEmpty) {
+    final user = _currentUser;
+    if (user.id.isEmpty) {
       if (!mounted) return;
       setState(() => _loadingLink = false);
       return;
     }
-    final link =
-        await FriendLinkService.instance.generateFriendLink(userId);
+    final link = await FriendLinkService.instance.generateFriendLink(user);
     if (!mounted) return;
     setState(() {
       _friendLink = link;

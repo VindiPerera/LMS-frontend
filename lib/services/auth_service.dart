@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:google_sign_in/google_sign_in.dart';
 import '../models/user.dart';
+import 'deep_link_service.dart';
 import 'moment_service.dart';
 import 'push_notification_service.dart';
 
@@ -90,6 +91,11 @@ class AuthService {
     });
 
     _afterSignIn();
+    // Always a brand-new account (unlike login()) — see DeepLinkService.
+    // checkClipboardFallback's doc comment for why this only runs here and
+    // in loginWithGoogle's isNewUser branch, never on an ordinary login.
+    // ignore: discarded_futures
+    DeepLinkService.instance.checkClipboardFallback();
     return (await refreshCurrentUser())!;
   }
 
@@ -159,6 +165,10 @@ class AuthService {
     }
 
     _afterSignIn();
+    if (isNewUser) {
+      // ignore: discarded_futures
+      DeepLinkService.instance.checkClipboardFallback();
+    }
     return AuthResult((await refreshCurrentUser())!, isNewUser: isNewUser);
   }
 

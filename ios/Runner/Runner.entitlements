@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- iOS Universal Links for the QR-code / share-link flow (Case A of
+	     the deep link design doc — see deep_link_service.dart). Lets
+	     https://hellotalk.jaan.lk/u/{code} open FaceTalk directly instead
+	     of Safari, once Apple verifies
+	     https://hellotalk.jaan.lk/.well-known/apple-app-site-association
+	     (WellKnownController on the backend) against this app's Team ID.
+
+	     THIS FILE ISN'T WIRED UP YET — this repo has no Xcode signing
+	     configured (no DEVELOPMENT_TEAM in Runner.xcodeproj; iOS builds
+	     have only ever run from a Mac with real Xcode access, which this
+	     dev environment doesn't have). To finish enabling it:
+	       1. Open ios/Runner.xcworkspace in Xcode on a Mac with an Apple
+	          Developer account.
+	       2. Runner target -> Signing & Capabilities -> set a Team.
+	       3. "+ Capability" -> Associated Domains -> add this file
+	          automatically, or add "applinks:hellotalk.jaan.lk" here by
+	          hand if Xcode doesn't offer to.
+	       4. Replace "TEAMID" in WellKnownController::appleAppSiteAssociation
+	          with the real Team ID Xcode just showed you. -->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:hellotalk.jaan.lk</string>
+	</array>
+</dict>
+</plist>

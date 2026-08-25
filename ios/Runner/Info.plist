@@ -26,6 +26,26 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- Custom-scheme backup for the QR-code / share-link flow (Case A of
+	     the deep link design doc — see deep_link_service.dart). The real
+	     link is a Universal Link (https://hellotalk.jaan.lk/u/{code}),
+	     which needs no entry here — it needs the "Associated Domains"
+	     capability instead (applinks:hellotalk.jaan.lk), added via Xcode's
+	     Signing & Capabilities tab once this project has an Apple
+	     Developer Team ID (see ios/Runner/Runner.entitlements). This
+	     scheme is only a manual-testing aid (`xcrun simctl openurl booted
+	     "facetalk://u/CODE"`) that works with no domain verification. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>lk.jaan.facetalk.deeplink</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>facetalk</string>
+			</array>
+		</dict>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

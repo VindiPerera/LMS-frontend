@@ -42,6 +42,35 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+
+            <!-- Android App Links for the QR-code / share-link flow (Case A
+                 of the deep link design doc — see deep_link_service.dart
+                 and FriendLinkService). autoVerify="true" tells Android to
+                 check https://hellotalk.jaan.lk/.well-known/assetlinks.json
+                 (WellKnownController on the backend) at install time; once
+                 that succeeds, a tap on a matching link opens this app
+                 directly instead of a browser. Until it succeeds (or if the
+                 fingerprint in assetlinks.json is stale — see that
+                 controller's doc comment), Android still falls back to the
+                 browser, which lands on DeepLinkRedirectController's page
+                 (Case B) — nothing breaks either way. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https" android:host="hellotalk.jaan.lk" android:pathPrefix="/u/"/>
+            </intent-filter>
+
+            <!-- Custom-scheme backup for the same links — mainly a manual
+                 testing aid (`adb shell am start -a android.intent.action.VIEW
+                 -d "facetalk://u/CODE"`) that works with no domain
+                 verification at all; see deep_link_service.dart. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="facetalk" android:host="u"/>
+            </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
