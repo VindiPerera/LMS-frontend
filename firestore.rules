@@ -110,6 +110,18 @@ service cloud.firestore {
         allow create, delete: if isSignedIn() && request.auth.uid == followerUid;
         allow update: if false;
       }
+
+      // ------------------------------------------------------------------
+      // users/{uid}/profileLikes/{likerUid} — the thumbs-up "like" button
+      // on partner_profile_screen.dart, exists iff likerUid liked uid's
+      // profile. Same "written under the other party" shape as followers/
+      // above — see ProfileLikeService.
+      // ------------------------------------------------------------------
+      match /profileLikes/{likerUid} {
+        allow read: if isSignedIn();
+        allow create, delete: if isSignedIn() && request.auth.uid == likerUid;
+        allow update: if false;
+      }
     }
 
     // ------------------------------------------------------------------

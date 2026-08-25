@@ -8,6 +8,7 @@ import '../../models/voiceroom.dart';
 import '../../services/follow_service.dart';
 import '../../services/moment_service.dart';
 import '../../services/partner_service.dart';
+import '../../services/profile_like_service.dart';
 import '../../services/teacher_service.dart';
 import '../../services/voice_room_service.dart';
 import '../../theme/app_colors.dart';
@@ -40,8 +41,10 @@ class PartnerProfileScreen extends StatefulWidget {
 
 class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
   late AppUser _user;
-  int _likesCount = 1;
+  int _likesCount = 0;
   bool _isLiked = false;
+  StreamSubscription<bool>? _likeSub;
+  StreamSubscription<int>? _likeCountSub;
   bool _isFollowing = false;
   StreamSubscription<bool>? _followSub;
   int _selectedTab = 0; // 0: About Me, 1: Moments, 2: Achievements
@@ -54,11 +57,19 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
     _followSub = FollowService.streamIsFollowing(_user.id).listen((following) {
       if (mounted) setState(() => _isFollowing = following);
     });
+    _likeSub = ProfileLikeService.streamIsLiked(_user.id).listen((liked) {
+      if (mounted) setState(() => _isLiked = liked);
+    });
+    _likeCountSub = ProfileLikeService.streamLikeCount(_user.id).listen((count) {
+      if (mounted) setState(() => _likesCount = count);
+    });
   }
 
   @override
   void dispose() {
     _followSub?.cancel();
+    _likeSub?.cancel();
+    _likeCountSub?.cancel();
     super.dispose();
   }
 
@@ -70,12 +81,30 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
     } catch (_) {}
   }
 
-  void _toggleLike() {
+  Future<void> _toggleLike() async {
     HapticFeedback.lightImpact();
+    final wasLiked = _isLiked;
     setState(() {
-      _isLiked = !_isLiked;
-      _likesCount += _isLiked ? 1 : -1;
+      _isLiked = !wasLiked;
+      _likesCount += _isLiked ? 1 : -1; // optimistic
     });
+
+    try {
+      if (wasLiked) {
+        await ProfileLikeService.unlike(_user.id);
+      } else {
+        await ProfileLikeService.like(_user.id);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLiked = wasLiked; // revert
+        _likesCount += wasLiked ? 1 : -1;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not update like. Try again.')),
+      );
+    }
   }
 
   Future<void> _toggleFollow() async {
