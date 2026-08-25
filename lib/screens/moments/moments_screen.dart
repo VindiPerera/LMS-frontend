@@ -241,24 +241,35 @@ class _MomentsScreenState extends State<MomentsScreen> {
               color: AppColors.surfaceLight,
               borderRadius: BorderRadius.circular(18),
             ),
-            child: const TextField(
-              decoration: InputDecoration(
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                contentPadding: EdgeInsets.only(top: 8),
-                hintText: 'Search moments',
-                hintStyle: TextStyle(
-                  color: AppColors.textTertiary,
-                  fontSize: 13.5,
-                ),
-                prefixIcon: Icon(
+            // A TextField's prefixIcon fights a fixed-height parent for
+            // vertical space (that's what pushed the hint text off-center
+            // before) — a plain Row + isDense TextField, same as
+            // chat_list_screen.dart's search bar, centers reliably instead.
+            child: Row(
+              children: [
+                const Icon(
                   Icons.search_rounded,
                   size: 18,
                   color: AppColors.textTertiary,
                 ),
-                prefixIconConstraints: BoxConstraints(minWidth: 20, minHeight: 20),
-              ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    textAlignVertical: TextAlignVertical.center,
+                    decoration: const InputDecoration(
+                      border: InputBorder.none,
+                      isDense: true,
+                      contentPadding: EdgeInsets.zero,
+                      hintText: 'Search moments',
+                      hintStyle: TextStyle(
+                        color: AppColors.textTertiary,
+                        fontSize: 13.5,
+                      ),
+                    ),
+                    style: const TextStyle(fontSize: 13.5),
+                  ),
+                ),
+              ],
             ),
           ),
           actions: [

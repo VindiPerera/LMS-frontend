@@ -86,6 +86,30 @@ service cloud.firestore {
         allow delete: if isOwner(uid) ||
           (resource != null && request.auth.uid == resource.data.fromUserId);
       }
+
+      // ------------------------------------------------------------------
+      // users/{uid}/following/{targetUid} — exists iff `uid` follows
+      // `targetUid`. Only the follower (`uid` here) manages their own
+      // following list — see FollowService.follow/unfollow, which writes
+      // this and the mirroring followers/ doc below in one batch.
+      // ------------------------------------------------------------------
+      match /following/{targetUid} {
+        allow read: if isSignedIn();
+        allow create, delete: if isOwner(uid);
+        allow update: if false;
+      }
+
+      // ------------------------------------------------------------------
+      // users/{uid}/followers/{followerUid} — the mirror image, written
+      // under the person being followed (`uid`) by the follower
+      // (`followerUid`) — same "written under the other party" shape as
+      // friend_requests above, with the same spoofing check.
+      // ------------------------------------------------------------------
+      match /followers/{followerUid} {
+        allow read: if isSignedIn();
+        allow create, delete: if isSignedIn() && request.auth.uid == followerUid;
+        allow update: if false;
+      }
     }
 
     // ------------------------------------------------------------------

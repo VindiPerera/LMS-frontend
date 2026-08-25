@@ -21,6 +21,10 @@ class _ConnectScreenState extends State<ConnectScreen>
   final _filters = const ['Recommended', 'Nearby', 'New Users', 'Same City'];
   int _filterIndex = 0;
 
+  bool _searching = false;
+  final _searchController = TextEditingController();
+  String _searchQuery = '';
+
   List<AppUser>? _partners;
   String? _error;
 
@@ -29,6 +33,16 @@ class _ConnectScreenState extends State<ConnectScreen>
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
     _loadPartners();
+  }
+
+  void _toggleSearch() {
+    setState(() {
+      _searching = !_searching;
+      if (!_searching) {
+        _searchController.clear();
+        _searchQuery = '';
+      }
+    });
   }
 
   Future<void> _loadPartners() async {
@@ -46,6 +60,7 @@ class _ConnectScreenState extends State<ConnectScreen>
   @override
   void dispose() {
     _tabController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -56,18 +71,31 @@ class _ConnectScreenState extends State<ConnectScreen>
         // The add-friend entry point now lives only on the Message tab
         // (chat_list_screen.dart's "Add People" button) — no need for a
         // second one here too.
-        title: const Text(
-          'Connect',
-          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 19),
-        ),
+        title: _searching
+            ? TextField(
+                controller: _searchController,
+                autofocus: true,
+                onChanged: (val) =>
+                    setState(() => _searchQuery = val.trim().toLowerCase()),
+                decoration: const InputDecoration(
+                  hintText: 'Search by name or @handle',
+                  hintStyle: TextStyle(
+                    color: AppColors.textTertiary,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w400,
+                  ),
+                  border: InputBorder.none,
+                ),
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              )
+            : const Text(
+                'Connect',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 19),
+              ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.tune_rounded),
-            onPressed: () {},
-          ),
-          IconButton(
-            icon: const Icon(Icons.search_rounded),
-            onPressed: () {},
+            icon: Icon(_searching ? Icons.close_rounded : Icons.search_rounded),
+            onPressed: _toggleSearch,
           ),
         ],
         bottom: TabBar(
@@ -98,9 +126,10 @@ class _ConnectScreenState extends State<ConnectScreen>
             partners: _partners,
             error: _error,
             onRetry: _loadPartners,
+            searchQuery: _searchQuery,
           ),
           const _EmptyTab(icon: Icons.groups_rounded, label: 'No groups yet'),
-          const _TeachersTab(),
+          _TeachersTab(searchQuery: _searchQuery),
         ],
       ),
     );
@@ -115,6 +144,7 @@ class _PartnersTab extends StatelessWidget {
   final List<AppUser>? partners;
   final String? error;
   final VoidCallback onRetry;
+  final String searchQuery;
 
   const _PartnersTab({
     required this.filters,
@@ -123,6 +153,7 @@ class _PartnersTab extends StatelessWidget {
     required this.partners,
     required this.error,
     required this.onRetry,
+    this.searchQuery = '',
   });
 
   @override
@@ -190,8 +221,8 @@ class _PartnersTab extends StatelessWidget {
       );
     }
 
-    final users = partners;
-    if (users == null) {
+    final allUsers = partners;
+    if (allUsers == null) {
       return const Center(
         child: CircularProgressIndicator(
           strokeWidth: 2.4,
@@ -200,11 +231,20 @@ class _PartnersTab extends StatelessWidget {
       );
     }
 
+    final users = searchQuery.isEmpty
+        ? allUsers
+        : allUsers.where((u) {
+            return u.name.toLowerCase().contains(searchQuery) ||
+                u.handle.toLowerCase().contains(searchQuery);
+          }).toList();
+
     if (users.isEmpty) {
-      return const Center(
+      return Center(
         child: Text(
-          'No partners yet — check back soon!',
-          style: TextStyle(color: AppColors.textTertiary),
+          searchQuery.isNotEmpty
+              ? 'No partners matching "$searchQuery"'
+              : 'No partners yet — check back soon!',
+          style: const TextStyle(color: AppColors.textTertiary),
         ),
       );
     }
@@ -449,7 +489,8 @@ class _EmptyTab extends StatelessWidget {
 }
 
 class _TeachersTab extends StatefulWidget {
-  const _TeachersTab();
+  final String searchQuery;
+  const _TeachersTab({this.searchQuery = ''});
 
   @override
   State<_TeachersTab> createState() => _TeachersTabState();
@@ -485,12 +526,22 @@ class _TeachersTabState extends State<_TeachersTab> {
       );
     }
 
-    final teachers = _teachers ?? const [];
+    final allTeachers = _teachers ?? const [];
+    final query = widget.searchQuery;
+    final teachers = query.isEmpty
+        ? allTeachers
+        : allTeachers.where((t) {
+            return t.name.toLowerCase().contains(query) ||
+                t.handle.toLowerCase().contains(query);
+          }).toList();
+
     if (teachers.isEmpty) {
-      return const Center(
+      return Center(
         child: Text(
-          'No teachers available right now.',
-          style: TextStyle(color: AppColors.textTertiary),
+          query.isNotEmpty
+              ? 'No teachers matching "$query"'
+              : 'No teachers available right now.',
+          style: const TextStyle(color: AppColors.textTertiary),
         ),
       );
     }

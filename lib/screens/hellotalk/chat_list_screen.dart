@@ -398,12 +398,26 @@ class _ChatListTile extends StatelessWidget {
         ),
         child: Row(
           children: [
-            // User Avatar with online indicator and country flag
-            AppAvatar.forUser(
-              chat.user,
-              size: 54,
-              showOnlineDot: true,
-              showFlag: true,
+            // User Avatar with online indicator and country flag. The
+            // isOnline on chat.user itself is a denormalized snapshot from
+            // whenever a message was last sent (see ChatService._infoFor,
+            // which doesn't even carry isOnline — it's always the AppUser
+            // default of false) — genuinely live status needs its own
+            // listener, same as chat_detail_screen.dart's header.
+            StreamBuilder<bool>(
+              stream: PartnerService.streamIsOnline(chat.user.id),
+              initialData: chat.user.isOnline,
+              builder: (context, snapshot) {
+                return AppAvatar(
+                  seed: chat.user.name,
+                  size: 54,
+                  showOnlineDot: true,
+                  isOnline: snapshot.data ?? false,
+                  showFlag: true,
+                  flag: chat.user.countryFlag,
+                  imageUrl: chat.user.avatarUrl,
+                );
+              },
             ),
             const SizedBox(width: 14),
 

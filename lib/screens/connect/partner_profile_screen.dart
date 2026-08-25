@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../models/moment.dart';
 import '../../models/user.dart';
 import '../../models/voiceroom.dart';
+import '../../services/follow_service.dart';
 import '../../services/moment_service.dart';
 import '../../services/partner_service.dart';
 import '../../services/teacher_service.dart';
@@ -13,6 +16,7 @@ import '../../widgets/app_avatar.dart';
 import '../../widgets/moment_card.dart';
 import '../../widgets/profile_map_header.dart';
 import '../hellotalk/chat_detail_screen.dart';
+import '../me/follow_list_screen.dart';
 import '../voiceroom/voice_room_detail_screen.dart';
 
 /// Full profile screen designed according to the modern HelloTalk profile spec:
@@ -39,6 +43,7 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
   int _likesCount = 1;
   bool _isLiked = false;
   bool _isFollowing = false;
+  StreamSubscription<bool>? _followSub;
   int _selectedTab = 0; // 0: About Me, 1: Moments, 2: Achievements
 
   @override
@@ -46,6 +51,15 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
     super.initState();
     _user = widget.initial;
     _refresh();
+    _followSub = FollowService.streamIsFollowing(_user.id).listen((following) {
+      if (mounted) setState(() => _isFollowing = following);
+    });
+  }
+
+  @override
+  void dispose() {
+    _followSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _refresh() async {
@@ -64,11 +78,28 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
     });
   }
 
-  void _toggleFollow() {
+  Future<void> _toggleFollow() async {
     HapticFeedback.selectionClick();
-    setState(() {
-      _isFollowing = !_isFollowing;
-    });
+    final wasFollowing = _isFollowing;
+    setState(() => _isFollowing = !wasFollowing); // optimistic
+
+    try {
+      if (wasFollowing) {
+        await FollowService.unfollow(_user.id);
+      } else {
+        await FollowService.follow(_user);
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isFollowing = wasFollowing); // revert
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not update follow status. Try again.')),
+        );
+      }
+      return;
+    }
+
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(_isFollowing ? 'Following ${_user.name}' : 'Unfollowed ${_user.name}'),
@@ -481,17 +512,45 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
   Widget _buildSocialStatsRow(AppUser user) {
     return Row(
       children: [
-        _statItem('1', 'Following'),
+        StreamBuilder<int>(
+          stream: FollowService.streamFollowingCount(user.id),
+          initialData: 0,
+          builder: (context, snapshot) => _statItem(
+            '${snapshot.data ?? 0}',
+            'Following',
+            onTap: () => _openFollowList(context, user, 0),
+          ),
+        ),
         const SizedBox(width: 18),
-        _statItem('1', 'Followers'),
+        StreamBuilder<int>(
+          stream: FollowService.streamFollowersCount(user.id),
+          initialData: 0,
+          builder: (context, snapshot) => _statItem(
+            '${snapshot.data ?? 0}',
+            'Followers',
+            onTap: () => _openFollowList(context, user, 1),
+          ),
+        ),
         const SizedBox(width: 18),
         _statItem('10d', 'Joined'),
       ],
     );
   }
 
-  Widget _statItem(String number, String label) {
-    return Row(
+  void _openFollowList(BuildContext context, AppUser user, int initialTab) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => FollowListScreen(
+          uid: user.id,
+          userName: user.name,
+          initialTab: initialTab,
+        ),
+      ),
+    );
+  }
+
+  Widget _statItem(String number, String label, {VoidCallback? onTap}) {
+    final content = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
@@ -513,6 +572,8 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
         ),
       ],
     );
+    if (onTap == null) return content;
+    return InkWell(onTap: onTap, borderRadius: BorderRadius.circular(6), child: content);
   }
 
   Widget _buildVoiceRoomCard(VoiceRoom room) {

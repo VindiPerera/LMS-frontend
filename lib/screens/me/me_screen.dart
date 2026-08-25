@@ -4,6 +4,7 @@ import '../../models/moment.dart';
 import '../../models/user.dart';
 import '../../models/voiceroom.dart';
 import '../../services/auth_service.dart';
+import '../../services/follow_service.dart';
 import '../../services/moment_service.dart';
 import '../../services/payment_api_service.dart';
 import '../../services/voice_room_service.dart';
@@ -16,6 +17,7 @@ import '../moments/user_moments_screen.dart';
 import '../voiceroom/voice_room_detail_screen.dart';
 import 'course_detail_sheet.dart';
 import 'edit_profile_screen.dart';
+import 'follow_list_screen.dart';
 import 'vip_calendar_screen.dart';
 
 class MeScreen extends StatefulWidget {
@@ -56,8 +58,6 @@ class _MeScreenState extends State<MeScreen> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(14, 8, 14, 24),
           children: [
-            _TopBar(),
-            const SizedBox(height: 14),
             _VipPromoBanner(),
             const SizedBox(height: 18),
             _ProfileHeader(user: user, onEdit: _editProfile),
@@ -99,74 +99,6 @@ class _MeScreenState extends State<MeScreen> {
           ],
         ),
       ),
-    );
-  }
-}
-
-class _TopBar extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        _pillBadge('HT', '0'),
-        const SizedBox(width: 10),
-        _circleIcon(Icons.storefront_outlined),
-        const SizedBox(width: 10),
-        _circleIcon(Icons.shopping_bag_outlined),
-        const Spacer(),
-        _circleIcon(Icons.ios_share_rounded),
-        const SizedBox(width: 10),
-        _circleIcon(Icons.settings_outlined),
-      ],
-    );
-  }
-
-  Widget _pillBadge(String text, String count) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceLight,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 18,
-            height: 18,
-            decoration: const BoxDecoration(
-              color: AppColors.vipGold,
-              shape: BoxShape.circle,
-            ),
-            alignment: Alignment.center,
-            child: const Text(
-              'HT',
-              style: TextStyle(
-                fontSize: 7,
-                fontWeight: FontWeight.w800,
-                color: Colors.black,
-              ),
-            ),
-          ),
-          const SizedBox(width: 6),
-          Text(
-            count,
-            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _circleIcon(IconData icon) {
-    return Container(
-      width: 38,
-      height: 38,
-      decoration: const BoxDecoration(
-        color: AppColors.surfaceLight,
-        shape: BoxShape.circle,
-      ),
-      child: Icon(icon, size: 18),
     );
   }
 }
@@ -346,27 +278,24 @@ class _ProfileHeader extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Row(
-                children: const [
-                  Text(
-                    '1 ',
-                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-                  ),
-                  Text(
-                    'Following  ',
-                    style: TextStyle(
-                      color: AppColors.textTertiary,
-                      fontSize: 13,
+                children: [
+                  StreamBuilder<int>(
+                    stream: FollowService.streamFollowingCount(user.id),
+                    initialData: 0,
+                    builder: (context, snapshot) => _FollowStat(
+                      count: snapshot.data ?? 0,
+                      label: 'Following',
+                      onTap: () => _openFollowList(context, user, 0),
                     ),
                   ),
-                  Text(
-                    '1 ',
-                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-                  ),
-                  Text(
-                    'Followers',
-                    style: TextStyle(
-                      color: AppColors.textTertiary,
-                      fontSize: 13,
+                  const SizedBox(width: 14),
+                  StreamBuilder<int>(
+                    stream: FollowService.streamFollowersCount(user.id),
+                    initialData: 0,
+                    builder: (context, snapshot) => _FollowStat(
+                      count: snapshot.data ?? 0,
+                      label: 'Followers',
+                      onTap: () => _openFollowList(context, user, 1),
                     ),
                   ),
                 ],
@@ -401,6 +330,51 @@ class _ProfileHeader extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+
+  void _openFollowList(BuildContext context, AppUser user, int initialTab) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => FollowListScreen(
+          uid: user.id,
+          userName: user.name,
+          initialTab: initialTab,
+        ),
+      ),
+    );
+  }
+}
+
+class _FollowStat extends StatelessWidget {
+  final int count;
+  final String label;
+  final VoidCallback onTap;
+
+  const _FollowStat({
+    required this.count,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '$count ',
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+          ),
+          Text(
+            label,
+            style: const TextStyle(color: AppColors.textTertiary, fontSize: 13),
+          ),
+        ],
+      ),
     );
   }
 }
