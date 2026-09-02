@@ -61,6 +61,10 @@ class _MeScreenState extends State<MeScreen> {
             _VipPromoBanner(),
             const SizedBox(height: 18),
             _ProfileHeader(user: user, onEdit: _editProfile),
+            if (user.tags.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              _InterestsSection(tags: user.tags),
+            ],
             const SizedBox(height: 18),
             _MyVoiceRoomBanner(),
             Row(
@@ -379,6 +383,60 @@ class _FollowStat extends StatelessWidget {
   }
 }
 
+/// Chips for `AppUser.tags` (picked on select_interests_screen.dart right
+/// after signup) — the signed-in user's own equivalent of the "Interest &
+/// Hobbies" chips shown on partner_profile_screen.dart / friend_profile_
+/// screen.dart for other people.
+class _InterestsSection extends StatelessWidget {
+  final List<String> tags;
+  const _InterestsSection({required this.tags});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Interest & Hobbies',
+            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: tags
+                .map((t) => Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.surfaceLight,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        t,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                    ))
+                .toList(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _StatCard extends StatelessWidget {
   final String? icon;
   final String value;
@@ -547,7 +605,7 @@ class _VipCalendarRow extends StatelessWidget {
             const SizedBox(width: 12),
             const Expanded(
               child: Text(
-                'VIP Calendar',
+                'VIP membership calendar',
                 style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
               ),
             ),

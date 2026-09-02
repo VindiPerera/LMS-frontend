@@ -888,6 +888,11 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
 
           if (user.tags.isNotEmpty) ...[
             const SizedBox(height: 14),
+            const Text(
+              'Interest & Hobbies',
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
+            ),
+            const SizedBox(height: 8),
             Wrap(
               spacing: 6,
               runSpacing: 6,

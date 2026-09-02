@@ -19,7 +19,7 @@ import 'notification_api_service.dart';
 ///
 /// `participantInfo` is denormalized (a snapshot of each user's profile,
 /// refreshed every time they send a message) so the chat list can render
-/// avatars/names without an extra read per row — see hello-firebase's
+/// avatars/names without an extra read per row — see this project's
 /// firestore.rules for the corresponding access rules.
 class ChatService {
   static final _chats = FirebaseFirestore.instance.collection('chats');
@@ -73,11 +73,21 @@ class ChatService {
 
   /// Live messages for one thread, oldest first, for
   /// hellotalk/chat_detail_screen.dart.
+  ///
+  /// Filters by `participants` (denormalized onto every message doc — see
+  /// [sendMessage]) even though every message here already belongs to the
+  /// caller's own thread: firestore.rules' per-message read rule checks
+  /// `resource.data.participants`, and Firestore can only allow a *list*
+  /// query against a per-document rule when the query carries a matching
+  /// filter — an unfiltered `.collection('messages').snapshots()` would be
+  /// rejected outright as unprovable, regardless of what's actually stored.
   static Stream<List<ChatMessage>> streamMessages(String chatId) {
-    if (chatId.isEmpty) return const Stream.empty();
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (chatId.isEmpty || uid == null) return const Stream.empty();
     return _chats
         .doc(chatId)
         .collection('messages')
+        .where('participants', arrayContains: uid)
         .snapshots()
         .map((snap) {
           final messages = snap.docs

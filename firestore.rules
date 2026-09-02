@@ -3,17 +3,14 @@ rules_version = '2';
 // ============================================================================
 // FaceTalk — Firestore Security Rules
 // ============================================================================
-// SCOPE WARNING: this file only covers the collections the Moments feature
-// touches — moments/{postId} (+ comments subcollection), notifications,
-// reports, users (read/own-write only), friendships (read/own-write only,
-// needed for the "friends"-visibility check below), chats/messages, and
-// voiceRooms. It does NOT cover partner/connect data used elsewhere in the
-// app. Firestore rules are deny-by-default outside matched paths, so if this
-// project currently has no firestore.rules deployed (it didn't at the time
-// this file was written — Firestore was presumably running on its default
-// console rules), deploying this file as-is WILL break every collection not
-// listed here. Merge this into a complete rules file covering the rest of
-// the app's collections before running `firebase deploy --only firestore:rules`.
+// This is the single, authoritative rules file for this project (deploy
+// with `firebase deploy --only firestore:rules` from this hello-frontend/
+// directory). It covers every collection the app writes to: users (+
+// friend_requests/following/followers/profileLikes subcollections),
+// friendships, moments (+ comments), notifications, reports, chats (+
+// messages), voiceRooms, and voiceRoomInvites. Firestore rules are
+// deny-by-default outside matched paths, so a new collection needs a match
+// block added here before the client can read/write it.
 // ============================================================================
 
 service cloud.firestore {
@@ -241,15 +238,54 @@ service cloud.firestore {
 
     // ------------------------------------------------------------------
     // chats/{chatId} and chats/{chatId}/messages/{messageId}
+    //
+    // Previously `allow create, update: if isSignedIn()` with no ownership
+    // check at all — ANY signed-in user could read, create, or overwrite
+    // ANY other pair's chat thread (messages included), since chatId is
+    // deterministic (ChatService.chatIdFor: sorted uids joined with "_")
+    // and therefore guessable/computable from two known uids. Fixed to
+    // require the caller be one of the thread's two participants, and to
+    // tie chatId itself to those participants so a doc can't be written
+    // under someone else's chatId by supplying a fake `participants` list
+    // client-side (which client code otherwise fully controls).
     // ------------------------------------------------------------------
     match /chats/{chatId} {
-      allow read: if isSignedIn();
-      allow create, update: if isSignedIn();
+      function idMatchesParticipants(participants) {
+        return participants is list && participants.size() == 2 &&
+          chatId == (participants[0] < participants[1]
+            ? participants[0] + '_' + participants[1]
+            : participants[1] + '_' + participants[0]);
+      }
+
+      allow read: if isSignedIn() && request.auth.uid in resource.data.participants;
+
+      allow create: if isSignedIn() &&
+        request.auth.uid in request.resource.data.participants &&
+        idMatchesParticipants(request.resource.data.participants);
+
+      // Participants never change after creation — only per-message fields
+      // (lastMessage, unread.*, participantInfo) do — see ChatService.
+      allow update: if isSignedIn() &&
+        request.auth.uid in resource.data.participants &&
+        request.resource.data.participants == resource.data.participants;
+
       allow delete: if false;
 
       match /messages/{messageId} {
-        allow read: if isSignedIn();
-        allow create: if isSignedIn() && request.resource.data.senderId == request.auth.uid;
+        // Each message also carries its own `participants` snapshot (see
+        // ChatService.sendMessage) so this rule never needs a get() on the
+        // parent doc — which would silently fail closed for the very first
+        // message of a brand-new thread, since get() inside a batched write
+        // only ever sees the pre-commit state, not sibling writes in the
+        // same batch. `idMatchesParticipants` still ties that snapshot back
+        // to the real chatId, so it can't be spoofed.
+        allow read: if isSignedIn() && request.auth.uid in resource.data.participants;
+
+        allow create: if isSignedIn() &&
+          request.resource.data.senderId == request.auth.uid &&
+          request.auth.uid in request.resource.data.participants &&
+          idMatchesParticipants(request.resource.data.participants);
+
         allow update, delete: if false;
       }
     }

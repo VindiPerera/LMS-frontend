@@ -59,7 +59,7 @@ class _VipCalendarScreenState extends State<VipCalendarScreen> {
       appBar: AppBar(
         backgroundColor: AppColors.background,
         elevation: 0,
-        title: const Text('VIP Calendar', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
+        title: const Text('VIP membership calendar', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),

@@ -3,7 +3,9 @@ import '../../services/auth_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_logo.dart';
 import '../main_shell.dart';
+import 'create_profile_screen.dart';
 import 'login_screen.dart';
+import 'signup_screen.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -45,16 +47,30 @@ class _SplashScreenState extends State<SplashScreen>
   /// existing user, skip straight past the auth screens into the app.
   /// The logo animation and session check run in parallel; navigation
   /// waits for whichever finishes last so the splash never flashes by.
+  ///
+  /// A signed-in Firebase Auth session doesn't mean the account finished
+  /// signup — someone who closes the app between CreateProfileScreen and
+  /// SelectInterestsScreen (or before either) still has a persisted
+  /// session, so this resumes wherever they left off rather than always
+  /// jumping to MainShell (matches LoginScreen._enterApp's logic).
   Future<void> _proceed() async {
     final userFuture = AuthService.instance.init();
     await Future.delayed(_minSplashDuration);
     final user = await userFuture;
     if (!mounted) return;
 
+    Widget next;
+    if (user == null) {
+      next = const LoginScreen();
+    } else if (!user.profileCompleted) {
+      final role = user.role == 'teacher' ? FaceTalkRole.teacher : FaceTalkRole.student;
+      next = CreateProfileScreen(role: role);
+    } else {
+      next = const MainShell();
+    }
+
     Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(
-        builder: (_) => user != null ? const MainShell() : const LoginScreen(),
-      ),
+      MaterialPageRoute(builder: (_) => next),
       (route) => false,
     );
   }
