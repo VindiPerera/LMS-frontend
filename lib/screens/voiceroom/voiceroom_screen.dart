@@ -20,9 +20,8 @@ class _VoiceroomScreenState extends State<VoiceroomScreen>
   final _categories = const [
     'All',
     'English',
+    'Korean',
     'Sinhala',
-    'Interaction',
-    'Music',
   ];
   int _categoryIndex = 0;
 
@@ -98,7 +97,7 @@ class _VoiceroomScreenState extends State<VoiceroomScreen>
                 autofocus: true,
                 decoration: const InputDecoration(
                   labelText: 'Room Topic / Title',
-                  hintText: 'e.g. Free Talk & Practice English',
+                  hintText: 'English Practice',
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -107,7 +106,7 @@ class _VoiceroomScreenState extends State<VoiceroomScreen>
                 controller: tagController,
                 decoration: const InputDecoration(
                   labelText: 'Tag (Optional)',
-                  hintText: 'e.g. Beginner Friendly',
+                  hintText: 'Beginner Level English',
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -176,50 +175,72 @@ class _VoiceroomScreenState extends State<VoiceroomScreen>
       ),
       appBar: AppBar(
         automaticallyImplyLeading: false,
-        titleSpacing: 12,
+        titleSpacing: 8,
         title: Row(
           children: [
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
                 color: AppColors.vipGold.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(12),
               ),
               child: const Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
                     'VIP',
                     style: TextStyle(
                       color: AppColors.vipGold,
                       fontWeight: FontWeight.w800,
-                      fontSize: 12.5,
+                      fontSize: 12,
                     ),
                   ),
-                  SizedBox(width: 4),
+                  SizedBox(width: 3),
                   Icon(
                     Icons.workspace_premium_rounded,
-                    size: 14,
+                    size: 13,
                     color: AppColors.vipGold,
                   ),
                 ],
               ),
             ),
-            const SizedBox(width: 14),
+            const SizedBox(width: 8),
             Expanded(
               child: TabBar(
                 controller: _tabController,
                 indicatorColor: AppColors.primaryPurple,
                 labelColor: AppColors.textPrimary,
                 unselectedLabelColor: AppColors.textTertiary,
+                indicatorSize: TabBarIndicatorSize.label,
+                labelPadding: const EdgeInsets.symmetric(horizontal: 4),
                 labelStyle: const TextStyle(
                   fontWeight: FontWeight.w700,
-                  fontSize: 16,
+                  fontSize: 15,
+                ),
+                unselectedLabelStyle: const TextStyle(
+                  fontWeight: FontWeight.w500,
+                  fontSize: 15,
                 ),
                 dividerColor: Colors.transparent,
                 tabs: const [
-                  Tab(text: 'Voice'),
-                  Tab(text: 'Live'),
-                  Tab(text: 'Learn'),
+                  Tab(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text('Voice'),
+                    ),
+                  ),
+                  Tab(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text('Live'),
+                    ),
+                  ),
+                  Tab(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text('Learn'),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -227,13 +248,13 @@ class _VoiceroomScreenState extends State<VoiceroomScreen>
         ),
         actions: [
           Container(
-            margin: const EdgeInsets.only(right: 12),
+            margin: const EdgeInsets.only(right: 10),
             child: ElevatedButton.icon(
               onPressed: _openCreateRoomSheet,
-              icon: const Icon(Icons.mic_rounded, size: 16),
+              icon: const Icon(Icons.mic_rounded, size: 15),
               label: const Text(
                 'Start',
-                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
               ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primaryPurple,
@@ -241,7 +262,8 @@ class _VoiceroomScreenState extends State<VoiceroomScreen>
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(20),
                 ),
-                padding: const EdgeInsets.symmetric(horizontal: 14),
+                padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+                minimumSize: const Size(0, 34),
               ),
             ),
           ),
