@@ -389,14 +389,6 @@ class _PartnerListTile extends StatelessWidget {
                       ),
                     ),
                   ],
-                  if (user.tags.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      children: user.tags.map((t) => _tagChip(t)).toList(),
-                    ),
-                  ],
                 ],
               ),
             ),
@@ -440,28 +432,6 @@ class _PartnerListTile extends StatelessWidget {
           fontSize: 10,
           color: color,
           fontWeight: FontWeight.w800,
-        ),
-      ),
-    );
-  }
-
-  Widget _tagChip(String text) {
-    final isHighlight =
-        text.contains('both like') || text == 'New' || text == 'Free to Chat';
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-      decoration: BoxDecoration(
-        color: isHighlight ? const Color(0xFFFFE9D9) : AppColors.surfaceLight,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: 11.5,
-          color: isHighlight
-              ? const Color(0xFFD9722E)
-              : AppColors.textSecondary,
-          fontWeight: FontWeight.w600,
         ),
       ),
     );
