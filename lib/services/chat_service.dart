@@ -24,6 +24,17 @@ import 'notification_api_service.dart';
 class ChatService {
   static final _chats = FirebaseFirestore.instance.collection('chats');
 
+  /// Fixed sender id the admin panel's broadcast feature writes as the
+  /// "FaceTalk" system message (see hello-backend's
+  /// FirestoreChatBroadcastService, which must agree on this exact string).
+  /// Not a real Firebase Auth account — just a well-known id both sides
+  /// treat specially. chat_detail_screen.dart hides the reply composer for
+  /// it; firestore.rules blocks message writes into a thread flagged
+  /// `isReadOnly` regardless.
+  static const String systemUid = 'facetalk_system';
+
+  static bool isSystemChat(String otherUid) => otherUid == systemUid;
+
   static String _uid() {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) throw StateError('Not signed in.');
