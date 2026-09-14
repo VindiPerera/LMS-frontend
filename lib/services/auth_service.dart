@@ -205,6 +205,17 @@ class AuthService {
     return updated;
   }
 
+  /// Settings > Notifications toggle. Unlike [updateProfile], this never
+  /// touches `profileCompleted` — flipping a notification preference isn't
+  /// "finishing your profile".
+  Future<AppUser> setVoiceRoomNotificationsEnabled(bool enabled) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) throw StateError('Not signed in.');
+
+    await _users.doc(uid).update({'voiceRoomNotificationsEnabled': enabled});
+    return (await refreshCurrentUser())!;
+  }
+
   Future<void> logout() async {
     // Before signOut() clears FirebaseAuth.instance.currentUser — otherwise
     // setOnlineStatus has no uid left to write to.

@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../../data/mock_data.dart';
 import '../../models/voiceroom.dart';
@@ -129,7 +130,7 @@ class _VoiceroomScreenState extends State<VoiceroomScreen>
                     Navigator.of(sheetContext).pop();
                     Navigator.of(sheetContext).push(
                       MaterialPageRoute(
-                        builder: (_) => VoiceRoomDetailScreen(room: newRoom),
+                        builder: (_) => VoiceRoomDetailScreen(room: newRoom, justCreated: true),
                       ),
                     );
                   } catch (e) {
@@ -403,6 +404,12 @@ class _VoiceRoomCard extends StatelessWidget {
   final VoiceRoom room;
   const _VoiceRoomCard({required this.room});
 
+  // Only the host sees the reminder on their own room's card — it's
+  // guidance for the person about to speak to a live audience, not
+  // something a browsing listener needs before they've even joined.
+  bool get _isMyRoom =>
+      room.hostId.isNotEmpty && room.hostId == FirebaseAuth.instance.currentUser?.uid;
+
   @override
   Widget build(BuildContext context) {
     return InkWell(
@@ -499,6 +506,34 @@ class _VoiceRoomCard extends StatelessWidget {
                 Text(room.hostFlag, style: const TextStyle(fontSize: 12)),
               ],
             ),
+            if (_isMyRoom) ...[
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                decoration: BoxDecoration(
+                  color: AppColors.primaryPurple.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.mic_off_rounded, size: 14, color: AppColors.primaryPurple),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Please mute your mic if you are not speaking.',
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.primaryPurple,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ],
         ),
       ),

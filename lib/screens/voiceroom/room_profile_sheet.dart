@@ -1,23 +1,39 @@
 import 'dart:async';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../../models/room_participant.dart';
+import '../../services/friend_service.dart';
+import '../../services/room_participant_service.dart';
 import '../../widgets/app_avatar.dart';
 
 Future<void> showRoomProfileSheet(
   BuildContext context,
-  RoomParticipant participant,
-) {
+  RoomParticipant participant, {
+  required String roomId,
+  required bool isViewerHost,
+}) {
   return showModalBottomSheet(
     context: context,
     backgroundColor: Colors.transparent,
     isScrollControlled: true,
-    builder: (_) => RoomProfileSheet(participant: participant),
+    builder: (_) => RoomProfileSheet(
+      participant: participant,
+      roomId: roomId,
+      isViewerHost: isViewerHost,
+    ),
   );
 }
 
 class RoomProfileSheet extends StatefulWidget {
   final RoomParticipant participant;
-  const RoomProfileSheet({super.key, required this.participant});
+  final String roomId;
+  final bool isViewerHost;
+  const RoomProfileSheet({
+    super.key,
+    required this.participant,
+    required this.roomId,
+    required this.isViewerHost,
+  });
 
   @override
   State<RoomProfileSheet> createState() => _RoomProfileSheetState();
@@ -32,6 +48,10 @@ class _RoomProfileSheetState extends State<RoomProfileSheet> {
   late Timer _timer;
   late DateTime _now;
 
+  bool get _isSelf =>
+      widget.participant.uid.isNotEmpty &&
+      widget.participant.uid == FirebaseAuth.instance.currentUser?.uid;
+
   @override
   void initState() {
     super.initState();
@@ -45,6 +65,40 @@ class _RoomProfileSheetState extends State<RoomProfileSheet> {
   void dispose() {
     _timer.cancel();
     super.dispose();
+  }
+
+  Future<void> _sendPartnerRequest() async {
+    try {
+      await FriendService.instance.sendFriendRequest(widget.participant.uid);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Partner request sent to ${widget.participant.name}.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not send request: ${e.toString().replaceFirst('Exception: ', '')}')),
+      );
+    }
+  }
+
+  Future<void> _removeFromStage() async {
+    try {
+      await RoomParticipantService.removeFromStage(
+        roomId: widget.roomId,
+        uid: widget.participant.uid,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${widget.participant.name} was moved back to the audience.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not remove: ${e.toString().replaceFirst('Exception: ', '')}')),
+      );
+    }
   }
 
   String get _timeLabel {
@@ -88,10 +142,32 @@ class _RoomProfileSheetState extends State<RoomProfileSheet> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
-                        _pillButton(Icons.sync_alt_rounded, 'Partner'),
-                        const SizedBox(width: 8),
-                        _pillButton(Icons.mic_off_rounded, 'Remove'),
-                        const SizedBox(width: 8),
+                        if (!_isSelf) ...[
+                          StreamBuilder<FriendStatus>(
+                            stream: FriendService.instance.streamFriendshipStatus(widget.participant.uid),
+                            builder: (context, snapshot) {
+                              final status = snapshot.data ?? FriendStatus.none;
+                              final canSend = status == FriendStatus.none;
+                              final label = switch (status) {
+                                FriendStatus.friends => 'Partners',
+                                FriendStatus.pending => 'Requested',
+                                FriendStatus.incoming => 'Respond',
+                                _ => 'Partner',
+                              };
+                              return _pillButton(
+                                Icons.sync_alt_rounded,
+                                label,
+                                onTap: canSend ? _sendPartnerRequest : null,
+                                dimmed: !canSend,
+                              );
+                            },
+                          ),
+                          const SizedBox(width: 8),
+                        ],
+                        if (widget.isViewerHost && !_isSelf && widget.participant.isSeated) ...[
+                          _pillButton(Icons.mic_off_rounded, 'Remove', onTap: _removeFromStage),
+                          const SizedBox(width: 8),
+                        ],
                         _iconCircle(Icons.more_horiz_rounded),
                       ],
                     ),
@@ -289,29 +365,34 @@ class _RoomProfileSheetState extends State<RoomProfileSheet> {
     );
   }
 
-  Widget _pillButton(IconData icon, String label) {
-    return Container(
+  Widget _pillButton(IconData icon, String label, {VoidCallback? onTap, bool dimmed = false}) {
+    final content = Container(
       padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
       decoration: BoxDecoration(
         color: Colors.white10,
         borderRadius: BorderRadius.circular(22),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 17, color: Colors.white70),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 14.5,
-              fontWeight: FontWeight.w600,
+      child: Opacity(
+        opacity: dimmed ? 0.5 : 1,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 17, color: Colors.white70),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 14.5,
+                fontWeight: FontWeight.w600,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
+    if (onTap == null) return content;
+    return GestureDetector(onTap: onTap, child: content);
   }
 
   Widget _iconCircle(IconData icon) {

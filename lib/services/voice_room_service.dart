@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 
 import '../models/voiceroom.dart';
 import 'auth_service.dart';
@@ -24,7 +25,11 @@ class VoiceRoomService {
   static String? get _uid => FirebaseAuth.instance.currentUser?.uid;
 
   /// Live feed of every currently-active room, newest first — the main
-  /// Voice tab feed.
+  /// Voice tab feed. Needs the `isActive` + `createdAt` composite index in
+  /// firestore.indexes.json deployed (`firebase deploy --only
+  /// firestore:indexes`) — without it Firestore rejects this query outright
+  /// and every room silently vanishes from the feed instead of erroring
+  /// loudly, hence the debugPrint below rather than a bare swallow.
   static Stream<List<VoiceRoom>> streamActiveRooms({int limit = 30}) {
     return _rooms
         .where('isActive', isEqualTo: true)
@@ -32,7 +37,10 @@ class VoiceRoomService {
         .limit(limit)
         .snapshots()
         .map((snap) => snap.docs.map(VoiceRoom.fromFirestore).toList())
-        .handleError((_) => <VoiceRoom>[]);
+        .handleError((e) {
+          debugPrint('VoiceRoomService.streamActiveRooms failed (showing no rooms): $e');
+          return <VoiceRoom>[];
+        });
   }
 
   /// The room [userId] is currently hosting, or null if they don't have one
@@ -95,7 +103,11 @@ class VoiceRoomService {
       hostFlag: user.countryFlag,
       category: category,
       tag: tag.trim().isEmpty ? 'General' : tag.trim(),
-      participantCount: 1,
+      // 0, not 1 — RoomParticipantService.join bumps this to 1 the instant
+      // VoiceRoomDetailScreen opens for the host (its initState always
+      // follows createRoom immediately), so it stays the single place that
+      // increments/decrements this count instead of double-counting here.
+      participantCount: 0,
       isCreator: true,
     );
 

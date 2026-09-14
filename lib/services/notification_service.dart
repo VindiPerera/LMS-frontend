@@ -66,6 +66,11 @@ class NotificationService {
   /// collection's firestore.rules comment), but the actual push now goes
   /// straight through NotificationApiService/hello-backend, since nothing
   /// is watching that collection to turn it into a push right now.
+  ///
+  /// The invite itself always goes through (the host still successfully
+  /// invites their friend); only the push is skipped when the recipient has
+  /// turned off Voice Room notifications in Settings, per
+  /// [voiceRoomNotificationsEnabledFor].
   static Future<void> inviteToVoiceRoom({
     required String recipientId,
     required String roomId,
@@ -83,6 +88,8 @@ class NotificationService {
       'createdAt': FieldValue.serverTimestamp(),
     });
 
+    if (!await voiceRoomNotificationsEnabledFor(recipientId)) return;
+
     // ignore: discarded_futures
     NotificationApiService.sendPush(
       recipientUid: recipientId,
@@ -90,5 +97,20 @@ class NotificationService {
       body: 'invited you to a Voice Room',
       data: {'type': 'voiceroom', 'roomId': roomId, 'actorId': hostId},
     );
+  }
+
+  /// Whether [uid] wants to receive Voice Room push notifications — the
+  /// Settings > Notifications toggle (see AuthService.setVoiceRoomNotificationsEnabled).
+  /// Defaults to true (opted in) both when the field is missing (existing
+  /// users who never touched the setting) and if the read itself fails, so a
+  /// transient Firestore error can never silently swallow a real invite.
+  static Future<bool> voiceRoomNotificationsEnabledFor(String uid) async {
+    if (uid.isEmpty) return true;
+    try {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      return doc.data()?['voiceRoomNotificationsEnabled'] != false;
+    } catch (_) {
+      return true;
+    }
   }
 }

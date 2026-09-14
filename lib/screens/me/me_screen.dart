@@ -4,6 +4,7 @@ import '../../models/moment.dart';
 import '../../models/user.dart';
 import '../../models/voiceroom.dart';
 import '../../services/auth_service.dart';
+import '../../services/exchange_rate_service.dart';
 import '../../services/follow_service.dart';
 import '../../services/moment_service.dart';
 import '../../services/payment_api_service.dart';
@@ -18,6 +19,7 @@ import '../voiceroom/voice_room_detail_screen.dart';
 import 'course_detail_sheet.dart';
 import 'edit_profile_screen.dart';
 import 'follow_list_screen.dart';
+import 'notification_settings_screen.dart';
 import 'vip_calendar_screen.dart';
 
 class MeScreen extends StatefulWidget {
@@ -41,6 +43,10 @@ class _MeScreenState extends State<MeScreen> {
     AuthService.instance.refreshCurrentUser().then((_) {
       if (mounted) setState(() {});
     });
+    // Pre-warms the USD/LKR rate _VipBenefitsCard prices off of, so it's
+    // usually already loaded by the time the user opens the VIP sheet.
+    // ignore: discarded_futures
+    ExchangeRateService.instance.ensureLoaded();
   }
 
   Future<void> _editProfile() async {
@@ -54,6 +60,20 @@ class _MeScreenState extends State<MeScreen> {
   Widget build(BuildContext context) {
     final user = _user;
     return Scaffold(
+      appBar: AppBar(
+        backgroundColor: AppColors.background,
+        elevation: 0,
+        automaticallyImplyLeading: false,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings_outlined, color: AppColors.textPrimary),
+            tooltip: 'Notification settings',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const NotificationSettingsScreen()),
+            ),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.fromLTRB(14, 8, 14, 24),
@@ -671,39 +691,58 @@ class _VipBenefitsCard extends StatelessWidget {
           const SizedBox(height: 10),
           _benefitRow('Search nearby Users', '—', true),
           const SizedBox(height: 18),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: () => _subscribe(context),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primaryPurple,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(24),
-                ),
-              ),
-              child: Text(
-                'Subscribe — \$${VipPlan.thirtyDays.amount.toStringAsFixed(2)} / 30 days',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 14.5,
-                ),
-              ),
-            ),
+          ValueListenableBuilder<double?>(
+            valueListenable: ExchangeRateService.instance.rate,
+            builder: (context, usdToLkrRate, _) {
+              final plan = VipPlan.thirtyDaysFor(usdToLkrRate);
+              return Column(
+                children: [
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () => _subscribe(context, plan),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primaryPurple,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(24),
+                        ),
+                      ),
+                      child: Text(
+                        'Subscribe — \$${plan.amount.toStringAsFixed(2)} / 30 days',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14.5,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '≈ Rs. ${VipPlan.lkrTargetPrice.toStringAsFixed(0)} at today\'s exchange rate',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.vipCardText.withValues(alpha: 0.6),
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         ],
       ),
     );
   }
 
-  Future<void> _subscribe(BuildContext context) async {
+  Future<void> _subscribe(BuildContext context, VipPlan plan) async {
     // Captured before any pop below — a plain `context` variable stops
     // being safely usable for widget lookups once the sheet that owns it
     // closes, but this messenger reference stays valid.
     final messenger = ScaffoldMessenger.of(context);
 
-    final purchased = await PaymentMethodSheet.show(context, plan: VipPlan.thirtyDays);
+    final purchased = await PaymentMethodSheet.show(context, plan: plan);
     if (purchased != true) return;
 
     await AuthService.instance.refreshCurrentUser();
