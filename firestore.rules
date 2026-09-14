@@ -281,10 +281,16 @@ service cloud.firestore {
         // to the real chatId, so it can't be spoofed.
         allow read: if isSignedIn() && request.auth.uid in resource.data.participants;
 
+        // Blocks a reply into a broadcast/announcement thread (admin panel
+        // -> hello-backend's FirestoreChatBroadcastService, which sets
+        // isReadOnly: true on the parent chat doc — see ChatService.
+        // systemUid on the Flutter side, which hides the composer for the
+        // same reason but doesn't stop a hand-crafted write without this).
         allow create: if isSignedIn() &&
           request.resource.data.senderId == request.auth.uid &&
           request.auth.uid in request.resource.data.participants &&
-          idMatchesParticipants(request.resource.data.participants);
+          idMatchesParticipants(request.resource.data.participants) &&
+          get(/databases/$(database)/documents/chats/$(chatId)).data.get('isReadOnly', false) == false;
 
         allow update, delete: if false;
       }
