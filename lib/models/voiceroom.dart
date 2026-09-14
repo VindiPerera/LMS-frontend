@@ -15,6 +15,17 @@ class VoiceRoom {
   final bool isTop;
   final bool isCreator;
   final bool isActive;
+  // Denormalized read/join allow-list, mirroring MomentService's `audience`
+  // pattern (see moment_service.dart's doc comment for why this has to be a
+  // stored, queryable field rather than a live lookup). Every room this app
+  // creates is public, so this is always `['public']` — VoiceRoomService
+  // .createRoom always seeds it that way. The list shape (rather than a
+  // plain bool) is kept only so firestore.rules and any older room document
+  // written before rooms were public-only keep working unchanged; there's
+  // no UI left to create anything else. firestore.rules gates both the room
+  // doc and its participants/comments/whiteboard subcollections on
+  // `audience.hasAny(['public', uid])`.
+  final List<String> audience;
   final DateTime? createdAt;
 
   const VoiceRoom({
@@ -32,6 +43,7 @@ class VoiceRoom {
     this.isTop = false,
     this.isCreator = false,
     this.isActive = true,
+    this.audience = const ['public'],
     this.createdAt,
   });
 
@@ -55,6 +67,10 @@ class VoiceRoom {
       isTop: data['isTop'] == true,
       isCreator: data['isCreator'] == true,
       isActive: data['isActive'] != false,
+      audience: (data['audience'] as List<dynamic>?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          const ['public'],
       createdAt: data['createdAt'] is Timestamp
           ? (data['createdAt'] as Timestamp).toDate()
           : null,
@@ -76,6 +92,7 @@ class VoiceRoom {
       'isTop': isTop,
       'isCreator': isCreator,
       'isActive': true,
+      'audience': audience,
       'createdAt': FieldValue.serverTimestamp(),
     };
   }

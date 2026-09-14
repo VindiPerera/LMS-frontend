@@ -1,5 +1,5 @@
 // Firebase Cloud Messaging background-message service worker for the
-// "hello-82bf9" project — kept in sync with lib/firebase_options.dart's
+// "hello-52f9b" project — kept in sync with lib/firebase_options.dart's
 // `web` FirebaseOptions (this is a plain JS file served statically, so it
 // can't import that Dart file and needs its own copy of the config).
 //
@@ -11,12 +11,12 @@ importScripts('https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js
 importScripts('https://www.gstatic.com/firebasejs/10.13.2/firebase-messaging-compat.js');
 
 firebase.initializeApp({
-  apiKey: 'AIzaSyCEfR5H68krQG3f21bZDl1JhDBvaZjUTRU',
-  appId: '1:227063183986:web:1bedc1dde53d82c048e0eb',
-  messagingSenderId: '227063183986',
-  projectId: 'hello-82bf9',
-  authDomain: 'hello-82bf9.firebaseapp.com',
-  storageBucket: 'hello-82bf9.firebasestorage.app',
+  apiKey: 'AIzaSyDGyKutN7gNC4H65mM7C4KlZ7aJDC1ZLJE',
+  appId: '1:867397619439:web:6f23e33a8ecb147f8c951a',
+  messagingSenderId: '867397619439',
+  projectId: 'hello-52f9b',
+  authDomain: 'hello-52f9b.firebaseapp.com',
+  storageBucket: 'hello-52f9b.firebasestorage.app',
 });
 
 firebase.messaging();

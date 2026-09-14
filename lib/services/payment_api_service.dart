@@ -22,13 +22,33 @@ class VipPlan {
     required this.days,
   });
 
-  static const thirtyDays = VipPlan(
-    id: 'vip_30_days',
-    label: 'VIP — 30 days',
-    amount: 4.99,
-    currency: 'USD',
-    days: 30,
-  );
+  /// Rs. 1,000 is the actual target price for this plan. The card charge
+  /// still has to happen in USD (PayPal Advanced Card Payments doesn't
+  /// take LKR here), so [thirtyDaysFor] recomputes the USD amount from a
+  /// live USD->LKR rate every time it's built — see ExchangeRateService —
+  /// keeping the real, LKR-equivalent price pegged to this figure as the
+  /// exchange rate moves, instead of the USD price silently drifting.
+  static const double lkrTargetPrice = 1000;
+
+  /// Shown until a live rate is available (first launch, or offline with
+  /// no cache yet) — roughly what Rs. 1,000 is worth in USD.
+  static const double fallbackUsdAmount = 4.99;
+
+  /// Builds the 30-day plan priced from [usdToLkrRate] (from
+  /// ExchangeRateService.instance.rate). Pass null to get
+  /// [fallbackUsdAmount] while a rate hasn't loaded yet.
+  static VipPlan thirtyDaysFor(double? usdToLkrRate) {
+    final amount = (usdToLkrRate != null && usdToLkrRate > 0)
+        ? double.parse((lkrTargetPrice / usdToLkrRate).toStringAsFixed(2))
+        : fallbackUsdAmount;
+    return VipPlan(
+      id: 'vip_30_days',
+      label: 'VIP — 30 days',
+      amount: amount,
+      currency: 'USD',
+      days: 30,
+    );
+  }
 }
 
 /// Thrown when hello-backend rejects or fails a payment, with the
