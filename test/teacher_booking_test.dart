@@ -1,6 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:facetalk_clone/data/mock_data.dart';
-import 'package:facetalk_clone/models/learn_item.dart';
 import 'package:facetalk_clone/models/user.dart';
 import 'package:facetalk_clone/utils/location_helper.dart';
 

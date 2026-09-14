@@ -51,7 +51,12 @@ class _ConnectScreenState extends State<ConnectScreen>
       final partners = await PartnerService.fetchPartners();
       if (!mounted) return;
       setState(() => _partners = partners);
-    } catch (_) {
+    } catch (e) {
+      // Requires a composite index on (isOnline desc, createdAt desc) — see
+      // firestore.indexes.json. Without it Firestore rejects this query
+      // outright, and this falls back to "no partners" rather than
+      // surfacing the real cause, hence the debugPrint.
+      debugPrint('ConnectScreen._loadPartners failed (showing no partners): $e');
       if (!mounted) return;
       setState(() => _partners = []);
     }

@@ -30,6 +30,10 @@ class AppUser {
   final String role;
   final String detail;
   final bool profileCompleted;
+  // Settings > Notifications toggle. Defaults to true (opted in) so existing
+  // users without this field yet keep getting Voice Room invite pushes —
+  // see AppUser.fromJson, which treats a missing field the same way.
+  final bool voiceRoomNotificationsEnabled;
 
   const AppUser({
     this.id = '',
@@ -51,6 +55,7 @@ class AppUser {
     this.role = 'student',
     this.detail = '',
     this.profileCompleted = false,
+    this.voiceRoomNotificationsEnabled = true,
   });
 
   /// Decodes a `users/{uid}` Firestore document into an AppUser. Callers
@@ -80,6 +85,7 @@ class AppUser {
       role: json['role']?.toString() ?? 'student',
       detail: json['detail']?.toString() ?? '',
       profileCompleted: json['profileCompleted'] == true,
+      voiceRoomNotificationsEnabled: json['voiceRoomNotificationsEnabled'] != false,
     );
   }
 

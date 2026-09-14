@@ -4,6 +4,7 @@ import '../../models/moment.dart';
 import '../../models/user.dart';
 import '../../models/voiceroom.dart';
 import '../../services/auth_service.dart';
+import '../../services/exchange_rate_service.dart';
 import '../../services/follow_service.dart';
 import '../../services/moment_service.dart';
 import '../../services/payment_api_service.dart';
@@ -18,6 +19,7 @@ import '../voiceroom/voice_room_detail_screen.dart';
 import 'course_detail_sheet.dart';
 import 'edit_profile_screen.dart';
 import 'follow_list_screen.dart';
+import 'notification_settings_screen.dart';
 import 'vip_calendar_screen.dart';
 
 class MeScreen extends StatefulWidget {
@@ -41,6 +43,10 @@ class _MeScreenState extends State<MeScreen> {
     AuthService.instance.refreshCurrentUser().then((_) {
       if (mounted) setState(() {});
     });
+    // Pre-warms the USD/LKR rate _VipBenefitsCard prices off of, so it's
+    // usually already loaded by the time the user opens the VIP sheet.
+    // ignore: discarded_futures
+    ExchangeRateService.instance.ensureLoaded();
   }
 
   Future<void> _editProfile() async {
@@ -54,6 +60,20 @@ class _MeScreenState extends State<MeScreen> {
   Widget build(BuildContext context) {
     final user = _user;
     return Scaffold(
+      appBar: AppBar(
+        backgroundColor: AppColors.background,
+        elevation: 0,
+        automaticallyImplyLeading: false,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings_outlined, color: AppColors.textPrimary),
+            tooltip: 'Notification settings',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const NotificationSettingsScreen()),
+            ),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.fromLTRB(14, 8, 14, 24),
@@ -133,9 +153,18 @@ class _VipPromoBanner extends StatelessWidget {
               showModalBottomSheet(
                 context: context,
                 backgroundColor: Colors.transparent,
-                builder: (_) => Padding(
+                isScrollControlled: true,
+                builder: (context) => Padding(
                   padding: const EdgeInsets.all(16.0),
-                  child: _VipBenefitsCard(),
+                  // The benefits list is taller than some screens, so this
+                  // caps the sheet below full height and lets it scroll
+                  // instead of overflowing off the bottom.
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: MediaQuery.of(context).size.height * 0.85,
+                    ),
+                    child: SingleChildScrollView(child: _VipBenefitsCard()),
+                  ),
                 ),
               );
             },
@@ -632,78 +661,144 @@ class _VipBenefitsCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Header uses the same 3/1/1 column split as each benefit row
+          // below, so "Non-VIP"/"VIP" line up exactly over their columns.
           Row(
             children: [
-              const Text('👑', style: TextStyle(fontSize: 16)),
-              const SizedBox(width: 6),
-              Text(
-                'VIP benefits',
-                style: TextStyle(
-                  color: AppColors.vipCardText,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 15,
+              const Expanded(
+                flex: 3,
+                child: Row(
+                  children: [
+                    Text('👑', style: TextStyle(fontSize: 16)),
+                    SizedBox(width: 6),
+                    Text(
+                      'VIP benefits',
+                      style: TextStyle(
+                        color: AppColors.vipCardText,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const Spacer(),
-              Text(
-                'Free',
-                style: TextStyle(
-                  color: AppColors.vipCardText.withValues(alpha: 0.5),
-                  fontWeight: FontWeight.w700,
-                  fontSize: 12,
+              Expanded(
+                flex: 1,
+                child: Text(
+                  'Non-VIP',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: AppColors.vipCardText.withValues(alpha: 0.5),
+                    fontWeight: FontWeight.w700,
+                    fontSize: 11,
+                  ),
                 ),
               ),
-              const SizedBox(width: 26),
-              Text(
-                'VIP',
-                style: TextStyle(
-                  color: AppColors.vipCardText,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 13,
+              Expanded(
+                flex: 1,
+                child: Text(
+                  'VIP',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: AppColors.vipGold,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 12.5,
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 14),
-          _benefitRow('Unlimited Translations', '5 times/day', true),
           const SizedBox(height: 10),
-          _benefitRow('Unlock Visitors page', '—', true),
-          const SizedBox(height: 10),
-          _benefitRow('Search nearby Users', '—', true),
+          Divider(
+            height: 1,
+            thickness: 1,
+            color: AppColors.vipCardText.withValues(alpha: 0.12),
+          ),
+          const SizedBox(height: 12),
+          _benefitRow(
+            'Unlimited AI Translation & Original Subtitles',
+            freeValue: '5 times/day',
+            vipValue: 'Unlimited',
+          ),
+          const SizedBox(height: 12),
+          _benefitRow('Unlock Visitors page'),
+          const SizedBox(height: 12),
+          _benefitRow('Search nearby Users'),
+          const SizedBox(height: 12),
+          _benefitRow('9x Exposure Boost', vipValue: 'Up to 9x'),
+          const SizedBox(height: 12),
+          _benefitRow(
+            'Meet more native speakers',
+            freeValue: '1 of each',
+            vipValue: '3 of each',
+          ),
+          const SizedBox(height: 12),
+          _benefitRow('Unlimited Live & Voiceroom'),
+          const SizedBox(height: 12),
+          _benefitRow('Search around the World'),
+          const SizedBox(height: 12),
+          _benefitRow('Filter Partners by Gender'),
+          const SizedBox(height: 12),
+          _benefitRow(
+            'Get More Language Partners',
+            freeValue: '10/day',
+            vipValue: '25/day',
+          ),
+          const SizedBox(height: 12),
+          _benefitRow('View Nearby Moments'),
           const SizedBox(height: 18),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: () => _subscribe(context),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primaryPurple,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(24),
-                ),
-              ),
-              child: Text(
-                'Subscribe — \$${VipPlan.thirtyDays.amount.toStringAsFixed(2)} / 30 days',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 14.5,
-                ),
-              ),
-            ),
+          ValueListenableBuilder<double?>(
+            valueListenable: ExchangeRateService.instance.rate,
+            builder: (context, usdToLkrRate, _) {
+              final plan = VipPlan.thirtyDaysFor(usdToLkrRate);
+              return Column(
+                children: [
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () => _subscribe(context, plan),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primaryPurple,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(24),
+                        ),
+                      ),
+                      child: Text(
+                        'Subscribe — \$${plan.amount.toStringAsFixed(2)} / 30 days',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14.5,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '≈ Rs. ${VipPlan.lkrTargetPrice.toStringAsFixed(0)} at today\'s exchange rate',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.vipCardText.withValues(alpha: 0.6),
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         ],
       ),
     );
   }
 
-  Future<void> _subscribe(BuildContext context) async {
+  Future<void> _subscribe(BuildContext context, VipPlan plan) async {
     // Captured before any pop below — a plain `context` variable stops
     // being safely usable for widget lookups once the sheet that owns it
     // closes, but this messenger reference stays valid.
     final messenger = ScaffoldMessenger.of(context);
 
-    final purchased = await PaymentMethodSheet.show(context, plan: VipPlan.thirtyDays);
+    final purchased = await PaymentMethodSheet.show(context, plan: plan);
     if (purchased != true) return;
 
     await AuthService.instance.refreshCurrentUser();
@@ -714,7 +809,10 @@ class _VipBenefitsCard extends StatelessWidget {
     );
   }
 
-  Widget _benefitRow(String label, String freeValue, bool vipCheck) {
+  // `freeValue`/`vipValue` show a plan-specific figure (e.g. "5 times/day",
+  // "Unlimited"); when omitted, the column falls back to a lock (Free — not
+  // included) or a check (VIP — included) icon instead.
+  Widget _benefitRow(String label, {String? freeValue, String? vipValue}) {
     return Row(
       children: [
         Expanded(
@@ -726,21 +824,49 @@ class _VipBenefitsCard extends StatelessWidget {
         ),
         Expanded(
           flex: 1,
-          child: Text(
-            freeValue,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: AppColors.vipCardText.withValues(alpha: 0.45),
-              fontSize: 12.5,
-            ),
+          child: Center(
+            child: freeValue != null
+                ? Text(
+                    freeValue,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.vipCardText.withValues(alpha: 0.45),
+                      fontSize: 12.5,
+                    ),
+                  )
+                : Icon(
+                    Icons.lock_rounded,
+                    color: AppColors.vipCardText.withValues(alpha: 0.35),
+                    size: 15,
+                  ),
           ),
         ),
         Expanded(
           flex: 1,
-          child: Icon(
-            Icons.check_rounded,
-            color: AppColors.vipCardText,
-            size: 18,
+          child: Center(
+            child: vipValue != null
+                ? Text(
+                    vipValue,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.vipGold,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 12.5,
+                    ),
+                  )
+                : Container(
+                    width: 20,
+                    height: 20,
+                    decoration: const BoxDecoration(
+                      color: AppColors.vipGold,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.check_rounded,
+                      color: Colors.white,
+                      size: 14,
+                    ),
+                  ),
           ),
         ),
       ],

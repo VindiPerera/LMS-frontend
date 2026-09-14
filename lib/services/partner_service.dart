@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/user.dart';
+import '../utils/stream_fallback.dart';
 
 /// Fetches language-exchange partners for the Connect tab from the
 /// `users` Firestore collection (see connect_screen.dart).
@@ -47,6 +48,6 @@ class PartnerService {
         .doc(uid)
         .snapshots()
         .map((doc) => doc.data()?['isOnline'] == true)
-        .handleError((_) => false);
+        .withFallback(() => false);
   }
 }

@@ -4,10 +4,23 @@ import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import '../config/api_config.dart';
 
-/// Uploads user-generated files (avatars) to hello-backend and persists them in MySQL.
+/// Uploads user-generated files (avatars, whiteboard images) to
+/// hello-backend and persists them in MySQL.
 class StorageService {
   /// Uploads [bytes] as this user's avatar and returns its public URL.
-  static Future<String> uploadAvatar(String uid, Uint8List bytes) async {
+  static Future<String> uploadAvatar(String uid, Uint8List bytes) {
+    return _upload(uid: uid, bytes: bytes, type: 'avatar');
+  }
+
+  /// Uploads [bytes] (e.g. from ImagePicker) as a voice room whiteboard
+  /// image and returns its public URL — same MediaController::upload
+  /// endpoint as [uploadAvatar], just tagged with a different `type` so
+  /// the backend's Media row records what it actually is.
+  static Future<String> uploadWhiteboardImage(String uid, Uint8List bytes) {
+    return _upload(uid: uid, bytes: bytes, type: 'whiteboard');
+  }
+
+  static Future<String> _upload({required String uid, required Uint8List bytes, required String type}) async {
     final candidateUrls = ApiConfig.candidateUploadUrls;
     String lastServerError = '';
 
@@ -22,7 +35,7 @@ class StorageService {
           headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
           body: jsonEncode({
             'user_id': uid,
-            'type': 'avatar',
+            'type': type,
             'extension': 'jpg',
             'file_base64': base64String,
           }),
@@ -46,7 +59,7 @@ class StorageService {
         final request = http.MultipartRequest('POST', uri);
 
         request.fields['user_id'] = uid;
-        request.fields['type'] = 'avatar';
+        request.fields['type'] = type;
 
         final multipartFile = http.MultipartFile.fromBytes(
           'file',
@@ -73,7 +86,7 @@ class StorageService {
     }
 
     throw Exception(
-      'Failed to upload avatar to backend: ${lastServerError.isNotEmpty ? lastServerError : "Server rejected avatar upload."}',
+      'Failed to upload $type to backend: ${lastServerError.isNotEmpty ? lastServerError : "Server rejected upload."}',
     );
   }
 }

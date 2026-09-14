@@ -358,7 +358,7 @@ const proPartnerBanner = CourseBanner(
 );
 
 const roomParticipants = [
-  RoomParticipant(name: 'Peter', flag: '🇺🇸', isHost: true, isSpeaking: true),
+  RoomParticipant(name: 'Peter', flag: '🇺🇸', role: 'host'),
   RoomParticipant(name: 'Lina', flag: '🇰🇷', isMuted: true),
   RoomParticipant(name: 'Sandra', flag: '🇧🇷', isMuted: true),
   RoomParticipant(name: 'João', flag: '🇵🇹'),
@@ -575,53 +575,3 @@ const roomChatLog = [
 ];
 
 const roomQuickReplies = ['Hey, everyone!', "I'm new here.", 'Welcome!'];
-
-const boardSpeakers = [
-  RoomParticipant(
-    name: 'supun',
-    flag: '🇨🇦',
-    isHost: true,
-    isSpeaking: true,
-    gender: 'male',
-    age: 24,
-    nativeLang: 'EN',
-    learningLang: 'SI',
-    location: 'Toronto, Canada',
-    nativeLanguageFull: 'English',
-    learningLanguagesFull: ['Sinhalese'],
-    hobbies: [
-      'Traveling',
-      'Reading',
-      'Movies',
-      'TV-series',
-      'Music',
-      'Fitness',
-      'Swimming',
-      'Camping',
-      'Fashion',
-      'Gardning',
-      'Photography',
-      'Dancing',
-      'Foot ball',
-      'Cricket',
-    ],
-  ),
-  RoomParticipant(name: '', flag: '', isEmptySeat: true),
-  RoomParticipant(name: '', flag: '', isEmptySeat: true),
-  RoomParticipant(name: '', flag: '', isEmptySeat: true),
-  RoomParticipant(name: '', flag: '', isEmptySeat: true),
-  RoomParticipant(name: '', flag: '', isEmptySeat: true),
-  RoomParticipant(name: '', flag: '', isEmptySeat: true),
-  RoomParticipant(name: '', flag: '', isEmptySeat: true),
-];
-
-const boardStripCount = 7;
-const boardOthersCount = 10;
-
-const boardComments = [
-  BoardComment(sender: 'Mike B.', text: 'Good Morning🌟'),
-  BoardComment(sender: 'Mike B.', text: 'Good Morning🌟'),
-  BoardComment(sender: 'Mike B.', text: 'Good Morning🌟\nGood Morning🌟'),
-  BoardComment(sender: 'Mike B.', text: 'Good Morning🌟'),
-  BoardComment(sender: 'Mike B.', text: 'Good Morning🌟'),
-];

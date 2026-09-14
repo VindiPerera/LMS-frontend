@@ -8,6 +8,7 @@ import 'screens/auth/splash_screen.dart';
 import 'services/deep_link_service.dart';
 import 'services/navigation_service.dart';
 import 'services/push_notification_service.dart';
+import 'theme/app_scroll_behavior.dart';
 import 'theme/app_theme.dart';
 
 Future<void> main() async {
@@ -36,6 +37,7 @@ class FaceTalkApp extends StatelessWidget {
       title: 'FaceTalk',
       debugShowCheckedModeBanner: false,
       navigatorKey: NavigationService.navigatorKey,
+      scrollBehavior: AppScrollBehavior(),
       theme: AppTheme.light,
       themeMode: ThemeMode.light,
       home: const SplashScreen(),

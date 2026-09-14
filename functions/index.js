@@ -483,6 +483,14 @@ exports.onVoiceRoomInviteCreate = onDocumentCreated(
     const invite = event.data.data();
     if (!invite?.recipientId || !invite?.roomId) return;
 
+    // Settings > Notifications > Voice Room invites — mirrors the check in
+    // lib/services/notification_service.dart's inviteToVoiceRoom (the
+    // client-side path that actually runs today). Defaults to true when the
+    // field is missing, same as AppUser.fromJson. Skips both the in-app
+    // notification item and the push, so a muted recipient sees neither.
+    const recipientSnap = await db.collection("users").doc(invite.recipientId).get();
+    if (recipientSnap.data()?.voiceRoomNotificationsEnabled === false) return;
+
     await writeNotification(invite.recipientId, {
       type: "voiceroom",
       actorId: invite.hostId || "",

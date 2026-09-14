@@ -32,8 +32,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       VoiceRoomService.streamActiveRoomForUser(widget.user.id);
   // Live online/offline for the header — widget.user.isOnline alone would
   // just be whatever was true the moment this screen opened, never
-  // updating while the chat stays open.
-  late final Stream<bool> _theirOnlineStream = PartnerService.streamIsOnline(widget.user.id);
+  // updating while the chat stays open. Skipped for the FaceTalk system
+  // account: it isn't a real user doc, so there's nothing to listen to.
+  late final Stream<bool> _theirOnlineStream = _isSystemChat
+      ? const Stream.empty()
+      : PartnerService.streamIsOnline(widget.user.id);
+
+  bool get _isSystemChat => ChatService.isSystemChat(widget.user.id);
 
   @override
   void initState() {
@@ -117,25 +122,41 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   imageUrl: widget.user.avatarUrl,
                   size: 36,
                   showFlag: false,
-                  showOnlineDot: true,
+                  showOnlineDot: !_isSystemChat,
                   isOnline: isOnline,
                 ),
                 const SizedBox(width: 10),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      widget.user.name,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    Row(
+                      children: [
+                        Text(
+                          widget.user.name,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        if (_isSystemChat) ...[
+                          const SizedBox(width: 4),
+                          const Icon(
+                            Icons.verified_rounded,
+                            size: 15,
+                            color: AppColors.primaryPurple,
+                          ),
+                        ],
+                      ],
                     ),
                     Text(
-                      isOnline ? 'Active now' : 'Offline',
+                      _isSystemChat
+                          ? 'Official account'
+                          : (isOnline ? 'Active now' : 'Offline'),
                       style: TextStyle(
                         fontSize: 11.5,
-                        color: isOnline ? AppColors.online : AppColors.textTertiary,
+                        color: _isSystemChat
+                            ? AppColors.textTertiary
+                            : (isOnline ? AppColors.online : AppColors.textTertiary),
                       ),
                     ),
                   ],
@@ -144,13 +165,15 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             );
           },
         ),
-        actions: [
-          IconButton(icon: const Icon(Icons.call_outlined), onPressed: () {}),
-          IconButton(
-            icon: const Icon(Icons.more_vert_rounded),
-            onPressed: () {},
-          ),
-        ],
+        actions: _isSystemChat
+            ? const []
+            : [
+                IconButton(icon: const Icon(Icons.call_outlined), onPressed: () {}),
+                IconButton(
+                  icon: const Icon(Icons.more_vert_rounded),
+                  onPressed: () {},
+                ),
+              ],
       ),
       body: Column(
         children: [
@@ -237,7 +260,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               },
             ),
           ),
-          _Composer(controller: _controller, onSend: _send),
+          _isSystemChat
+              ? const _ReadOnlyNotice()
+              : _Composer(controller: _controller, onSend: _send),
         ],
       ),
     );
@@ -483,6 +508,39 @@ class _VoiceWave extends StatelessWidget {
             ),
           )
           .toList(),
+    );
+  }
+}
+
+/// Shown instead of [_Composer] for the FaceTalk system/broadcast thread —
+/// replies aren't offered at all, rather than a text field that would just
+/// fail (see firestore.rules' `isReadOnly` guard on chats/{chatId}/messages).
+class _ReadOnlyNotice extends StatelessWidget {
+  const _ReadOnlyNotice();
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: const BoxDecoration(
+          color: AppColors.surface,
+          border: Border(top: BorderSide(color: AppColors.divider, width: 0.6)),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.lock_outline_rounded, size: 15, color: AppColors.textTertiary),
+            const SizedBox(width: 6),
+            Text(
+              'Official announcements — you can\'t reply here',
+              style: const TextStyle(fontSize: 12.5, color: AppColors.textTertiary),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
