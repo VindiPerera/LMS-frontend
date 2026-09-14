@@ -57,6 +57,9 @@ class _VoiceroomScreenState extends State<VoiceroomScreen>
     final titleController = TextEditingController();
     final tagController = TextEditingController();
 
+    // This app only ever creates public rooms — listed on Voice for anyone
+    // to join — so the sheet no longer offers a Private option at all
+    // (there is nothing left here for it to gate).
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -110,6 +113,17 @@ class _VoiceroomScreenState extends State<VoiceroomScreen>
                   hintText: 'Beginner Level English',
                   border: OutlineInputBorder(),
                 ),
+              ),
+              const SizedBox(height: 8),
+              const Row(
+                children: [
+                  Icon(Icons.public_rounded, size: 15, color: Colors.black45),
+                  SizedBox(width: 6),
+                  Text(
+                    'Listed on Voice for anyone to join',
+                    style: TextStyle(fontSize: 12.5, color: Colors.black45),
+                  ),
+                ],
               ),
               const SizedBox(height: 18),
               ElevatedButton(

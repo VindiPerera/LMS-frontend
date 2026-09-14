@@ -108,7 +108,20 @@ class AuthService {
       password: password,
     );
     _afterSignIn();
-    return (await refreshCurrentUser())!;
+    final user = await refreshCurrentUser();
+    if (user == null) {
+      // Auth succeeded but there is no matching Firestore profile — the
+      // account may have been created directly in the Firebase console or
+      // the document was deleted. Sign out so the app doesn't end up in a
+      // half-authenticated state, then surface a clear message.
+      await FirebaseAuth.instance.signOut();
+      throw FirebaseAuthException(
+        code: 'user-not-found',
+        message:
+            'No profile found for this account. Please sign up to create one.',
+      );
+    }
+    return user;
   }
 
   /// "Continue with Google". [role] is only used the first time this Google

@@ -153,9 +153,18 @@ class _VipPromoBanner extends StatelessWidget {
               showModalBottomSheet(
                 context: context,
                 backgroundColor: Colors.transparent,
-                builder: (_) => Padding(
+                isScrollControlled: true,
+                builder: (context) => Padding(
                   padding: const EdgeInsets.all(16.0),
-                  child: _VipBenefitsCard(),
+                  // The benefits list is taller than some screens, so this
+                  // caps the sheet below full height and lets it scroll
+                  // instead of overflowing off the bottom.
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: MediaQuery.of(context).size.height * 0.85,
+                    ),
+                    child: SingleChildScrollView(child: _VipBenefitsCard()),
+                  ),
                 ),
               );
             },
@@ -652,44 +661,91 @@ class _VipBenefitsCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Header uses the same 3/1/1 column split as each benefit row
+          // below, so "Non-VIP"/"VIP" line up exactly over their columns.
           Row(
             children: [
-              const Text('👑', style: TextStyle(fontSize: 16)),
-              const SizedBox(width: 6),
-              Text(
-                'VIP benefits',
-                style: TextStyle(
-                  color: AppColors.vipCardText,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 15,
+              const Expanded(
+                flex: 3,
+                child: Row(
+                  children: [
+                    Text('👑', style: TextStyle(fontSize: 16)),
+                    SizedBox(width: 6),
+                    Text(
+                      'VIP benefits',
+                      style: TextStyle(
+                        color: AppColors.vipCardText,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const Spacer(),
-              Text(
-                'Free',
-                style: TextStyle(
-                  color: AppColors.vipCardText.withValues(alpha: 0.5),
-                  fontWeight: FontWeight.w700,
-                  fontSize: 12,
+              Expanded(
+                flex: 1,
+                child: Text(
+                  'Non-VIP',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: AppColors.vipCardText.withValues(alpha: 0.5),
+                    fontWeight: FontWeight.w700,
+                    fontSize: 11,
+                  ),
                 ),
               ),
-              const SizedBox(width: 26),
-              Text(
-                'VIP',
-                style: TextStyle(
-                  color: AppColors.vipCardText,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 13,
+              Expanded(
+                flex: 1,
+                child: Text(
+                  'VIP',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: AppColors.vipGold,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 12.5,
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 14),
-          _benefitRow('Unlimited Translations', '5 times/day', true),
           const SizedBox(height: 10),
-          _benefitRow('Unlock Visitors page', '—', true),
-          const SizedBox(height: 10),
-          _benefitRow('Search nearby Users', '—', true),
+          Divider(
+            height: 1,
+            thickness: 1,
+            color: AppColors.vipCardText.withValues(alpha: 0.12),
+          ),
+          const SizedBox(height: 12),
+          _benefitRow(
+            'Unlimited AI Translation & Original Subtitles',
+            freeValue: '5 times/day',
+            vipValue: 'Unlimited',
+          ),
+          const SizedBox(height: 12),
+          _benefitRow('Unlock Visitors page'),
+          const SizedBox(height: 12),
+          _benefitRow('Search nearby Users'),
+          const SizedBox(height: 12),
+          _benefitRow('9x Exposure Boost', vipValue: 'Up to 9x'),
+          const SizedBox(height: 12),
+          _benefitRow(
+            'Meet more native speakers',
+            freeValue: '1 of each',
+            vipValue: '3 of each',
+          ),
+          const SizedBox(height: 12),
+          _benefitRow('Unlimited Live & Voiceroom'),
+          const SizedBox(height: 12),
+          _benefitRow('Search around the World'),
+          const SizedBox(height: 12),
+          _benefitRow('Filter Partners by Gender'),
+          const SizedBox(height: 12),
+          _benefitRow(
+            'Get More Language Partners',
+            freeValue: '10/day',
+            vipValue: '25/day',
+          ),
+          const SizedBox(height: 12),
+          _benefitRow('View Nearby Moments'),
           const SizedBox(height: 18),
           ValueListenableBuilder<double?>(
             valueListenable: ExchangeRateService.instance.rate,
@@ -753,7 +809,10 @@ class _VipBenefitsCard extends StatelessWidget {
     );
   }
 
-  Widget _benefitRow(String label, String freeValue, bool vipCheck) {
+  // `freeValue`/`vipValue` show a plan-specific figure (e.g. "5 times/day",
+  // "Unlimited"); when omitted, the column falls back to a lock (Free — not
+  // included) or a check (VIP — included) icon instead.
+  Widget _benefitRow(String label, {String? freeValue, String? vipValue}) {
     return Row(
       children: [
         Expanded(
@@ -765,21 +824,49 @@ class _VipBenefitsCard extends StatelessWidget {
         ),
         Expanded(
           flex: 1,
-          child: Text(
-            freeValue,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: AppColors.vipCardText.withValues(alpha: 0.45),
-              fontSize: 12.5,
-            ),
+          child: Center(
+            child: freeValue != null
+                ? Text(
+                    freeValue,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.vipCardText.withValues(alpha: 0.45),
+                      fontSize: 12.5,
+                    ),
+                  )
+                : Icon(
+                    Icons.lock_rounded,
+                    color: AppColors.vipCardText.withValues(alpha: 0.35),
+                    size: 15,
+                  ),
           ),
         ),
         Expanded(
           flex: 1,
-          child: Icon(
-            Icons.check_rounded,
-            color: AppColors.vipCardText,
-            size: 18,
+          child: Center(
+            child: vipValue != null
+                ? Text(
+                    vipValue,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.vipGold,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 12.5,
+                    ),
+                  )
+                : Container(
+                    width: 20,
+                    height: 20,
+                    decoration: const BoxDecoration(
+                      color: AppColors.vipGold,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.check_rounded,
+                      color: Colors.white,
+                      size: 14,
+                    ),
+                  ),
           ),
         ),
       ],

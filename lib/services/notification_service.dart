@@ -59,13 +59,17 @@ class NotificationService {
     await batch.commit();
   }
 
-  /// Invites [recipientId] to the signed-in user's live voice room.
+  /// Invites [recipientId] to the signed-in user's live (public) voice room.
   ///
   /// Still writes a `voiceRoomInvites` doc (harmless, and picks up
   /// automatically if Cloud Functions ever get deployed later — see that
   /// collection's firestore.rules comment), but the actual push now goes
   /// straight through NotificationApiService/hello-backend, since nothing
   /// is watching that collection to turn it into a push right now.
+  ///
+  /// Every room is public, so [recipientId] can already read/join it
+  /// without anything else changing here — this is purely a "hey, come join
+  /// me" nudge, not an access grant.
   ///
   /// The invite itself always goes through (the host still successfully
   /// invites their friend); only the push is skipped when the recipient has

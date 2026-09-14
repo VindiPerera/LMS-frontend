@@ -358,7 +358,7 @@ const proPartnerBanner = CourseBanner(
 );
 
 const roomParticipants = [
-  RoomParticipant(name: 'Peter', flag: '🇺🇸', isHost: true, isSpeaking: true),
+  RoomParticipant(name: 'Peter', flag: '🇺🇸', role: 'host'),
   RoomParticipant(name: 'Lina', flag: '🇰🇷', isMuted: true),
   RoomParticipant(name: 'Sandra', flag: '🇧🇷', isMuted: true),
   RoomParticipant(name: 'João', flag: '🇵🇹'),

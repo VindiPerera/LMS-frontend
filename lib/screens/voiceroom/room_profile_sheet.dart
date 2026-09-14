@@ -10,7 +10,7 @@ Future<void> showRoomProfileSheet(
   BuildContext context,
   RoomParticipant participant, {
   required String roomId,
-  required bool isViewerHost,
+  required bool canModerate,
 }) {
   return showModalBottomSheet(
     context: context,
@@ -19,7 +19,7 @@ Future<void> showRoomProfileSheet(
     builder: (_) => RoomProfileSheet(
       participant: participant,
       roomId: roomId,
-      isViewerHost: isViewerHost,
+      canModerate: canModerate,
     ),
   );
 }
@@ -27,12 +27,12 @@ Future<void> showRoomProfileSheet(
 class RoomProfileSheet extends StatefulWidget {
   final RoomParticipant participant;
   final String roomId;
-  final bool isViewerHost;
+  final bool canModerate;
   const RoomProfileSheet({
     super.key,
     required this.participant,
     required this.roomId,
-    required this.isViewerHost,
+    required this.canModerate,
   });
 
   @override
@@ -164,7 +164,7 @@ class _RoomProfileSheetState extends State<RoomProfileSheet> {
                           ),
                           const SizedBox(width: 8),
                         ],
-                        if (widget.isViewerHost && !_isSelf && widget.participant.isSeated) ...[
+                        if (widget.canModerate && !_isSelf && widget.participant.isSeated) ...[
                           _pillButton(Icons.mic_off_rounded, 'Remove', onTap: _removeFromStage),
                           const SizedBox(width: 8),
                         ],

@@ -1,8 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import '../models/chat_message.dart';
 import '../models/user.dart';
 import '../utils/chat_time.dart';
+import '../utils/stream_fallback.dart';
 import 'auth_service.dart';
 import 'notification_api_service.dart';
 
@@ -41,7 +43,14 @@ class ChatService {
   }
 
   /// Live list of the current user's chat threads for
-  /// hellotalk/chat_list_screen.dart, newest message first.
+  /// hellotalk/chat_list_screen.dart, newest message first. Requires a
+  /// composite index on (participants CONTAINS, lastMessageAt desc) — see
+  /// firestore.indexes.json; without it this query fails outright, and
+  /// (unlike a plain `.handleError((_) => <ChatPreview>[])`, whose return
+  /// value is silently discarded — the callback is `void`, not a stream
+  /// transform, so it swallows the error without ever emitting the
+  /// fallback) `withFallback` below actually pushes `[]` downstream so the
+  /// chat list's StreamBuilder resolves instead of spinning forever.
   static Stream<List<ChatPreview>> streamChatPreviews() {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return const Stream.empty();
@@ -52,7 +61,10 @@ class ChatService {
         .map(
           (snap) => snap.docs.map((doc) => _previewFromDoc(doc, uid)).toList(),
         )
-        .handleError((_) => <ChatPreview>[]);
+        .withFallback(
+          () => <ChatPreview>[],
+          onError: (e) => debugPrint('ChatService.streamChatPreviews failed (showing no chats): $e'),
+        );
   }
 
   /// Sum of unread counts across every thread, for the bottom nav badge.
@@ -68,7 +80,7 @@ class ChatService {
             return total + ((unread as num?)?.toInt() ?? 0);
           });
         })
-        .handleError((_) => 0);
+        .withFallback(() => 0);
   }
 
   /// Live messages for one thread, oldest first, for
@@ -100,7 +112,7 @@ class ChatService {
           });
           return messages;
         })
-        .handleError((_) => <ChatMessage>[]);
+        .withFallback(() => <ChatMessage>[]);
   }
 
 

@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 enum RoomMessageIcon { none, notice, gift, translate, star }
 
 /// One person present in a voice room — backed by
@@ -10,7 +12,9 @@ class RoomParticipant {
   final String name;
   final String avatarUrl;
   final String flag;
-  // 'host' | 'speaker' | 'listener'. Only host/speaker occupy a grid seat.
+  // 'host' | 'moderator' | 'speaker' | 'listener'. Host/moderator/speaker
+  // occupy a grid seat; only host/moderator can moderate (remove from
+  // stage, end the room, edit the whiteboard).
   final String role;
   final bool isMuted;
   final bool isEmptySeat;
@@ -22,6 +26,12 @@ class RoomParticipant {
   final String nativeLanguageFull;
   final List<String> learningLanguagesFull;
   final List<String> hobbies;
+  // Last heartbeat write (RoomParticipantService.heartbeat) — null for the
+  // instant between join() and their first heartbeat, or for the
+  // decorative RoomParticipant.emptySeat placeholder. Used purely to spot
+  // participants who disconnected without a clean leave(); see
+  // RoomParticipantService.sweepStaleParticipants.
+  final DateTime? lastActiveAt;
 
   const RoomParticipant({
     this.uid = '',
@@ -39,14 +49,22 @@ class RoomParticipant {
     this.nativeLanguageFull = '',
     this.learningLanguagesFull = const [],
     this.hobbies = const [],
+    this.lastActiveAt,
   });
 
   static const emptySeat = RoomParticipant(name: '', flag: '', isEmptySeat: true);
 
   bool get isHost => role == 'host';
+  bool get isModerator => role == 'moderator';
 
-  // Occupies one of the grid's speaker seats (host or promoted speaker).
-  bool get isSeated => role == 'host' || role == 'speaker';
+  // Host or a live moderator — the two tiers that can remove someone from
+  // stage, end the room, and edit the whiteboard. See RoomParticipantService
+  // and firestore.rules for where this same host-or-moderator check is
+  // enforced server-side.
+  bool get canModerate => isHost || isModerator;
+
+  // Occupies one of the grid's speaker seats.
+  bool get isSeated => role == 'host' || role == 'moderator' || role == 'speaker';
 
   // Drives the on-air mic badge in the speaker grid — only shown for a
   // seated, currently-unmuted participant.
@@ -65,6 +83,7 @@ class RoomParticipant {
       nativeLang: data['nativeLang']?.toString() ?? '',
       learningLang: data['learningLang']?.toString() ?? '',
       hobbies: (data['tags'] as List?)?.map((e) => e.toString()).toList() ?? const [],
+      lastActiveAt: data['lastActiveAt'] is Timestamp ? (data['lastActiveAt'] as Timestamp).toDate() : null,
     );
   }
 }

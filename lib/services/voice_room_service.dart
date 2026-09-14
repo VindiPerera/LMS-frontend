@@ -24,15 +24,34 @@ class VoiceRoomService {
 
   static String? get _uid => FirebaseAuth.instance.currentUser?.uid;
 
-  /// Live feed of every currently-active room, newest first — the main
-  /// Voice tab feed. Needs the `isActive` + `createdAt` composite index in
-  /// firestore.indexes.json deployed (`firebase deploy --only
+  /// Rooms this device is currently allowed to see: 'public' plus, if
+  /// signed in, its own uid — matches firestore.rules'
+  /// `audience.hasAny(['public', uid])` read check exactly, and has to be a
+  /// real query filter (not just a client-side .where check after the
+  /// fact) or Firestore rejects the whole query outright as unprovable
+  /// against the rules — see MomentService._audienceKeysForReader, which
+  /// this mirrors. Every room created today has `audience: ['public']`, so
+  /// 'public' alone would now cover every current room; the extra own-uid
+  /// key is kept only so a user's own room stays visible if it's one of the
+  /// old restricted-audience documents from before rooms went public-only.
+  static List<String> _audienceKeysForReader() {
+    final uid = _uid;
+    return uid == null || uid.isEmpty ? const ['public'] : ['public', uid];
+  }
+
+  /// Live feed of every currently-active room this user may see, newest
+  /// first — the main Voice tab feed. Every room is public, so this shows
+  /// all of them; [_audienceKeysForReader] additionally covers any
+  /// restricted-audience room left over from before rooms went public-only.
+  /// Needs the `isActive` + `audience` (CONTAINS) + `createdAt` composite
+  /// index in firestore.indexes.json deployed (`firebase deploy --only
   /// firestore:indexes`) — without it Firestore rejects this query outright
   /// and every room silently vanishes from the feed instead of erroring
   /// loudly, hence the debugPrint below rather than a bare swallow.
   static Stream<List<VoiceRoom>> streamActiveRooms({int limit = 30}) {
     return _rooms
         .where('isActive', isEqualTo: true)
+        .where('audience', arrayContainsAny: _audienceKeysForReader())
         .orderBy('createdAt', descending: true)
         .limit(limit)
         .snapshots()
@@ -45,14 +64,13 @@ class VoiceRoomService {
 
   /// The room [userId] is currently hosting, or null if they don't have one
   /// active right now. Used by the profile screen's voice-room card and the
-  /// Chat tab's "you're hosting" banner — both just need "is this person
-  /// live right now", not a query needing a composite index (two equality
-  /// filters, no orderBy).
+  /// Chat tab's "you're hosting" banner.
   static Stream<VoiceRoom?> streamActiveRoomForUser(String userId) {
     if (userId.isEmpty) return Stream.value(null);
     return _rooms
         .where('hostId', isEqualTo: userId)
         .where('isActive', isEqualTo: true)
+        .where('audience', arrayContainsAny: _audienceKeysForReader())
         .limit(1)
         .snapshots()
         .map((snap) => snap.docs.isEmpty ? null : VoiceRoom.fromFirestore(snap.docs.first))
@@ -69,15 +87,42 @@ class VoiceRoomService {
   /// One-time fetch of a single room by id, e.g. hydrating a Voice Room
   /// invite notification deep link (NavigationService.openVoiceRoom) into
   /// the full [VoiceRoom] object VoiceRoomDetailScreen needs. Returns null
-  /// if it no longer exists.
+  /// if it no longer exists, or (unlike a list query, a single get() doesn't
+  /// get rejected outright — it's just denied) if this device isn't in the
+  /// room's `audience`, e.g. an invite that was later revoked.
   static Future<VoiceRoom?> fetchRoom(String roomId) async {
     if (roomId.isEmpty) return null;
-    final doc = await _rooms.doc(roomId).get();
-    if (!doc.exists) return null;
-    return VoiceRoom.fromFirestore(doc);
+    try {
+      final doc = await _rooms.doc(roomId).get();
+      if (!doc.exists) return null;
+      return VoiceRoom.fromFirestore(doc);
+    } on FirebaseException catch (e) {
+      if (e.code == 'permission-denied') return null;
+      rethrow;
+    }
   }
 
-  /// Creates a new room hosted by the signed-in user.
+  /// Live updates for a single room — VoiceRoomDetailScreen uses this to
+  /// notice when its own room gets ended (isActive flips to false) while
+  /// it's still open, so it can auto-pop everyone still inside instead of
+  /// leaving them stranded on a dead room. Null once the room no longer
+  /// exists (shouldn't normally happen — rooms are soft-deleted — but keeps
+  /// this safe if one ever is removed outright).
+  static Stream<VoiceRoom?> streamRoom(String roomId) {
+    if (roomId.isEmpty) return Stream.value(null);
+    return _rooms
+        .doc(roomId)
+        .snapshots()
+        .map((doc) => doc.exists ? VoiceRoom.fromFirestore(doc) : null)
+        .handleError((e) {
+          debugPrint('VoiceRoomService.streamRoom failed: $e');
+          return null;
+        });
+  }
+
+  /// Creates a new room hosted by the signed-in user. Every room this app
+  /// creates is public — listed in everyone's browse feed and joinable by
+  /// any signed-in user; there is no private-room option.
   static Future<VoiceRoom> createRoom({
     required String title,
     String tag = 'General',
@@ -109,6 +154,8 @@ class VoiceRoomService {
       // increments/decrements this count instead of double-counting here.
       participantCount: 0,
       isCreator: true,
+      // Always public — visible to, and joinable by, any signed-in user.
+      audience: const ['public'],
     );
 
     final ref = _rooms.doc();
@@ -117,10 +164,10 @@ class VoiceRoomService {
     return VoiceRoom.fromFirestore(snap);
   }
 
-  /// Ends [roomId] so it stops showing up anywhere. Only the host may do
-  /// this (also enforced by firestore.rules) — callers should guard the UI
-  /// action on `room.hostId == currentUid` too, rather than relying only on
-  /// the rules rejection.
+  /// Ends [roomId] so it stops showing up anywhere. Only the host or a live
+  /// moderator may do this (also enforced by firestore.rules) — callers
+  /// should guard the UI action on RoomParticipant.canModerate too, rather
+  /// than relying only on the rules rejection.
   static Future<void> endRoom(String roomId) async {
     if (roomId.isEmpty) return;
     await _rooms.doc(roomId).update({'isActive': false});
