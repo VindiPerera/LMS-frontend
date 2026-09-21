@@ -78,6 +78,26 @@ class FollowService {
         .handleError((_) => false);
   }
 
+  /// Whether [otherId] currently follows the signed-in user — the other
+  /// half of [streamIsFollowing]. Combining the two is how a caller detects
+  /// a mutual follow (shown as "Partner" wherever both directions are true
+  /// — see room_profile_sheet.dart's Follow button) without needing a
+  /// dedicated "mutual" field anywhere: backed by the signed-in user's own
+  /// `followers` subcollection, which already stores exactly this (see this
+  /// class's own doc comment — `users/{uid}/followers/{followerUid}` exists
+  /// iff `followerUid` follows `uid`).
+  static Stream<bool> streamIsFollowedBy(String otherId) {
+    final uid = _uid();
+    if (uid == null || otherId.isEmpty) return Stream.value(false);
+    return _users
+        .doc(uid)
+        .collection('followers')
+        .doc(otherId)
+        .snapshots()
+        .map((doc) => doc.exists)
+        .handleError((_) => false);
+  }
+
   /// Live counts for me_screen.dart / partner_profile_screen.dart's stats
   /// row. A plain doc-count listener rather than a maintained counter field
   /// — same tradeoff me_screen.dart already makes for "My Moments" (see

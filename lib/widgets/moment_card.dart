@@ -23,6 +23,7 @@ import 'post_image_grid.dart';
 import 'reaction_picker.dart';
 import 'report_sheet.dart';
 import 'reshare_sheet.dart';
+import 'voice_room_invite_card.dart';
 
 /// Hashtag support isn't built into package:linkify, unlike @mentions
 /// (UserTagLinkifier) — this mirrors that package's own Linkifier pattern.
@@ -314,7 +315,14 @@ class _MomentCardState extends State<MomentCard> {
             const SizedBox(height: 10),
             _buildText(),
           ],
-          if (_moment.isReshare && (_moment.originalPostId ?? '').isNotEmpty)
+          if (_moment.hasVoiceRoomCard)
+            VoiceRoomInviteCard(
+              roomId: _moment.voiceRoomId,
+              title: _moment.voiceRoomTitle,
+              hostName: _moment.voiceRoomHostName,
+              hostAvatar: _moment.voiceRoomHostAvatar,
+            )
+          else if (_moment.isReshare && (_moment.originalPostId ?? '').isNotEmpty)
             EmbeddedPostCard(originalPostId: _moment.originalPostId!)
           else if (_moment.mediaType == MomentMediaType.image && _moment.imageUrls.isNotEmpty)
             Padding(

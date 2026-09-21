@@ -10,7 +10,7 @@ import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
 import 'add_contact_screen.dart';
 import 'chat_detail_screen.dart';
-import '../voiceroom/voice_room_detail_screen.dart';
+import '../voiceroom/open_voice_room.dart';
 
 class ChatListScreen extends StatefulWidget {
   const ChatListScreen({super.key});
@@ -541,11 +541,7 @@ class _LiveVoiceRoomBanner extends StatelessWidget {
         final room = snapshot.data;
         if (room == null) return const SizedBox.shrink();
         return GestureDetector(
-          onTap: () {
-            Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => VoiceRoomDetailScreen(room: room)),
-            );
-          },
+          onTap: () => openVoiceRoom(context, room),
           child: Container(
             margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),

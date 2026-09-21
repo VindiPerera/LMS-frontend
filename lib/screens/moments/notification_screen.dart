@@ -9,7 +9,7 @@ import '../../services/voice_room_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
 import '../friends/friend_profile_screen.dart';
-import '../voiceroom/voice_room_detail_screen.dart';
+import '../voiceroom/open_voice_room.dart';
 import 'post_detail_screen.dart';
 
 /// Notification feed: `notifications/{uid}/items` ordered newest first.
@@ -97,9 +97,7 @@ class _NotificationTile extends StatelessWidget {
           );
           return;
         }
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => VoiceRoomDetailScreen(room: room)),
-        );
+        await openVoiceRoom(context, room);
         return;
 
       case NotificationType.like:

@@ -9,7 +9,7 @@ import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
 import '../hellotalk/chat_detail_screen.dart';
 import '../moments/user_moments_screen.dart';
-import '../voiceroom/voice_room_detail_screen.dart';
+import '../voiceroom/open_voice_room.dart';
 
 class FriendProfileScreen extends StatefulWidget {
   final String friendId;
@@ -466,13 +466,7 @@ class _FriendProfileScreenState extends State<FriendProfileScreen> {
                                       ),
                                       const SizedBox(width: 8),
                                       ElevatedButton(
-                                        onPressed: () {
-                                          Navigator.of(context).push(
-                                            MaterialPageRoute(
-                                              builder: (_) => VoiceRoomDetailScreen(room: room),
-                                            ),
-                                          );
-                                        },
+                                        onPressed: () => openVoiceRoom(context, room),
                                         style: ElevatedButton.styleFrom(
                                           backgroundColor: Colors.white,
                                           foregroundColor: AppColors.primaryPurple,

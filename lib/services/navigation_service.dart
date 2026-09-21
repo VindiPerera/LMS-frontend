@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../screens/friends/friend_profile_screen.dart';
 import '../screens/hellotalk/chat_detail_screen.dart';
 import '../screens/moments/post_detail_screen.dart';
-import '../screens/voiceroom/voice_room_detail_screen.dart';
+import '../screens/voiceroom/open_voice_room.dart' as voice_room_nav;
 import 'partner_service.dart';
 import 'voice_room_service.dart';
 
@@ -65,17 +65,19 @@ class NavigationService {
   /// Deep-links to voice room [roomId] — from a Voice Room invite
   /// notification. Fetches the room first since VoiceRoomDetailScreen needs
   /// the full [VoiceRoom], not just its id; silently no-ops if the room
-  /// already ended by the time the notification is tapped.
+  /// already ended by the time the notification is tapped. Goes through
+  /// screens/voiceroom/open_voice_room.dart like every other "open this
+  /// room" entry point in the app, so a still-banned user gets the same
+  /// "you can't join this room" dialog here too instead of the room
+  /// briefly flashing open from a tapped notification.
   static Future<void> openVoiceRoom(String roomId) async {
     if (roomId.isEmpty) return;
-    final navigator = navigatorKey.currentState;
-    if (navigator == null) return;
+    final context = navigatorKey.currentContext;
+    if (context == null) return;
     try {
       final room = await VoiceRoomService.fetchRoom(roomId);
-      if (room == null) return;
-      navigator.push(
-        MaterialPageRoute(builder: (_) => VoiceRoomDetailScreen(room: room)),
-      );
+      if (room == null || !context.mounted) return;
+      await voice_room_nav.openVoiceRoom(context, room);
     } catch (e) {
       debugPrint('NavigationService.openVoiceRoom($roomId) failed: $e');
     }

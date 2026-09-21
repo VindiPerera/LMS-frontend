@@ -60,6 +60,14 @@
         { "fieldPath": "isActive", "order": "ASCENDING" },
         { "fieldPath": "audience", "arrayConfig": "CONTAINS" }
       ]
+    },
+    {
+      "collectionGroup": "participants",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "handRaised", "order": "ASCENDING" },
+        { "fieldPath": "handRaisedAt", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

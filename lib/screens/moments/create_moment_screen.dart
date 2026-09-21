@@ -4,12 +4,14 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../models/moment.dart';
+import '../../models/voiceroom.dart';
 import '../../services/connectivity_service.dart';
 import '../../services/media_service.dart';
 import '../../services/moment_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
 import '../../widgets/visibility_selector.dart';
+import '../../widgets/voice_room_invite_card.dart';
 import '../../services/auth_service.dart';
 
 int _keySeed = 0;
@@ -54,11 +56,19 @@ class CreateMomentScreen extends StatefulWidget {
   final String? initialText;
   final String? initialPicker;
 
+  /// A Voice Room "Share to Moments" card to attach (see
+  /// voice_room_detail_screen.dart's Share sheet). Only meaningful when
+  /// creating a new post — editing an existing one just keeps whatever
+  /// card it already had (there's no UI here to add/change one on an
+  /// existing post).
+  final VoiceRoom? attachedVoiceRoom;
+
   const CreateMomentScreen({
     super.key,
     this.existing,
     this.initialText,
     this.initialPicker,
+    this.attachedVoiceRoom,
   });
 
   @override
@@ -79,6 +89,12 @@ class _CreateMomentScreenState extends State<CreateMomentScreen> {
 
   final List<_ImageItem> _images = [];
   _VideoItem? _video;
+
+  // Only set on create (never populated from `existing` — see
+  // widget.attachedVoiceRoom's doc comment). Removable via the card's own X
+  // like any other attached media, in case the user changes their mind
+  // before posting.
+  late VoiceRoom? _attachedRoom = widget.attachedVoiceRoom;
 
   bool _posting = false;
   bool _online = true;
@@ -118,7 +134,12 @@ class _CreateMomentScreenState extends State<CreateMomentScreen> {
     super.dispose();
   }
 
-  bool get _canAddMore => _video == null && _images.length < 9;
+  // A room card and photos/video don't mix in the composer — moment_card.dart
+  // only ever renders one or the other, so letting both be attached would
+  // silently drop whichever one it doesn't render.
+  bool get _canAddMore => _video == null && _images.length < 9 && _attachedRoom == null;
+
+  void _removeAttachedRoom() => setState(() => _attachedRoom = null);
 
   Future<void> _pickImage(ImageSource source) async {
     if (_video != null) return;
@@ -140,7 +161,7 @@ class _CreateMomentScreenState extends State<CreateMomentScreen> {
   bool get _canPost {
     final hasText = _textController.text.trim().isNotEmpty;
     final hasMedia = _images.isNotEmpty || _video != null;
-    return (hasText || hasMedia) && !_posting;
+    return (hasText || hasMedia || _attachedRoom != null) && !_posting;
   }
 
   Future<void> _submit() async {
@@ -195,12 +216,19 @@ class _CreateMomentScreenState extends State<CreateMomentScreen> {
           visibility: _visibility,
         );
       } else {
+        final room = _attachedRoom;
         await MomentService.createMoment(
           text: _textController.text,
           postId: _postId,
           imageUrls: imageUrls,
           mediaType: mediaType,
           visibility: _visibility,
+          voiceRoomId: room?.id,
+          voiceRoomTitle: room?.title ?? '',
+          voiceRoomHostName: room?.hostName ?? '',
+          voiceRoomHostAvatar: room?.hostAvatar ?? '',
+          voiceRoomCategory: room?.category ?? '',
+          voiceRoomTag: room?.tag ?? '',
         );
       }
       if (!mounted) return;
@@ -325,9 +353,11 @@ class _CreateMomentScreenState extends State<CreateMomentScreen> {
                           minLines: 3,
                           maxLines: 10,
                           onChanged: (_) => setState(() {}),
-                          decoration: const InputDecoration(
-                            hintText: "What's on your mind?",
-                            hintStyle: TextStyle(color: AppColors.textTertiary, fontSize: 15),
+                          decoration: InputDecoration(
+                            hintText: _attachedRoom != null
+                                ? 'Say something about your Voice Room (optional)'
+                                : "What's on your mind?",
+                            hintStyle: const TextStyle(color: AppColors.textTertiary, fontSize: 15),
                             border: InputBorder.none,
                           ),
                           style: const TextStyle(fontSize: 15.5, height: 1.4),
@@ -342,6 +372,10 @@ class _CreateMomentScreenState extends State<CreateMomentScreen> {
                   ),
                   const SizedBox(height: 8),
                   VisibilitySelector(value: _visibility, onChanged: (v) => setState(() => _visibility = v)),
+                  if (_attachedRoom != null) ...[
+                    const SizedBox(height: 16),
+                    _buildAttachedRoom(_attachedRoom!),
+                  ],
                   if (_images.isNotEmpty || _video != null) ...[
                     const SizedBox(height: 16),
                     _buildMediaRow(),
@@ -378,6 +412,42 @@ class _CreateMomentScreenState extends State<CreateMomentScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  /// The room-card preview — this IS the post preview for a "Share to
+  /// Moments" post (there's no separate preview step; what's shown here is
+  /// exactly what moment_card.dart renders once the room's own live stream
+  /// takes over — see VoiceRoomInviteCard). The X lets the user detach it
+  /// and post plain text instead, same affordance as removing a photo.
+  Widget _buildAttachedRoom(VoiceRoom room) {
+    return Stack(
+      children: [
+        // Read-only here (unlike the same card once actually posted) — this
+        // is just a preview of what the post will look like, and tapping
+        // "Join" mid-composition would yank the user out to the room and
+        // lose whatever caption they were typing.
+        IgnorePointer(
+          child: VoiceRoomInviteCard(
+            roomId: room.id,
+            title: room.title,
+            hostName: room.hostName,
+            hostAvatar: room.hostAvatar,
+          ),
+        ),
+        Positioned(
+          top: 4,
+          right: 4,
+          child: GestureDetector(
+            onTap: _removeAttachedRoom,
+            child: Container(
+              padding: const EdgeInsets.all(4),
+              decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+              child: const Icon(Icons.close_rounded, color: Colors.white, size: 14),
+            ),
+          ),
+        ),
+      ],
     );
   }
 

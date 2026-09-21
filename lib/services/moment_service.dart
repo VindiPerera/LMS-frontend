@@ -208,6 +208,14 @@ class MomentService {
     MomentVisibility visibility = MomentVisibility.public,
     bool isReshare = false,
     String? originalPostId,
+    // A "Share to Moments" voice-room card (see VoiceRoomDetailScreen's
+    // Share flow) — pass all of these together or none at all.
+    String? voiceRoomId,
+    String voiceRoomTitle = '',
+    String voiceRoomHostName = '',
+    String voiceRoomHostAvatar = '',
+    String voiceRoomCategory = '',
+    String voiceRoomTag = '',
   }) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     final currentUser = AuthService.instance.currentUser;
@@ -216,7 +224,8 @@ class MomentService {
     }
 
     final cleanText = text.trim();
-    if (cleanText.isEmpty && imageUrls.isEmpty && videoUrl == null && !isReshare) {
+    final hasVoiceRoomCard = voiceRoomId != null && voiceRoomId.isNotEmpty;
+    if (cleanText.isEmpty && imageUrls.isEmpty && videoUrl == null && !isReshare && !hasVoiceRoomCard) {
       throw StateError('Add some text or media before posting.');
     }
 
@@ -230,6 +239,12 @@ class MomentService {
       visibility: visibility,
       isReshare: isReshare,
       originalPostId: originalPostId,
+      voiceRoomId: voiceRoomId ?? '',
+      voiceRoomTitle: voiceRoomTitle,
+      voiceRoomHostName: voiceRoomHostName,
+      voiceRoomHostAvatar: voiceRoomHostAvatar,
+      voiceRoomCategory: voiceRoomCategory,
+      voiceRoomTag: voiceRoomTag,
     );
     final audience = await _audienceFor(visibility: visibility, ownerUid: uid);
 

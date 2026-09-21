@@ -1,22 +1,26 @@
 import 'dart:async';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../models/room_participant.dart';
-import '../../models/user.dart';
 import '../../models/voiceroom.dart';
 import '../../models/whiteboard_item.dart';
-import '../../services/friend_service.dart';
-import '../../services/notification_service.dart';
-import '../../services/partner_service.dart';
 import '../../services/room_participant_service.dart';
-import '../../services/room_share_service.dart';
 import '../../services/storage_service.dart';
 import '../../services/voice_room_service.dart';
+import '../../services/voice_room_session_controller.dart';
 import '../../services/whiteboard_service.dart';
 import '../../widgets/app_avatar.dart';
+import '../../widgets/dark_action_sheet.dart';
+import '../../widgets/whiteboard_canvas.dart';
+import 'expanded_whiteboard_screen.dart';
+import 'raised_hands_sheet.dart';
 import 'room_profile_sheet.dart';
+import 'share_room_sheet.dart';
+import 'whiteboard_options_sheets.dart';
 
 class VoiceRoomDetailScreen extends StatefulWidget {
   final VoiceRoom room;
@@ -40,9 +44,20 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
   // "there's more to scroll" visible up front instead of something the user
   // has to discover by accidentally swiping.
   final _toolbarScrollController = ScrollController();
+  // Drives the live comment feed so new messages auto-scroll to the bottom
+  // and users can also freely scroll back up through history. Disposed in
+  // dispose() alongside every other controller on this screen.
+  final _commentScrollController = ScrollController();
+  // Same auto-scroll-to-newest role as _commentScrollController above, for
+  // the captions panel's own line list.
+  final _subtitlesScrollController = ScrollController();
   bool _subtitlesOn = false;
   bool _ending = false;
   bool _addingImage = false;
+  // Set right before popping from "Minimize the room" — tells dispose() the
+  // session was handed off to VoiceRoomSessionController rather than ended,
+  // so it must not call RoomParticipantService.leave.
+  bool _minimizedHandoff = false;
 
   static const bg = Color(0xFF1B1B3A);
   static const bubble = Color(0xFF272753);
@@ -64,9 +79,49 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
   late final Stream<List<RoomParticipant>> _participantsStream =
       RoomParticipantService.streamParticipants(widget.room.id).asBroadcastStream();
   late final Stream<List<BoardComment>> _commentsStream =
-      RoomParticipantService.streamRecentComments(widget.room.id);
+      RoomParticipantService.streamComments(widget.room.id);
+  late final Stream<List<SubtitleLine>> _subtitlesStream =
+      RoomParticipantService.streamSubtitles(widget.room.id);
+  // asBroadcastStream() for the same reason as _participantsStream above:
+  // both the stage card's StreamBuilder AND the expanded full-screen view
+  // (and the plain _whiteboardSub cache below) need their own listener on
+  // this same stream.
   late final Stream<List<WhiteboardItem>> _whiteboardStream =
-      WhiteboardService.streamItems(widget.room.id);
+      WhiteboardService.streamItems(widget.room.id).asBroadcastStream();
+
+  // A plain cache of the board's current items, kept up to date via
+  // _whiteboardSub below — used by the "add image"/"add text"/"bring to
+  // front"/"send to back" actions, which need to know what's already on
+  // the board (to place a new item somewhere free, or to compute the new
+  // top/bottom zIndex) without an extra Firestore read of their own.
+  List<WhiteboardItem> _whiteboardItems = const [];
+  StreamSubscription<List<WhiteboardItem>>? _whiteboardSub;
+
+  // Watches the signed-in user's own role so a listener who gets seated by
+  // the host/moderator — RoomParticipantService.acceptRaisedHand (they
+  // asked first) or acceptStageInvite (the host asked them first) — gets a
+  // clear notice of it. Every path that can turn a listener into a speaker
+  // now always goes through the host/moderator (see setHandRaised's doc
+  // comment for why raising a hand no longer claims a seat by itself), so
+  // this notice is always the right call for that transition — there's no
+  // "did I do this to myself?" case left to distinguish.
+  String? _lastKnownRole;
+  StreamSubscription<List<RoomParticipant>>? _roleWatchSub;
+
+  // Streams the signed-in user's own moderatorInvitePending flag from their
+  // participant doc — set by the host when they send an invitation.
+  StreamSubscription<bool>? _moderatorInviteSub;
+  // Guards against showing the Accept/Ignore dialog more than once if the
+  // stream re-emits before the user has dismissed the first one.
+  bool _pendingInviteDialog = false;
+
+  // Same idea as the two fields above, for a host/moderator's stage invite
+  // (room_profile_sheet.dart's "Invite" button) rather than a moderator
+  // invite — kept as its own independent stream/guard/dialog rather than
+  // merged into the moderator one, since both could in principle be pending
+  // for the same person at once and each needs its own Accept/Ignore.
+  StreamSubscription<bool>? _stageInviteSub;
+  bool _pendingStageInviteDialog = false;
 
   // Watches the room doc itself (not just the participant roster) so
   // everyone still inside gets auto-popped with a notice the moment it
@@ -100,6 +155,15 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
         sessionId: _sessionId,
       ).catchError((e) {
         debugPrint('Failed to join room ${widget.room.id}: $e');
+        // A kickParticipant ban still within its 24h window — see
+        // RoomParticipantService.join's pre-check and firestore.rules'
+        // isBanned(), the actual enforcement this message is just fronting
+        // for. Distinct, specific copy (with the remaining time) rather
+        // than the generic "no access" case below.
+        if (e is RoomBanException) {
+          _bounceWithMessage(e.toString());
+          return;
+        }
         // Every room this app creates today is public and joinable by any
         // signed-in user, so firestore.rules should never actually reject
         // this — but it still can for a room document that predates that
@@ -109,14 +173,7 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
         // having no seat, no roster write, nothing.
         final denied = e is FirebaseException && e.code == 'permission-denied';
         if (!denied) return;
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted || _ending) return;
-          _ending = true;
-          Navigator.of(context).pop();
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("You don't have access to this room.")),
-          );
-        });
+        _bounceWithMessage("You don't have access to this room.");
       });
       _roomSub = VoiceRoomService.streamRoom(widget.room.id).listen((room) {
         if (!mounted || _ending) return;
@@ -139,6 +196,67 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
       });
       _sweepSub = _participantsStream.listen((participants) {
         RoomParticipantService.sweepStaleParticipants(widget.room.id, participants);
+      });
+      _whiteboardSub = _whiteboardStream.listen((items) {
+        // setState so _whiteboardItems is up-to-date in the widget state —
+        // the StreamBuilder's initialData reads this field on every rebuild,
+        // so without setState the canvas would show stale (or empty) items
+        // the moment it gets re-mounted after the user scrolls away and back.
+        if (mounted) {
+          setState(() => _whiteboardItems = items);
+        } else {
+          _whiteboardItems = items;
+        }
+      });
+      // Watch this user's own moderatorInvitePending flag (stored on their
+      // participant doc). The host sets it when they pick someone from the Add
+      // Moderator picker; no new Firestore rules required since the host can
+      // already write any participant doc, and self-writes are also allowed.
+      final selfUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+      if (!_isHost && selfUid.isNotEmpty) {
+        _moderatorInviteSub = RoomParticipantService.streamModeratorInvitePending(
+          widget.room.id,
+          selfUid,
+        ).listen((pending) {
+          if (!mounted || _pendingInviteDialog) return;
+          if (pending) _showModeratorInviteDialog(selfUid);
+        });
+        // Same pattern, for a host/moderator's stage invite — see
+        // room_profile_sheet.dart's "Invite" button.
+        _stageInviteSub = RoomParticipantService.streamStageInvitePending(
+          widget.room.id,
+          selfUid,
+        ).listen((pending) {
+          if (!mounted || _pendingStageInviteDialog) return;
+          if (pending) _showStageInviteDialog(selfUid);
+        });
+      }
+      _roleWatchSub = _participantsStream.listen((participants) {
+        final newRole = _findMe(participants)?.role;
+        if (_lastKnownRole == 'listener' && newRole == 'speaker') {
+          _showInvitedToStageNotice();
+        } else if (!_isHost && _lastKnownRole != null && newRole == null) {
+          // We were present a moment ago and now aren't — the only way
+          // that happens while this screen is open and heartbeating
+          // normally (so the 90s-stale sweep can't be it) is
+          // RoomParticipantService.kickParticipant deleting our own doc
+          // out from under us. `_lastKnownRole != null` guards against
+          // misreading "join() just hasn't landed yet" on the very first
+          // snapshot or two as a kick.
+          //
+          // `!_isHost` guards against a real (if rare) false positive: the
+          // host can never actually be kicked — room_profile_sheet.dart's
+          // "Kick Out" always requires the target not be yourself, and a
+          // moderator additionally can't target the host — so for the host
+          // this branch can only ever mean a transient gap in this stream
+          // (e.g. a rejoin's fresh doc not yet reflected in the
+          // orderBy('joinedAt') query, or another client's stale-sweep
+          // racing our own heartbeat), never a genuine kick. Misreading
+          // that as "You were removed" would wrongly close the room the
+          // host is actually still hosting.
+          _handleKicked();
+        }
+        _lastKnownRole = newRole;
       });
     }
     if (widget.justCreated) {
@@ -178,14 +296,22 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
   void dispose() {
     _controller.dispose();
     _toolbarScrollController.dispose();
+    _commentScrollController.dispose();
+    _subtitlesScrollController.dispose();
     _roomSub?.cancel();
     _heartbeatTimer?.cancel();
     _sweepSub?.cancel();
-    if (widget.room.id.isNotEmpty) {
+    _whiteboardSub?.cancel();
+    _roleWatchSub?.cancel();
+    _moderatorInviteSub?.cancel();
+    _stageInviteSub?.cancel();
+    if (widget.room.id.isNotEmpty && !_minimizedHandoff) {
       // Fire-and-forget: the screen is already closing, nothing left to
       // await into. RoomParticipantService.leave swallows its own errors,
       // and is a no-op if _sessionId no longer owns the doc (a fresh
-      // rejoin already claimed it before this call landed).
+      // rejoin already claimed it before this call landed). Skipped when
+      // minimized — VoiceRoomSessionController now owns this session's
+      // presence instead of it ending here.
       RoomParticipantService.leave(widget.room.id, _sessionId);
     }
     super.dispose();
@@ -201,14 +327,19 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
   }
 
   // Host first (regardless of join order — reopening your own room
-  // shouldn't bump you out of seat 0), then other speakers by join order,
-  // padded with empty seats out to the grid's usual size. Never truncated,
-  // so a rare race in requestToSpeak can add an extra row rather than ever
-  // silently dropping someone who's actually on stage.
+  // shouldn't bump you out of seat 0), then moderators, then other speakers
+  // by join order, padded with empty seats out to the grid's usual size.
+  // Never truncated, so a rare race in acceptRaisedHand/acceptStageInvite
+  // can add an extra row rather than ever silently dropping someone who's
+  // actually on stage.
+  // Moderators were previously omitted because the filter only checked
+  // role == 'speaker'; they now slot in between host and speakers so their
+  // shield badge is always visible.
   List<RoomParticipant> _buildSeats(List<RoomParticipant> participants) {
     final host = participants.where((p) => p.isHost);
+    final moderators = participants.where((p) => p.isModerator);
     final otherSpeakers = participants.where((p) => p.role == 'speaker');
-    final seats = [...host, ...otherSpeakers];
+    final seats = [...host, ...moderators, ...otherSpeakers];
     final seatCount = seats.length > RoomParticipantService.speakerSeats
         ? seats.length
         : RoomParticipantService.speakerSeats;
@@ -249,105 +380,510 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
     }
   }
 
-  /// Host-only "Leave" — distinct from End Room. If no moderator exists
-  /// yet, the host must hand the stage off to one of the current speakers
-  /// first (see _ChooseModeratorSheet); once a moderator is in place (or
-  /// there's genuinely no one to hand off to), leaving just pops the
-  /// screen — dispose() already does the actual RoomParticipantService.leave.
+  /// Host-only "Leave" — distinct from End Room.
+  /// If a moderator is already assigned, leaves immediately.
+  /// Otherwise shows the "Add Moderator Reminder" dialog (Screenshot 1).
   Future<void> _leave(List<RoomParticipant> participants) async {
-    final hasModerator = participants.any((p) => p.isModerator);
+    final hasModerator = participants.any((p) => p.isModerator && !p.isHost);
     if (hasModerator) {
-      Navigator.of(context).pop();
+      if (mounted) Navigator.of(context).pop();
       return;
     }
 
-    final stageCandidates = participants.where((p) => p.role == 'speaker').toList();
-    if (stageCandidates.isEmpty) {
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Leave without a moderator?'),
-          content: const Text(
-            "There's no one else on stage to hand the room to. You can still "
-            'leave — the room will stay open without a moderator until '
-            'someone can end it.',
+    // Show the reminder dialog matching Screenshot 1.
+    if (!mounted) return;
+    final action = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => Dialog(
+        backgroundColor: const Color(0xFF1E1E3F),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Add Moderator Reminder',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'There is no moderator in the current room.'
+                ' The room will close when you leave.'
+                ' You can add a moderator now.',
+                style: TextStyle(color: Colors.white70, fontSize: 13.5, height: 1.5),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.of(ctx).pop('set'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF7B68F4),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                    elevation: 0,
+                  ),
+                  child: const Text(
+                    'Set moderators',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop('close'),
+                child: const Text(
+                  'Close',
+                  style: TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
           ),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Leave anyway', style: TextStyle(color: Colors.red)),
-            ),
-          ],
         ),
-      );
-      if (confirmed != true || !mounted) return;
-      Navigator.of(context).pop();
-      return;
-    }
-
-    final chosen = await showModalBottomSheet<RoomParticipant>(
-      context: context,
-      backgroundColor: bubble,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) => _ChooseModeratorSheet(candidates: stageCandidates),
+      ),
     );
-    if (chosen == null || !mounted) return;
 
-    try {
-      await RoomParticipantService.promoteToModerator(roomId: widget.room.id, uid: chosen.uid);
-      if (!mounted) return;
-      Navigator.of(context).pop();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not assign moderator: ${e.toString().replaceFirst('Exception: ', '')}')),
-      );
+    if (!mounted) return;
+    if (action == 'set') {
+      // Open the moderator panel (Screenshot 2). Pass the current
+      // participants snapshot so the panel knows who is on stage.
+      await _showModeratorPanel(participants);
+      return; // host stays in the room after managing moderators
     }
+    // 'close' or dialog dismissed — leave without assigning
+    if (mounted) Navigator.of(context).pop();
   }
 
-  // Every room is public, so anyone on stage — host, moderator, or plain
-  // speaker — may share it; only queued listeners (not yet seated) can't.
-  bool _canShare(RoomParticipant? me) {
-    if (me == null) return false;
-    return me.isSeated;
-  }
-
-  void _openRoomOptions(RoomParticipant? me, List<RoomParticipant> participants) {
-    showModalBottomSheet(
+  /// Shows the Moderator management panel (Screenshot 2).
+  /// Displays the current moderator (if any) with Add/Remove buttons.
+  Future<void> _showModeratorPanel(List<RoomParticipant> participants) async {
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Colors.transparent,
+      backgroundColor: const Color(0xFF121212),
       isScrollControlled: true,
-      builder: (sheetContext) => _RoomOptionsSheet(
-        canShare: _canShare(me),
-        onShare: () {
-          Navigator.of(sheetContext).pop();
-          RoomShareService.shareRoom(widget.room);
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (ctx) => _ModeratorPanelSheet(
+        participants: participants,
+        roomId: widget.room.id,
+        onAddTap: () async {
+          Navigator.of(ctx).pop(); // close panel first
+          await _showAddModeratorPicker(participants);
         },
-        onMinimize: () {
-          // Close the sheet first, then pop the detail screen back to the
-          // feed WITHOUT calling leave() — the session stays alive in the
-          // background (heartbeat keeps ticking via the Timer we already
-          // started) so the user can rejoin from the room card.
-          Navigator.of(sheetContext).pop();
-          if (mounted) Navigator.of(context).pop();
-        },
-        onLeave: () {
-          Navigator.of(sheetContext).pop();
-          if (_isHost) {
-            _leave(participants);
-          } else if (mounted) {
-            Navigator.of(context).pop();
+        onRemoveTap: (moderator) async {
+          try {
+            await RoomParticipantService.demoteModeratorToSpeaker(
+              roomId: widget.room.id,
+              uid: moderator.uid,
+            );
+            // Also cancel any pending invite for that uid.
+            await VoiceRoomService.deleteModeratorInvite(widget.room.id, moderator.uid);
+            if (ctx.mounted) Navigator.of(ctx).pop();
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('${moderator.name} is no longer the moderator.'),
+                  duration: const Duration(seconds: 2),
+                ),
+              );
+            }
+          } catch (e) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Could not remove moderator: ${e.toString().replaceFirst('Exception: ', '')}')),
+              );
+            }
           }
         },
       ),
     );
   }
 
+  /// Shows the Add Moderator full-screen picker (Screenshot 3).
+  /// Lists stage speakers (not the host, not an existing moderator).
+  /// Single-select; tapping OK sends the invite.
+  Future<void> _showAddModeratorPicker(List<RoomParticipant> participants) async {
+    if (!mounted) return;
+    final candidates = participants
+        .where((p) => p.role == 'speaker')
+        .toList();
+
+    if (candidates.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No speakers on stage to invite as moderator.')),
+      );
+      return;
+    }
+
+    RoomParticipant? chosen;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => _AddModeratorDialog(
+        candidates: candidates,
+        onChosen: (p) => chosen = p,
+      ),
+    );
+    if (confirmed != true || chosen == null || !mounted) return;
+
+    try {
+      await RoomParticipantService.sendModeratorInvite(
+        roomId: widget.room.id,
+        uid: chosen!.uid,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Moderator invitation sent to ${chosen!.name}.'),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not send invitation: ${e.toString().replaceFirst('Exception: ', '')}')),
+      );
+    }
+  }
+
+  /// Shown to the invitee when the host sends them a moderator invitation.
+  /// The invite doc is streamed by _moderatorInviteSub — this fires when
+  /// status == 'pending'. [selfUid] is the signed-in user's uid (used to
+  /// call promoteToModerator/deleteModeratorInvite).
+  void _showModeratorInviteDialog(String selfUid) {
+    if (!mounted || _pendingInviteDialog) return;
+    _pendingInviteDialog = true;
+    // Set right before either button pops this dialog itself, so
+    // whenComplete below (a catch-all for dismissal some OTHER way, e.g.
+    // the system back gesture — barrierDismissible only blocks tapping
+    // outside, not that) knows to leave _pendingInviteDialog alone: those
+    // two buttons' own `finally` blocks are what reset it once their
+    // Firestore write has actually finished, not the moment the dialog
+    // itself closes (see either button's onPressed for why that distinction
+    // matters).
+    var closedByButton = false;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => Dialog(
+        backgroundColor: const Color(0xFF1E1E3F),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 52,
+                height: 52,
+                decoration: const BoxDecoration(
+                  color: Color(0xFF7B68F4),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.shield_rounded, color: Colors.white, size: 28),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                "You've been invited as Moderator",
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'The host has selected you to moderate this room.'
+                ' You can manage the stage, mute speakers, and keep the session running.',
+                style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () async {
+                        closedByButton = true;
+                        Navigator.of(ctx).pop();
+                        try {
+                          // Self-write: clear the flag from own participant doc.
+                          // No host permission needed — participants can update
+                          // non-role fields on their own doc (Firestore rules).
+                          await RoomParticipantService.clearModeratorInvitePending(
+                            widget.room.id, selfUid);
+                        } finally {
+                          // Only now — not the moment the dialog pops (see
+                          // this doc's own history: that used to reset the
+                          // guard immediately via showDialog's
+                          // .whenComplete, which raced with this very
+                          // write and could pop the SAME dialog right back
+                          // open before the clear had actually landed).
+                          _pendingInviteDialog = false;
+                        }
+                      },
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.white60,
+                        side: const BorderSide(color: Colors.white24),
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+                      ),
+                      child: const Text('Ignore', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () async {
+                        closedByButton = true;
+                        Navigator.of(ctx).pop();
+                        try {
+                          await RoomParticipantService.promoteToModerator(
+                            roomId: widget.room.id, uid: selfUid);
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text("You are now the moderator 🛡️"),
+                                duration: Duration(seconds: 3),
+                              ),
+                            );
+                          }
+                        } catch (e) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Could not accept: ${e.toString().replaceFirst('Exception: ', '')}')),
+                            );
+                          }
+                        } finally {
+                          // Not reset until promoteToModerator's whole
+                          // sequence (role update -> moderatorUid persist ->
+                          // clear moderatorInvitePending) has actually
+                          // finished — see the Ignore button's matching
+                          // comment for why resetting this the moment the
+                          // dialog pops (the old behavior) was the actual
+                          // bug: the role-update write alone already
+                          // touches this same participant doc and would
+                          // trigger a fresh "still pending" snapshot before
+                          // the flag was really cleared, popping this exact
+                          // dialog right back open.
+                          _pendingInviteDialog = false;
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF7B68F4),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+                        elevation: 0,
+                      ),
+                      child: const Text('Accept', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    ).whenComplete(() {
+      // Only a dismissal neither button caused (system back gesture) needs
+      // handling here — Accept/Ignore already reset this themselves, once
+      // their own write actually finished.
+      if (!closedByButton) _pendingInviteDialog = false;
+    });
+  }
+
+  /// Shown to the invitee when the host/moderator sends them a stage
+  /// invite (room_profile_sheet.dart's "Invite" button) — same shape as
+  /// _showModeratorInviteDialog just above (including why
+  /// _pendingStageInviteDialog only resets once each button's own write has
+  /// actually finished, not the moment the dialog pops), just with
+  /// different copy/icon and calling acceptStageInvite/declineStageInvite
+  /// instead of the moderator equivalents.
+  void _showStageInviteDialog(String selfUid) {
+    if (!mounted || _pendingStageInviteDialog) return;
+    _pendingStageInviteDialog = true;
+    var closedByButton = false;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => Dialog(
+        backgroundColor: const Color(0xFF1E1E3F),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 52,
+                height: 52,
+                decoration: const BoxDecoration(
+                  color: Color(0xFF7B68F4),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.mic_rounded, color: Colors.white, size: 28),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                "You've been invited to speak!",
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'The host would like you to join the stage. Accept to take a seat and start talking.',
+                style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () async {
+                        closedByButton = true;
+                        Navigator.of(ctx).pop();
+                        try {
+                          await RoomParticipantService.declineStageInvite(widget.room.id);
+                        } finally {
+                          _pendingStageInviteDialog = false;
+                        }
+                      },
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.white60,
+                        side: const BorderSide(color: Colors.white24),
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+                      ),
+                      child: const Text('Ignore', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () async {
+                        closedByButton = true;
+                        Navigator.of(ctx).pop();
+                        try {
+                          await RoomParticipantService.acceptStageInvite(widget.room.id);
+                        } catch (e) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Could not join: ${e.toString().replaceFirst('Exception: ', '')}')),
+                            );
+                          }
+                        } finally {
+                          _pendingStageInviteDialog = false;
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF7B68F4),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+                        elevation: 0,
+                      ),
+                      child: const Text('Accept', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    ).whenComplete(() {
+      if (!closedByButton) _pendingStageInviteDialog = false;
+    });
+  }
+
+  // Every room is public — anyone who reached this screen at all (host or
+  // audience) may share it, so this doesn't gate on `me`/the live
+  // participants stream: right after RoomParticipantService.join() writes
+  // our own doc, streamParticipants' orderBy('joinedAt') query can take a
+  // moment to actually reflect it (a pending serverTimestamp write isn't
+  // ordered until the server acks it), so `_findMe(participants)` briefly
+  // returns null even though we're genuinely in the room — which used to
+  // leave Share stuck disabled if the "…" menu was opened right away.
+  bool _canShare() => widget.room.id.isNotEmpty;
+
+  void _openRoomOptions(RoomParticipant? me, List<RoomParticipant> participants) {
+    // `_isHost` (derived straight from widget.room.hostId, not the live
+    // stream) covers the same race as above for the common case — a host
+    // opening the menu right after creating/reopening their own room, before
+    // their own participant doc has shown up in `participants` yet, should
+    // still see Close. A plain moderator has no such stream-independent
+    // signal, so that case still depends on `me`.
+    final canClose = _isHost || (me?.canModerate ?? false);
+    showDarkActionSheet(
+      context,
+      items: [
+        DarkActionItem(
+          label: 'Share',
+          enabled: _canShare(),
+          onTap: () => showShareRoomSheet(context, room: widget.room),
+        ),
+        DarkActionItem(
+          label: 'Minimize the room',
+          onTap: () {
+            // Hand presence off to VoiceRoomSessionController — it starts
+            // its own heartbeat/room-ended watch so the session survives
+            // this screen's dispose() — then show the floating mini window
+            // and pop back to wherever the user was.
+            VoiceRoomSessionController.instance.minimize(
+              room: widget.room,
+              sessionId: _sessionId,
+            );
+            _minimizedHandoff = true;
+            if (mounted) Navigator.of(context).pop();
+          },
+        ),
+        DarkActionItem(
+          label: 'Leave',
+          onTap: () {
+            if (_isHost) {
+              _leave(participants);
+            } else if (mounted) {
+              Navigator.of(context).pop();
+            }
+          },
+        ),
+        // "Close" — the old toolbar's "End Room", relabeled and moved in
+        // here (see the toolbar Row's own comment). Same permission gate
+        // (host/moderator) and same underlying action (_confirmEndRoom's
+        // own confirm dialog + VoiceRoomService.endRoom) as before.
+        if (canClose)
+          DarkActionItem(
+            label: 'Close',
+            color: const Color(0xFFFF4757),
+            onTap: _confirmEndRoom,
+          ),
+      ],
+    );
+  }
+
   /// Host/moderator-only "Add images" — picks a photo, uploads it via the
   /// same hello-backend endpoint EditProfileScreen uses for avatars (see
-  /// StorageService.uploadWhiteboardImage), then adds it to the board.
+  /// StorageService.uploadWhiteboardImage), then adds it to the board sized
+  /// to match its own proportions (see WhiteboardService.addImage) and
+  /// placed somewhere that doesn't already have something on it.
   Future<void> _addWhiteboardImage() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
@@ -358,8 +894,14 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
     setState(() => _addingImage = true);
     try {
       final bytes = await picked.readAsBytes();
+      final aspectRatio = await _decodeAspectRatio(bytes);
       final url = await StorageService.uploadWhiteboardImage(uid, bytes);
-      await WhiteboardService.addImage(roomId: widget.room.id, imageUrl: url);
+      await WhiteboardService.addImage(
+        roomId: widget.room.id,
+        imageUrl: url,
+        aspectRatio: aspectRatio,
+        existingItems: _whiteboardItems,
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -370,53 +912,171 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
     }
   }
 
-  /// Host/moderator-only "Type text" — also reused for tapping an existing
-  /// text item on the board to edit it in place (pass [existing]).
-  Future<void> _addOrEditText({WhiteboardItem? existing}) async {
-    final controller = TextEditingController(text: existing?.text ?? '');
-    final result = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: bubble,
-        title: Text(
-          existing == null ? 'Add text to the board' : 'Edit text',
-          style: const TextStyle(color: Colors.white, fontSize: 16),
-        ),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLines: 3,
-          style: const TextStyle(color: Colors.white),
-          decoration: const InputDecoration(
-            hintText: 'Say something...',
-            hintStyle: TextStyle(color: Colors.white38),
-            enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
-            focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF7B68F4))),
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(controller.text),
-            child: Text(existing == null ? 'Add' : 'Save', style: const TextStyle(color: Color(0xFF7B68F4))),
-          ),
-        ],
-      ),
-    );
-    if (result == null || result.trim().isEmpty || !mounted) return;
-
+  /// The picked image's own width/height ratio, so its board tile can be
+  /// resized later without distorting it (see WhiteboardCanvas's resize
+  /// handle). Falls back to a square ratio if decoding ever fails — the
+  /// image itself still adds fine, it would just resize freely instead of
+  /// aspect-locked.
+  Future<double> _decodeAspectRatio(Uint8List bytes) async {
     try {
-      if (existing == null) {
-        await WhiteboardService.addText(roomId: widget.room.id, text: result);
-      } else {
-        await WhiteboardService.editText(roomId: widget.room.id, itemId: existing.id, text: result);
-      }
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      final ratio = frame.image.width / frame.image.height;
+      frame.image.dispose();
+      codec.dispose();
+      return ratio > 0 ? ratio : 1;
+    } catch (_) {
+      return 1;
+    }
+  }
+
+  /// Host/moderator-only "Type text" — opens the same composer used to
+  /// edit an existing text item (see _openWhiteboardItemOptions), just
+  /// with no starting content/style.
+  Future<void> _openTextComposerForNew() {
+    return showTextComposerSheet(
+      context,
+      onSave: (draft) async {
+        try {
+          await WhiteboardService.addText(
+            roomId: widget.room.id,
+            text: draft.text,
+            existingItems: _whiteboardItems,
+            fontSize: draft.fontSize,
+            colorHex: draft.colorHex,
+            bold: draft.bold,
+            textAlign: draft.textAlign,
+          );
+        } catch (e) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Could not add text: ${e.toString().replaceFirst('Exception: ', '')}')),
+          );
+        }
+      },
+    );
+  }
+
+  /// The "⋮" handle on a selected board item (see WhiteboardCanvas) — text
+  /// gets the full composer (wording + style + z-order + delete); images
+  /// get a lighter sheet (rotate + z-order + delete), since there's no
+  /// wording or styling to edit on a photo.
+  void _openWhiteboardItemOptions(WhiteboardItem item) {
+    if (item.isText) {
+      showTextComposerSheet(
+        context,
+        existing: item,
+        onSave: (draft) async {
+          try {
+            await WhiteboardService.saveText(
+              roomId: widget.room.id,
+              itemId: item.id,
+              text: draft.text,
+              fontSize: draft.fontSize,
+              colorHex: draft.colorHex,
+              bold: draft.bold,
+              textAlign: draft.textAlign,
+            );
+          } catch (e) {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Could not save text: ${e.toString().replaceFirst('Exception: ', '')}')),
+            );
+          }
+        },
+        onDelete: () => _removeWhiteboardItem(item),
+        onBringToFront: () => _bringWhiteboardItemToFront(item),
+        onSendToBack: () => _sendWhiteboardItemToBack(item),
+      );
+    } else {
+      showImageOptionsSheet(
+        context,
+        onRotate: () => _rotateWhiteboardImage(item),
+        onBringToFront: () => _bringWhiteboardItemToFront(item),
+        onSendToBack: () => _sendWhiteboardItemToBack(item),
+        onDelete: () => _removeWhiteboardItem(item),
+      );
+    }
+  }
+
+  /// Commits a move or resize once the user releases the drag/resize
+  /// handle — see WhiteboardCanvas's doc comment for why this is the only
+  /// point a transform gets written, not every frame while dragging.
+  Future<void> _commitWhiteboardTransform(WhiteboardItem item) async {
+    try {
+      await WhiteboardService.updateTransform(
+        roomId: widget.room.id,
+        itemId: item.id,
+        x: item.x,
+        y: item.y,
+        width: item.width,
+        height: item.height,
+        rotation: item.isImage ? item.rotation : null,
+        fontSize: item.isText ? item.fontSize : null,
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not save text: ${e.toString().replaceFirst('Exception: ', '')}')),
+        SnackBar(content: Text('Could not move that: ${e.toString().replaceFirst('Exception: ', '')}')),
       );
     }
+  }
+
+  Future<void> _rotateWhiteboardImage(WhiteboardItem item) async {
+    try {
+      await WhiteboardService.updateTransform(
+        roomId: widget.room.id,
+        itemId: item.id,
+        x: item.x,
+        y: item.y,
+        width: item.width,
+        height: item.height,
+        rotation: (item.rotation + 90) % 360,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not rotate that: ${e.toString().replaceFirst('Exception: ', '')}')),
+      );
+    }
+  }
+
+  Future<void> _bringWhiteboardItemToFront(WhiteboardItem item) async {
+    try {
+      await WhiteboardService.bringToFront(roomId: widget.room.id, itemId: item.id, existingItems: _whiteboardItems);
+    } catch (_) {
+      // Non-critical — worst case it just stays at its current layer.
+    }
+  }
+
+  Future<void> _sendWhiteboardItemToBack(WhiteboardItem item) async {
+    try {
+      await WhiteboardService.sendToBack(roomId: widget.room.id, itemId: item.id, existingItems: _whiteboardItems);
+    } catch (_) {
+      // Non-critical — worst case it just stays at its current layer.
+    }
+  }
+
+  /// Opens the board full-screen (see WhiteboardGeometry — same aspect
+  /// ratio as the inline card, just bigger) for more precise dragging and
+  /// resizing than the small stage-card preview allows, especially on a
+  /// phone. Read-only for anyone who isn't host/moderator, same as inline.
+  void _openExpandedWhiteboard(bool canEdit) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ExpandedWhiteboardScreen(
+          roomId: widget.room.id,
+          canEdit: canEdit,
+          itemsStream: _whiteboardStream,
+          // Seed with the current cached items so the full-screen view
+          // renders immediately — see ExpandedWhiteboardScreen.initialItems.
+          initialItems: _whiteboardItems,
+          onTransformEnd: _commitWhiteboardTransform,
+          onOpenOptions: _openWhiteboardItemOptions,
+          onQuickDelete: _removeWhiteboardItem,
+        ),
+      ),
+    );
   }
 
   Future<void> _removeWhiteboardItem(WhiteboardItem item) async {
@@ -430,16 +1090,6 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
     }
   }
 
-  Future<void> _openInviteSheet() async {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: bubble,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) => _InviteFriendsSheet(roomId: widget.room.id),
-    );
-  }
-
   Future<void> _sendComment() async {
     final text = _controller.text;
     if (text.trim().isEmpty) return;
@@ -448,6 +1098,7 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
       await RoomParticipantService.sendComment(roomId: widget.room.id, text: text);
     } catch (e) {
       if (!mounted) return;
+      _controller.text = text;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Could not send: ${e.toString().replaceFirst('Exception: ', '')}')),
       );
@@ -471,21 +1122,121 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
     }
   }
 
-  Future<void> _requestToSpeak(RoomParticipant? me) async {
+  /// Tapping an empty seat or the composer's raise-hand button — both raise
+  /// (or, tapped again while already waiting, lower) the caller's own hand
+  /// rather than instantly claiming a seat. A host/moderator still has to
+  /// actually seat them (see the Raised Hands sheet's Accept), even when a
+  /// seat happens to be open right now — see
+  /// RoomParticipantService.setHandRaised's doc comment for why that's
+  /// deliberate. No _expectingOwnPromotion bookkeeping needed here (unlike
+  /// the old instant-seat version): raising a hand never changes `role`
+  /// itself, so _roleWatchSub's "was I just invited up?" notice fires
+  /// correctly and only once the host actually accepts — exactly the
+  /// moment that notice is for.
+  Future<void> _raiseHand(RoomParticipant? me) async {
     if (me != null && me.isSeated) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("You're already on stage.")),
       );
       return;
     }
+    final alreadyRaised = me?.handRaised ?? false;
     try {
-      await RoomParticipantService.requestToSpeak(widget.room.id);
+      await RoomParticipantService.setHandRaised(widget.room.id, !alreadyRaised);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            alreadyRaised ? 'Hand lowered.' : 'Hand raised — waiting for the host to invite you up.',
+          ),
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
       );
     }
+  }
+
+  /// The Raised Hands badge — host/moderator reviewing the queue.
+  void _openRaisedHandsSheet() {
+    showRaisedHandsSheet(context, roomId: widget.room.id);
+  }
+
+  /// Shown to a listener the moment the host/moderator seats them —
+  /// RoomParticipantService.acceptRaisedHand or .acceptStageInvite — see
+  /// _roleWatchSub's doc comment. Same floating-snackbar look as the
+  /// mic-etiquette reminder
+  /// above (bubble bg, rounded shape, icon + message) for a consistent
+  /// "something worth noticing just happened" moment in this screen.
+  void _showInvitedToStageNotice() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: bubble,
+          duration: const Duration(seconds: 4),
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+            side: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
+          ),
+          content: const Row(
+            children: [
+              Icon(Icons.mic_rounded, color: Color(0xFF7B68F4), size: 20),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  "You're invited to speak! Say hi to everyone 🎤",
+                  style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+  }
+
+  /// Pops this screen (once the first frame after it's actually attached —
+  /// this can fire from initState, before the Scaffold/ScaffoldMessenger
+  /// above it is reliably available yet) with an explanatory snackbar.
+  /// Shared by every "couldn't actually join this room" case — see
+  /// initState's join().catchError.
+  void _bounceWithMessage(String message) {
+    // No addPostFrameCallback here (unlike the justCreated mic-reminder
+    // snackbar above, which needs one because it runs synchronously inside
+    // initState, before the very first frame): this always fires from an
+    // async join().catchError callback, well after initState has returned
+    // and at least one frame has already built, so context is already
+    // attached to a live Scaffold/Navigator by the time this runs.
+    // Wrapping it in addPostFrameCallback here was the actual cause of a
+    // real bug — with no frame already scheduled at that point, the
+    // callback just sat queued until some unrelated interaction (e.g.
+    // scrolling) happened to trigger the next one, so the room stayed
+    // open, fully interactive, until then instead of closing immediately.
+    if (!mounted || _ending) return;
+    _ending = true;
+    Navigator.of(context).pop();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  /// Fires the moment this screen notices its OWN participant doc has
+  /// disappeared — see _roleWatchSub's doc comment for why that only ever
+  /// means RoomParticipantService.kickParticipant (room_profile_sheet.
+  /// dart's "Kick Out"). `_ending` doubles as the same "already handling a
+  /// screen-closing event" guard _roomSub's room-ended listener uses, so
+  /// the two can never both try to pop this screen.
+  void _handleKicked() {
+    if (!mounted || _ending) return;
+    _ending = true;
+    final messenger = ScaffoldMessenger.of(context);
+    Navigator.of(context).pop();
+    messenger.showSnackBar(
+      const SnackBar(content: Text('You were removed from this room.')),
+    );
   }
 
   @override
@@ -566,26 +1317,21 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                                     _actionChip(
                                       'Type text',
                                       Icons.text_fields_rounded,
-                                      onTap: () => _addOrEditText(),
+                                      onTap: _openTextComposerForNew,
                                     ),
-                                    const SizedBox(width: 8),
                                   ],
-                                  if (_isHost) ...[
-                                    _actionChip('Invite', Icons.person_add_alt_1_rounded, onTap: _openInviteSheet),
-                                    const SizedBox(width: 8),
-                                  ],
-                                  if (me?.canModerate ?? false) ...[
-                                    _ending
-                                        ? const SizedBox(
-                                            width: 16,
-                                            height: 16,
-                                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white70),
-                                          )
-                                        : _actionChip('End Room', Icons.call_end_rounded, onTap: _confirmEndRoom),
-                                    const SizedBox(width: 8),
-                                  ],
-                                  if (_isHost)
-                                    _actionChip('Leave', Icons.logout_rounded, onTap: () => _leave(participants)),
+                                  // Invite / End Room / Leave used to live
+                                  // here too — all three moved into the "…"
+                                  // menu (see _openRoomOptions): Leave was
+                                  // already duplicated there, End Room is
+                                  // now that menu's "Close" row, and the
+                                  // standalone friend-invite flow is fully
+                                  // superseded by the Share sheet's "Share
+                                  // to a Chat" (a joinable room-invite card
+                                  // sent straight into a real conversation,
+                                  // versus a bare push notification) and by
+                                  // inviting an audience member onto the
+                                  // stage directly from their profile.
                                 ],
                               ),
                             ),
@@ -620,7 +1366,7 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 12),
                         child: AspectRatio(
-                          aspectRatio: 1.8,
+                          aspectRatio: WhiteboardGeometry.aspectRatio,
                           child: Stack(
                             children: [
                               Container(
@@ -638,40 +1384,53 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                                   borderRadius: BorderRadius.circular(14),
                                   child: StreamBuilder<List<WhiteboardItem>>(
                                     stream: _whiteboardStream,
+                                    // Seed the builder with the already-cached
+                                    // items so the canvas renders instantly when
+                                    // the widget is re-mounted after the user
+                                    // scrolls away and back. Without this,
+                                    // broadcast streams don't replay their last
+                                    // value to new subscribers, leaving the board
+                                    // blank until the next Firestore event fires.
+                                    initialData: _whiteboardItems,
                                     builder: (context, wbSnapshot) {
                                       final items = wbSnapshot.data ?? const <WhiteboardItem>[];
-                                      if (items.isEmpty) return const SizedBox.shrink();
                                       final canEdit = me?.canModerate ?? false;
-                                      return ListView.separated(
-                                        scrollDirection: Axis.horizontal,
-                                        padding: const EdgeInsets.all(10),
-                                        itemCount: items.length,
-                                        separatorBuilder: (_, _) => const SizedBox(width: 8),
-                                        itemBuilder: (context, i) => _WhiteboardTile(
-                                          item: items[i],
-                                          canEdit: canEdit,
-                                          onEditText: () => _addOrEditText(existing: items[i]),
-                                          onRemove: () => _removeWhiteboardItem(items[i]),
-                                        ),
+                                      return WhiteboardCanvas(
+                                        items: items,
+                                        canEdit: canEdit,
+                                        onTransformEnd: _commitWhiteboardTransform,
+                                        onOpenOptions: _openWhiteboardItemOptions,
+                                        onQuickDelete: _removeWhiteboardItem,
                                       );
                                     },
                                   ),
                                 ),
                               ),
-                              const Positioned(
+                              // Opens the same board full-screen, for precise
+                              // dragging/resizing on a small phone card — a
+                              // decorative hint (not a hit target of its own)
+                              // until there's actually a board worth expanding.
+                              Positioned(
                                 right: 10,
                                 bottom: 10,
-                                child: Icon(
-                                  Icons.open_in_full_rounded,
-                                  color: Colors.white38,
-                                  size: 18,
+                                child: GestureDetector(
+                                  onTap: () => _openExpandedWhiteboard(me?.canModerate ?? false),
+                                  child: Container(
+                                    padding: const EdgeInsets.all(4),
+                                    decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
+                                    child: const Icon(
+                                      Icons.open_in_full_rounded,
+                                      color: Colors.white70,
+                                      size: 16,
+                                    ),
+                                  ),
                                 ),
                               ),
                             ],
                           ),
                         ),
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 8),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 12),
                         child: GridView.builder(
@@ -680,24 +1439,29 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                           gridDelegate:
                               const SliverGridDelegateWithFixedCrossAxisCount(
                                 crossAxisCount: 4,
-                                mainAxisSpacing: 14,
+                                mainAxisSpacing: 8,
                                 crossAxisSpacing: 4,
-                                // 0.85 gives each cell enough height for the
-                                // 56 px avatar + 4 px gap + ~14 px name label
-                                // without overflowing on narrow screens.
-                                childAspectRatio: 0.85,
+                                // Cells only need ~74px (56px avatar + 4px
+                                // gap + ~14px name label) to avoid
+                                // overflowing on narrow screens — 1.05 stays
+                                // comfortably above that while trimming the
+                                // extra headroom 0.85 used to leave, pulling
+                                // the second row of seats upward to make room
+                                // for the subtitles panel below.
+                                childAspectRatio: 1.05,
                               ),
                           itemCount: seats.length,
                           itemBuilder: (context, i) {
                             final speaker = seats[i];
                             return GestureDetector(
                               onTap: speaker.isEmptySeat
-                                  ? () => _requestToSpeak(me)
+                                  ? () => _raiseHand(me)
                                   : () => showRoomProfileSheet(
                                         context,
                                         speaker,
                                         roomId: widget.room.id,
                                         canModerate: me?.canModerate ?? false,
+                                        isHost: _isHost,
                                       ),
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
@@ -707,96 +1471,138 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                                           width: 56,
                                           height: 56,
                                           decoration: BoxDecoration(
-                                            color: Colors.white12,
+                                            color: (me?.handRaised ?? false)
+                                                ? const Color(0xFFE8A23C).withValues(alpha: 0.22)
+                                                : Colors.white12,
                                             shape: BoxShape.circle,
                                             border: Border.all(
-                                              color: Colors.white38,
+                                              color: (me?.handRaised ?? false)
+                                                  ? const Color(0xFFE8A23C)
+                                                  : Colors.white38,
                                               width: 1,
                                             ),
                                           ),
-                                          child: const Icon(
+                                          // Amber once the signed-in user has
+                                          // raised their own hand — a plain
+                                          // "you're in the queue" indicator,
+                                          // not something every empty seat
+                                          // shows (only ever reflects the
+                                          // viewer's own state; the grid has
+                                          // no per-seat "who raised" concept).
+                                          child: Icon(
                                             Icons.front_hand_rounded,
-                                            color: Colors.white38,
+                                            color: (me?.handRaised ?? false)
+                                                ? const Color(0xFFE8A23C)
+                                                : Colors.white38,
                                             size: 22,
                                           ),
                                         )
                                       : Stack(
                                           clipBehavior: Clip.none,
                                           children: [
+                                            // Avatar with green border highlight
+                                            // when unmuted/speaking, plain when muted.
                                             AppAvatar(
                                               seed: speaker.uid.isNotEmpty ? speaker.uid : '${speaker.name}$i',
                                               size: 56,
                                               showFlag: true,
                                               flag: speaker.flag,
                                               imageUrl: speaker.avatarUrl,
-                                              borderWidth: speaker.isSpeaking
-                                                  ? 2.5
-                                                  : 0,
+                                              borderWidth: speaker.isSpeaking ? 2.5 : 0,
                                               borderColor: const Color(0xFF3DDC97),
                                             ),
-                                            if (speaker.isSpeaking)
-                                              Positioned(
-                                                right: -2,
-                                                top: -2,
-                                                child: Container(
-                                                  width: 18,
-                                                  height: 18,
-                                                  decoration: const BoxDecoration(
-                                                    color: Color(0xFF3DDC97),
-                                                    shape: BoxShape.circle,
-                                                  ),
-                                                  child: const Icon(
-                                                    Icons.mic_rounded,
-                                                    color: Colors.white,
-                                                    size: 11,
-                                                  ),
-                                                ),
-                                              ),
-                                            // Role badge — opposite corner from
-                                            // the on-air mic badge above. Plain
-                                            // speakers get no badge (their
-                                            // default look already reads as
-                                            // "just a participant").
-                                            if (speaker.isHost || speaker.isModerator)
-                                              Positioned(
-                                                left: -2,
-                                                top: -2,
-                                                child: Container(
-                                                  width: 18,
-                                                  height: 18,
-                                                  decoration: BoxDecoration(
-                                                    color: speaker.isHost
-                                                        ? const Color(0xFFE8A23C)
-                                                        : const Color(0xFF7B68F4),
-                                                    shape: BoxShape.circle,
-                                                  ),
-                                                  child: Icon(
-                                                    speaker.isHost ? Icons.star_rounded : Icons.shield_rounded,
-                                                    color: Colors.white,
-                                                    size: 11,
+                                            // Muted badge — a small mic-off
+                                            // circle centered over the middle
+                                            // of the avatar, but only a
+                                            // fraction of its size — not the
+                                            // full-circle overlay this used
+                                            // to be (which hid the photo/
+                                            // initial entirely while muted),
+                                            // and not pinned to the edge
+                                            // either. Only shown when the
+                                            // seat is occupied AND the
+                                            // participant is muted.
+                                            if (!speaker.isSpeaking)
+                                              Positioned.fill(
+                                                child: Center(
+                                                  child: Container(
+                                                    width: 28,
+                                                    height: 28,
+                                                    decoration: BoxDecoration(
+                                                      color: Colors.black.withValues(alpha: 0.4),
+                                                      shape: BoxShape.circle,
+                                                    ),
+                                                    child: const Icon(
+                                                      Icons.mic_off_rounded,
+                                                      color: Colors.white,
+                                                      size: 17,
+                                                    ),
                                                   ),
                                                 ),
                                               ),
+                                            // When unmuted/speaking the green
+                                            // border highlight (borderWidth above)
+                                            // is the sole visual indicator —
+                                            // no extra badge needed.
                                           ],
                                         ),
                                   const SizedBox(height: 4),
-                                  Text(
-                                    speaker.isEmptySeat ? '${i + 1}' : speaker.name,
-                                    style: const TextStyle(
-                                      color: Colors.white54,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600,
+                                  // Name row — prefixed with a host/moderator
+                                  // role icon so rank is readable without
+                                  // blocking the profile picture.
+                                  if (speaker.isEmptySeat)
+                                    Text(
+                                      '${i + 1}',
+                                      style: const TextStyle(
+                                        color: Colors.white54,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    )
+                                  else
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        if (speaker.isHost)
+                                          const Padding(
+                                            padding: EdgeInsets.only(right: 3),
+                                            child: Icon(
+                                              Icons.star_rounded,
+                                              color: Color(0xFFE8A23C),
+                                              size: 11,
+                                            ),
+                                          )
+                                        else if (speaker.isModerator)
+                                          const Padding(
+                                            padding: EdgeInsets.only(right: 3),
+                                            child: Icon(
+                                              Icons.shield_rounded,
+                                              color: Color(0xFF7B68F4),
+                                              size: 11,
+                                            ),
+                                          ),
+                                        Flexible(
+                                          child: Text(
+                                            speaker.name,
+                                            style: const TextStyle(
+                                              color: Colors.white54,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ],
                                     ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
                                 ],
                               ),
                             );
                           },
                         ),
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 6),
                       SizedBox(
                         height: 44,
                         child: Padding(
@@ -826,10 +1632,19 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
                                     for (final listener in preview)
-                                      AppAvatar(
-                                        seed: listener.uid.isNotEmpty ? listener.uid : listener.name,
-                                        size: 32,
-                                        imageUrl: listener.avatarUrl,
+                                      GestureDetector(
+                                        onTap: () => showRoomProfileSheet(
+                                          context,
+                                          listener,
+                                          roomId: widget.room.id,
+                                          canModerate: me?.canModerate ?? false,
+                                          isHost: _isHost,
+                                        ),
+                                        child: AppAvatar(
+                                          seed: listener.uid.isNotEmpty ? listener.uid : listener.name,
+                                          size: 32,
+                                          imageUrl: listener.avatarUrl,
+                                        ),
                                       ),
                                     if (remaining > 0)
                                       Container(
@@ -858,29 +1673,61 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                         ),
                       ),
                       const SizedBox(height: 4),
+                      // Directly underneath the audience section, per the
+                      // HelloTalk-style layout this mirrors — collapses to
+                      // nothing when subtitles are off (see _Composer's new
+                      // CC toggle) so it never eats space it isn't using.
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        child: _SubtitleCaptionsPanel(
+                          visible: _subtitlesOn,
+                          stream: _subtitlesStream,
+                          scrollController: _subtitlesScrollController,
+                        ),
+                      ),
                       Padding(
                         padding: const EdgeInsets.fromLTRB(12, 2, 12, 2),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: StreamBuilder<List<BoardComment>>(
-                                stream: _commentsStream,
-                                builder: (context, commentsSnap) {
-                                  final comments = commentsSnap.data ?? const <BoardComment>[];
-                                  if (comments.isEmpty) return const SizedBox.shrink();
-                                  return Column(
-                                    children: comments.map((c) => _CommentLine(comment: c)).toList(),
-                                  );
-                                },
+                        child: StreamBuilder<List<BoardComment>>(
+                          stream: _commentsStream,
+                          builder: (context, commentsSnap) {
+                            final comments = commentsSnap.data ?? const <BoardComment>[];
+                            if (comments.isEmpty) return const SizedBox.shrink();
+
+                            // Auto-scroll to the newest comment whenever
+                            // the list grows. Post-frame so the ListView
+                            // has already laid out the new item before we
+                            // try to jump to its end.
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              if (_commentScrollController.hasClients) {
+                                _commentScrollController.animateTo(
+                                  _commentScrollController.position.maxScrollExtent,
+                                  duration: const Duration(milliseconds: 250),
+                                  curve: Curves.easeOut,
+                                );
+                              }
+                            });
+
+                            // Height is fluid: up to ~4 comment rows
+                            // (~88 px) on any screen width — scales down
+                            // naturally on small phones because every
+                            // row uses Flexible/Expanded internally.
+                            // BouncingScrollPhysics gives a native iOS
+                            // feel; ClampingScrollPhysics would be fine
+                            // for Android-only, but both platforms are
+                            // in scope here.
+                            return ConstrainedBox(
+                              constraints: const BoxConstraints(maxHeight: 88),
+                              child: ListView.builder(
+                                controller: _commentScrollController,
+                                shrinkWrap: true,
+                                physics: const BouncingScrollPhysics(),
+                                padding: EdgeInsets.zero,
+                                itemCount: comments.length,
+                                itemBuilder: (context, index) =>
+                                    _CommentLine(comment: comments[index]),
                               ),
-                            ),
-                            const SizedBox(width: 8),
-                            _SubtitlesButton(
-                              enabled: _subtitlesOn,
-                              onTap: () =>
-                                  setState(() => _subtitlesOn = !_subtitlesOn),
-                            ),
-                          ],
+                            );
+                          },
                         ),
                       ),
                     ],
@@ -891,7 +1738,17 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                   me: me,
                   onSend: _sendComment,
                   onToggleMic: () => _toggleMic(me),
-                  onRaiseHand: () => _requestToSpeak(me),
+                  onRaiseHand: () => _raiseHand(me),
+                  subtitlesOn: _subtitlesOn,
+                  onToggleSubtitles: () => setState(() => _subtitlesOn = !_subtitlesOn),
+                  // Only host/moderator get the Raised Hands badge in place
+                  // of their own (otherwise-inert, since they're always
+                  // seated already) raise-hand button — see _Composer's own
+                  // doc comment for why this slot specifically.
+                  raisedHandsStream: (me?.canModerate ?? false)
+                      ? RoomParticipantService.streamRaisedHands(widget.room.id)
+                      : null,
+                  onOpenRaisedHands: _openRaisedHandsSheet,
                 ),
               ],
             );
@@ -926,106 +1783,144 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
   }
 }
 
-/// Bottom sheet listing the host's friends, each with an "Invite" button
-/// that writes a `voiceRoomInvites` doc — functions/index.js's
-/// onVoiceRoomInviteCreate turns that into a real push + in-app
-/// notification for the invited friend. See NotificationService.inviteToVoiceRoom.
-class _InviteFriendsSheet extends StatefulWidget {
+// ---------------------------------------------------------------------------
+// Moderator Panel — Screenshot 2
+// Shows the currently-assigned moderator(s) and Add / Remove buttons.
+// ---------------------------------------------------------------------------
+class _ModeratorPanelSheet extends StatelessWidget {
+  final List<RoomParticipant> participants;
   final String roomId;
-  const _InviteFriendsSheet({required this.roomId});
+  final VoidCallback onAddTap;
+  final void Function(RoomParticipant moderator) onRemoveTap;
 
-  @override
-  State<_InviteFriendsSheet> createState() => _InviteFriendsSheetState();
-}
-
-class _InviteFriendsSheetState extends State<_InviteFriendsSheet> {
-  late final Future<List<AppUser>> _friendsFuture = _loadFriends();
-  final Set<String> _invited = {};
-
-  Future<List<AppUser>> _loadFriends() async {
-    final friendIds = await FriendService.instance.getFriendIds();
-    final users = await Future.wait(
-      friendIds.map((id) async {
-        try {
-          return await PartnerService.fetchPartner(id);
-        } catch (_) {
-          return null;
-        }
-      }),
-    );
-    return users.whereType<AppUser>().toList();
-  }
-
-  Future<void> _invite(AppUser friend) async {
-    setState(() => _invited.add(friend.id));
-    try {
-      await NotificationService.inviteToVoiceRoom(recipientId: friend.id, roomId: widget.roomId);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _invited.remove(friend.id));
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not invite ${friend.name}: ${e.toString().replaceFirst('Exception: ', '')}')),
-      );
-    }
-  }
+  const _ModeratorPanelSheet({
+    required this.participants,
+    required this.roomId,
+    required this.onAddTap,
+    required this.onRemoveTap,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final moderators = participants.where((p) => p.isModerator).toList();
+
     return SafeArea(
       top: false,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Invite friends',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16),
+            // Handle
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
             ),
-            const SizedBox(height: 14),
-            SizedBox(
-              height: 320,
-              child: FutureBuilder<List<AppUser>>(
-                future: _friendsFuture,
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white70),
-                    );
-                  }
-                  final friends = snapshot.data ?? const [];
-                  if (friends.isEmpty) {
-                    return const Center(
-                      child: Text(
-                        'Add some friends first to invite them here.',
-                        style: TextStyle(color: Colors.white54, fontSize: 13),
-                        textAlign: TextAlign.center,
+            const Text(
+              'Moderator',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 20),
+            // Avatar strip — shows current moderators (max 1 per spec)
+            if (moderators.isNotEmpty)
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: moderators.map((mod) {
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 16),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              AppAvatar(
+                                seed: mod.uid.isNotEmpty ? mod.uid : mod.name,
+                                size: 60,
+                                imageUrl: mod.avatarUrl,
+                                flag: mod.flag,
+                                showFlag: mod.flag.isNotEmpty,
+                                borderWidth: 2.5,
+                                borderColor: const Color(0xFF7B68F4),
+                              ),
+                              Positioned(
+                                right: -2,
+                                top: -2,
+                                child: Container(
+                                  width: 18,
+                                  height: 18,
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFF7B68F4),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(
+                                    Icons.shield_rounded,
+                                    color: Colors.white,
+                                    size: 11,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            mod.name,
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
                       ),
                     );
-                  }
-                  return ListView.separated(
-                    itemCount: friends.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 4),
-                    itemBuilder: (context, i) {
-                      final friend = friends[i];
-                      final invited = _invited.contains(friend.id);
-                      return ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: AppAvatar(seed: friend.name, size: 40, imageUrl: friend.avatarUrl),
-                        title: Text(friend.name, style: const TextStyle(color: Colors.white, fontSize: 14)),
-                        trailing: TextButton(
-                          onPressed: invited ? null : () => _invite(friend),
-                          child: Text(
-                            invited ? 'Invited' : 'Invite',
-                            style: TextStyle(color: invited ? Colors.white38 : const Color(0xFF7B68F4)),
-                          ),
-                        ),
-                      );
-                    },
-                  );
-                },
+                  }).toList(),
+                ),
+              )
+            else
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: Text(
+                  'No moderator assigned yet.',
+                  style: TextStyle(color: Colors.white38, fontSize: 13),
+                ),
               ),
+            const SizedBox(height: 24),
+            // Add / Remove action buttons
+            Row(
+              children: [
+                // Add button — disabled once a moderator is already set
+                // (one moderator at a time per spec).
+                _PanelActionButton(
+                  icon: Icons.add_rounded,
+                  label: 'Add',
+                  enabled: moderators.isEmpty,
+                  onTap: moderators.isEmpty ? onAddTap : null,
+                ),
+                const SizedBox(width: 20),
+                // Remove button — only enabled when a moderator exists.
+                _PanelActionButton(
+                  icon: Icons.remove_rounded,
+                  label: 'Remove',
+                  enabled: moderators.isNotEmpty,
+                  onTap: moderators.isNotEmpty
+                      ? () => onRemoveTap(moderators.first)
+                      : null,
+                ),
+              ],
             ),
           ],
         ),
@@ -1034,164 +1929,229 @@ class _InviteFriendsSheetState extends State<_InviteFriendsSheet> {
   }
 }
 
-/// Bottom sheet the host picks a moderator from before leaving — see
-/// _VoiceRoomDetailScreenState._leave. [candidates] is the live stage
-/// roster (speakers only, host excluded), passed in directly since it's
-/// already in hand from the same StreamBuilder frame — no separate fetch
-/// needed here.
-/// The green "…" menu's bottom sheet — see
-/// _VoiceRoomDetailScreenState._openRoomOptions. Deliberately scoped to
-/// just Share and Leave for now (not the full reference design's
-/// "Minimize the room" / "Close", which have no defined behavior in this
-/// app yet) — reuses the room's existing Leave semantics rather than
-/// inventing new ones.
-class _RoomOptionsSheet extends StatelessWidget {
-  final bool canShare;
-  final VoidCallback onShare;
-  final VoidCallback onMinimize;
-  final VoidCallback onLeave;
-  const _RoomOptionsSheet({
-    required this.canShare,
-    required this.onShare,
-    required this.onMinimize,
-    required this.onLeave,
+class _PanelActionButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool enabled;
+  final VoidCallback? onTap;
+
+  const _PanelActionButton({
+    required this.icon,
+    required this.label,
+    required this.enabled,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              decoration: BoxDecoration(
-                color: _VoiceRoomDetailScreenState.bubble,
-                borderRadius: BorderRadius.circular(16),
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              color: enabled
+                  ? Colors.white.withValues(alpha: 0.12)
+                  : Colors.white.withValues(alpha: 0.04),
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: enabled ? Colors.white24 : Colors.white12,
+                width: 1.2,
               ),
-              clipBehavior: Clip.antiAlias,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
+            ),
+            child: Icon(
+              icon,
+              color: enabled ? Colors.white : Colors.white24,
+              size: 24,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            label,
+            style: TextStyle(
+              color: enabled ? Colors.white70 : Colors.white24,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Add Moderator Picker — Screenshot 3
+// Full-screen dark dialog with search bar + single-select radio list.
+// ---------------------------------------------------------------------------
+class _AddModeratorDialog extends StatefulWidget {
+  final List<RoomParticipant> candidates;
+  final void Function(RoomParticipant) onChosen;
+
+  const _AddModeratorDialog({
+    required this.candidates,
+    required this.onChosen,
+  });
+
+  @override
+  State<_AddModeratorDialog> createState() => _AddModeratorDialogState();
+}
+
+class _AddModeratorDialogState extends State<_AddModeratorDialog> {
+  static const _bg = Color(0xFF0F0F1E);
+  final _searchCtrl = TextEditingController();
+  RoomParticipant? _selected;
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  List<RoomParticipant> get _filtered {
+    if (_query.isEmpty) return widget.candidates;
+    final q = _query.toLowerCase();
+    return widget.candidates
+        .where((p) => p.name.toLowerCase().contains(q))
+        .toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog.fullscreen(
+      backgroundColor: _bg,
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Top bar
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 8, 16, 4),
+              child: Row(
                 children: [
-                  _OptionRow(
-                    icon: Icons.ios_share_rounded,
-                    label: 'Share',
-                    enabled: canShare,
-                    disabledHint: 'Only the host, moderators, and staged speakers can share this room.',
-                    onTap: onShare,
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back_ios_rounded,
+                        color: Colors.white70, size: 20),
+                    onPressed: () => Navigator.of(context).pop(false),
                   ),
-                  const Divider(height: 1, color: Colors.white12),
-                  _OptionRow(
-                    icon: Icons.minimize_rounded,
-                    label: 'Minimize the room',
-                    enabled: true,
-                    onTap: onMinimize,
+                  const Expanded(
+                    child: Text(
+                      'Add Moderator',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
                   ),
-                  const Divider(height: 1, color: Colors.white12),
-                  _OptionRow(
-                    icon: Icons.logout_rounded,
-                    label: 'Leave',
-                    enabled: true,
-                    onTap: onLeave,
+                  TextButton(
+                    onPressed: _selected != null
+                        ? () {
+                            widget.onChosen(_selected!);
+                            Navigator.of(context).pop(true);
+                          }
+                        : null,
+                    child: Text(
+                      'OK',
+                      style: TextStyle(
+                        color: _selected != null
+                            ? const Color(0xFF7B68F4)
+                            : Colors.white30,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 10),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () => Navigator.of(context).pop(),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF7B68F4),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+            // Search bar
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+              child: Container(
+                height: 42,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.07),
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Text('Cancel', style: TextStyle(fontWeight: FontWeight.w700)),
+                child: TextField(
+                  controller: _searchCtrl,
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  decoration: const InputDecoration(
+                    hintText: 'Search',
+                    hintStyle: TextStyle(color: Colors.white38, fontSize: 14),
+                    prefixIcon: Icon(Icons.search_rounded,
+                        color: Colors.white38, size: 20),
+                    border: InputBorder.none,
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                  ),
+                  onChanged: (v) => setState(() => _query = v.trim()),
+                ),
               ),
             ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _OptionRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final bool enabled;
-  final String? disabledHint;
-  final VoidCallback onTap;
-  const _OptionRow({
-    required this.icon,
-    required this.label,
-    required this.enabled,
-    this.disabledHint,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return ListTile(
-      leading: Icon(icon, color: enabled ? Colors.white : Colors.white24, size: 20),
-      title: Text(
-        label,
-        style: TextStyle(
-          color: enabled ? Colors.white : Colors.white24,
-          fontSize: 14.5,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-      subtitle: !enabled && disabledHint != null
-          ? Text(disabledHint!, style: const TextStyle(color: Colors.white38, fontSize: 11.5))
-          : null,
-      onTap: enabled ? onTap : null,
-    );
-  }
-}
-
-class _ChooseModeratorSheet extends StatelessWidget {
-  final List<RoomParticipant> candidates;
-  const _ChooseModeratorSheet({required this.candidates});
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Choose a moderator before you leave',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              "They'll be able to manage the stage and end the room after you leave.",
-              style: TextStyle(color: Colors.white54, fontSize: 12.5),
-            ),
-            const SizedBox(height: 14),
-            SizedBox(
-              height: 320,
-              child: ListView.separated(
-                itemCount: candidates.length,
-                separatorBuilder: (_, _) => const SizedBox(height: 4),
+            // Candidate list
+            Expanded(
+              child: ListView.builder(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                itemCount: _filtered.length,
                 itemBuilder: (context, i) {
-                  final p = candidates[i];
-                  return ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: AppAvatar(seed: p.uid.isNotEmpty ? p.uid : p.name, size: 40, imageUrl: p.avatarUrl),
-                    title: Text(p.name, style: const TextStyle(color: Colors.white, fontSize: 14)),
-                    trailing: TextButton(
-                      onPressed: () => Navigator.of(context).pop(p),
-                      child: const Text('Make Moderator', style: TextStyle(color: Color(0xFF7B68F4))),
+                  final p = _filtered[i];
+                  final isSelected = _selected?.uid == p.uid;
+                  return InkWell(
+                    onTap: () => setState(() => _selected = p),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 10),
+                      child: Row(
+                        children: [
+                          // Radio indicator
+                          Container(
+                            width: 22,
+                            height: 22,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: isSelected
+                                    ? const Color(0xFF7B68F4)
+                                    : Colors.white38,
+                                width: 2,
+                              ),
+                              color: isSelected
+                                  ? const Color(0xFF7B68F4)
+                                  : Colors.transparent,
+                            ),
+                            child: isSelected
+                                ? const Icon(Icons.check_rounded,
+                                    color: Colors.white, size: 14)
+                                : null,
+                          ),
+                          const SizedBox(width: 14),
+                          AppAvatar(
+                            seed: p.uid.isNotEmpty ? p.uid : p.name,
+                            size: 44,
+                            imageUrl: p.avatarUrl,
+                            showFlag: p.flag.isNotEmpty,
+                            flag: p.flag,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              p.name,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   );
                 },
@@ -1204,105 +2164,105 @@ class _ChooseModeratorSheet extends StatelessWidget {
   }
 }
 
-/// One image or text item on the stage card's whiteboard row. Only
-/// host/moderator (`canEdit`) get the remove button and can tap a text
-/// item to edit it — everyone else just sees the content.
-class _WhiteboardTile extends StatelessWidget {
-  final WhiteboardItem item;
-  final bool canEdit;
-  final VoidCallback onEditText;
-  final VoidCallback onRemove;
-  const _WhiteboardTile({
-    required this.item,
-    required this.canEdit,
-    required this.onEditText,
-    required this.onRemove,
+/// The dedicated captions panel directly under the audience section (see
+/// _Composer's CC toggle, which drives [visible]). Collapses to nothing
+/// when subtitles are off; otherwise streams
+/// RoomParticipantService.streamSubtitles and grows with content up to a
+/// cap, then scrolls — same shape as the comment feed just below it.
+///
+/// No speech-to-text/translation pipeline exists yet, so [stream] is
+/// typically empty; the panel shows a muted "Listening for captions…"
+/// placeholder in that case rather than looking broken, and will start
+/// rendering real lines the moment something writes to that subcollection
+/// (RoomParticipantService.addSubtitleLine) — no UI change needed then.
+class _SubtitleCaptionsPanel extends StatelessWidget {
+  final bool visible;
+  final Stream<List<SubtitleLine>> stream;
+  final ScrollController scrollController;
+
+  const _SubtitleCaptionsPanel({
+    required this.visible,
+    required this.stream,
+    required this.scrollController,
   });
 
   @override
   Widget build(BuildContext context) {
-    final content = item.isImage
-        ? ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: Image.network(
-              item.imageUrl,
-              width: 140,
-              fit: BoxFit.cover,
-              errorBuilder: (_, _, _) => Container(
-                width: 140,
-                color: Colors.white12,
-                alignment: Alignment.center,
-                child: const Icon(Icons.broken_image_outlined, color: Colors.white38),
-              ),
-            ),
-          )
-        : GestureDetector(
-            onTap: canEdit ? onEditText : null,
-            child: Container(
-              width: 160,
-              padding: const EdgeInsets.all(10),
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
+      alignment: Alignment.topCenter,
+      child: !visible
+          ? const SizedBox(width: double.infinity)
+          : Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.35),
-                borderRadius: BorderRadius.circular(10),
+                color: Colors.black.withValues(alpha: 0.28),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
               ),
-              alignment: Alignment.centerLeft,
-              child: Text(
-                item.text,
-                maxLines: 4,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white, fontSize: 12.5, fontWeight: FontWeight.w600),
+              child: StreamBuilder<List<SubtitleLine>>(
+                stream: stream,
+                builder: (context, snapshot) {
+                  final lines = snapshot.data ?? const <SubtitleLine>[];
+                  if (lines.isEmpty) {
+                    return const Text(
+                      'Listening for captions…',
+                      style: TextStyle(fontSize: 12, color: Colors.white38, fontStyle: FontStyle.italic),
+                    );
+                  }
+
+                  // Auto-scroll to the newest line, same pattern as the
+                  // comment feed's own post-frame callback below.
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (scrollController.hasClients) {
+                      scrollController.animateTo(
+                        scrollController.position.maxScrollExtent,
+                        duration: const Duration(milliseconds: 250),
+                        curve: Curves.easeOut,
+                      );
+                    }
+                  });
+
+                  return ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 90),
+                    child: ListView.builder(
+                      controller: scrollController,
+                      shrinkWrap: true,
+                      physics: const BouncingScrollPhysics(),
+                      padding: EdgeInsets.zero,
+                      itemCount: lines.length,
+                      itemBuilder: (context, index) {
+                        final line = lines[index];
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 2),
+                          child: RichText(
+                            text: TextSpan(
+                              children: [
+                                TextSpan(
+                                  text: '${line.speakerName}: ',
+                                  style: const TextStyle(
+                                    fontSize: 12.5,
+                                    color: Colors.white54,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                TextSpan(
+                                  text: line.text,
+                                  style: const TextStyle(fontSize: 12.5, color: Colors.white, height: 1.3),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  );
+                },
               ),
             ),
-          );
-
-    if (!canEdit) return content;
-
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        content,
-        Positioned(
-          right: -4,
-          top: -4,
-          child: GestureDetector(
-            onTap: onRemove,
-            child: Container(
-              width: 20,
-              height: 20,
-              decoration: const BoxDecoration(color: Colors.black87, shape: BoxShape.circle),
-              child: const Icon(Icons.close_rounded, size: 13, color: Colors.white70),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _SubtitlesButton extends StatelessWidget {
-  final bool enabled;
-  final VoidCallback onTap;
-  const _SubtitlesButton({required this.enabled, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: enabled ? Colors.white : Colors.black,
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: Text(
-          'Subtitles',
-          style: TextStyle(
-            fontSize: 12.5,
-            fontWeight: FontWeight.w800,
-            color: enabled ? Colors.black : Colors.white,
-          ),
-        ),
-      ),
     );
   }
 }
@@ -1318,11 +2278,17 @@ class _CommentLine extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          AppAvatar(seed: comment.sender, size: 18),
+          // Use senderId (uid) as the avatar seed so two users with the same
+          // display name never get the same generated avatar. Falls back to
+          // the display name for legacy comments that pre-date senderId.
+          AppAvatar(
+            seed: comment.senderId.isNotEmpty ? comment.senderId : comment.sender,
+            size: 18,
+          ),
           const SizedBox(width: 6),
           Expanded(
             child: RichText(
-              maxLines: 1,
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
               text: TextSpan(
                 children: [
@@ -1358,18 +2324,35 @@ class _Composer extends StatelessWidget {
   final VoidCallback onSend;
   final VoidCallback onToggleMic;
   final VoidCallback onRaiseHand;
+  final bool subtitlesOn;
+  final VoidCallback onToggleSubtitles;
+  // Non-null only for a host/moderator, who's always seated already and so
+  // has no use for the self raise-hand button below — this repurposes that
+  // exact slot into the Raised Hands notification badge instead, rather
+  // than adding a whole new spot for it. Bottom row here stays in the same
+  // place regardless of how tall the seat grid above it is (unlike the
+  // scrolling comment feed the badge used to sit beside), so this is also
+  // the one spot in this screen guaranteed not to end up looking "too
+  // high" on a narrow/tall viewport.
+  final Stream<List<RoomParticipant>>? raisedHandsStream;
+  final VoidCallback? onOpenRaisedHands;
   const _Composer({
     required this.controller,
     required this.me,
     required this.onSend,
     required this.onToggleMic,
     required this.onRaiseHand,
+    required this.subtitlesOn,
+    required this.onToggleSubtitles,
+    this.raisedHandsStream,
+    this.onOpenRaisedHands,
   });
 
   @override
   Widget build(BuildContext context) {
     final isSeated = me?.isSeated ?? false;
     final isUnmuted = isSeated && !(me?.isMuted ?? true);
+    final handRaised = !isSeated && (me?.handRaised ?? false);
 
     return Container(
       padding: const EdgeInsets.fromLTRB(10, 6, 10, 10),
@@ -1395,6 +2378,23 @@ class _Composer extends StatelessWidget {
                     hintStyle: const TextStyle(color: Colors.white38, fontSize: 12.5),
                     border: InputBorder.none,
                     isDense: true,
+                    suffixIcon: isSeated
+                        ? ValueListenableBuilder<TextEditingValue>(
+                            valueListenable: controller,
+                            builder: (context, value, _) {
+                              if (value.text.trim().isEmpty) {
+                                return const SizedBox.shrink();
+                              }
+                              return IconButton(
+                                icon: const Icon(Icons.send_rounded, size: 16, color: Color(0xFF4FA8FF)),
+                                onPressed: onSend,
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                                splashRadius: 16,
+                              );
+                            },
+                          )
+                        : null,
                   ),
                 ),
               ),
@@ -1418,22 +2418,52 @@ class _Composer extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 6),
+          // Toggles the captions panel above the comment feed — a personal
+          // viewing preference, not tied to seat/mic state, so unlike the
+          // two buttons around it this one is always tappable regardless of
+          // role.
           GestureDetector(
-            onTap: onRaiseHand,
+            onTap: onToggleSubtitles,
             child: Container(
               width: 36,
               height: 36,
               decoration: BoxDecoration(
-                color: isSeated ? Colors.white24 : const Color(0xFF7B68F4),
+                color: subtitlesOn ? const Color(0xFF7B68F4) : Colors.white24,
                 shape: BoxShape.circle,
               ),
               child: const Icon(
-                Icons.front_hand_rounded,
+                Icons.closed_caption_rounded,
                 size: 18,
                 color: Colors.white,
               ),
             ),
           ),
+          const SizedBox(width: 6),
+          if (raisedHandsStream != null)
+            RaisedHandsBadge(stream: raisedHandsStream!, onTap: onOpenRaisedHands!)
+          else
+            GestureDetector(
+              onTap: onRaiseHand,
+              child: Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  // Amber while waiting (mirrors the empty-seat grid's own
+                  // amber highlight for the same state) so it's obvious at a
+                  // glance the request already went out — tapping it again
+                  // lowers the hand.
+                  color: isSeated
+                      ? Colors.white24
+                      : (handRaised ? const Color(0xFFE8A23C) : const Color(0xFF7B68F4)),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.front_hand_rounded,
+                  size: 18,
+                  color: Colors.white,
+                ),
+              ),
+            ),
         ],
       ),
     );

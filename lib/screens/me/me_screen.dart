@@ -15,7 +15,7 @@ import '../../widgets/payment_method_sheet.dart';
 import '../auth/splash_screen.dart';
 import '../friends/my_qr_code_screen.dart';
 import '../moments/user_moments_screen.dart';
-import '../voiceroom/voice_room_detail_screen.dart';
+import '../voiceroom/open_voice_room.dart';
 import 'course_detail_sheet.dart';
 import 'edit_profile_screen.dart';
 import 'follow_list_screen.dart';
@@ -1113,13 +1113,7 @@ class _MyVoiceRoomBanner extends StatelessWidget {
               Column(
                 children: [
                   ElevatedButton(
-                    onPressed: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => VoiceRoomDetailScreen(room: room),
-                        ),
-                      );
-                    },
+                    onPressed: () => openVoiceRoom(context, room),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.white,
                       foregroundColor: AppColors.primaryPurple,

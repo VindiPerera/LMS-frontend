@@ -10,7 +10,8 @@ import '../../services/voice_room_service.dart';
 import '../../theme/app_colors.dart';
 import '../../utils/chat_time.dart';
 import '../../widgets/app_avatar.dart';
-import '../voiceroom/voice_room_detail_screen.dart';
+import '../../widgets/voice_room_invite_card.dart';
+import '../voiceroom/open_voice_room.dart';
 
 class ChatDetailScreen extends StatefulWidget {
   final AppUser user;
@@ -285,9 +286,7 @@ class _PartnerVoiceRoomBanner extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => VoiceRoomDetailScreen(room: room)),
-        ),
+        onTap: () => openVoiceRoom(context, room),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
@@ -352,9 +351,7 @@ class _PartnerVoiceRoomBanner extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               ElevatedButton(
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => VoiceRoomDetailScreen(room: room)),
-                ),
+                onPressed: () => openVoiceRoom(context, room),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.white,
                   foregroundColor: AppColors.primaryPurple,
@@ -414,6 +411,23 @@ class _MessageBubble extends StatelessWidget {
     final timeLabel = message.createdAt != null
         ? formatChatTime(message.createdAt!)
         : '';
+
+    if (message.type == MessageType.voiceRoomInvite) {
+      // No bubble chrome around this one — VoiceRoomInviteCard already has
+      // its own gradient "card" look (matching the in-room share banner),
+      // so wrapping it in the usual purple/gray bubble would just double up
+      // the background. Capped to a comfortable card width rather than
+      // stretching edge-to-edge like a text bubble would.
+      return ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 260),
+        child: VoiceRoomInviteCard(
+          roomId: message.roomId,
+          title: message.roomTitle,
+          hostName: message.roomHostName,
+          hostAvatar: message.roomHostAvatar,
+        ),
+      );
+    }
 
     if (message.type == MessageType.voice) {
       return Container(

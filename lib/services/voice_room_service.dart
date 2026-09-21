@@ -173,6 +173,72 @@ class VoiceRoomService {
     await _rooms.doc(roomId).update({'isActive': false});
   }
 
+  /// Persists the designated moderator's uid directly on the room document.
+  /// This survives the participant doc being deleted when the moderator
+  /// leaves — [RoomParticipantService.join] reads it back and restores the
+  /// 'moderator' role when the same user rejoins. Only the host may call
+  /// this (firestore.rules' host-update branch covers the write).
+  static Future<void> setModerator(String roomId, String moderatorUid) async {
+    if (roomId.isEmpty || moderatorUid.isEmpty) return;
+    await _rooms.doc(roomId).update({'moderatorUid': moderatorUid});
+  }
+
+  /// Clears the stored moderator uid — called when the room no longer has a
+  /// designated moderator (e.g. moderator is removed from stage, or host
+  /// ends the room after returning). No-op if the field isn't set.
+  static Future<void> clearModerator(String roomId) async {
+    if (roomId.isEmpty) return;
+    await _rooms.doc(roomId).update({'moderatorUid': FieldValue.delete()});
+  }
+
+  // ------------------------------------------------------------------
+  // Moderator invite sub-collection helpers
+  // voiceRooms/{roomId}/moderatorInvites/{inviteeUid}
+  // The host writes a doc here; the invitee streams it while inside the
+  // room and shows an Accept / Ignore dialog. On Accept the normal
+  // RoomParticipantService.promoteToModerator path runs; on Ignore (or
+  // after promotion) the doc is deleted. No Cloud Functions required.
+  // ------------------------------------------------------------------
+
+  static CollectionReference<Map<String, dynamic>> _invites(String roomId) =>
+      _rooms.doc(roomId).collection('moderatorInvites');
+
+  /// Writes (or overwrites) the pending invite for [inviteeUid].
+  static Future<void> writeModeratorInvite(String roomId, String inviteeUid) async {
+    if (roomId.isEmpty || inviteeUid.isEmpty) return;
+    await _invites(roomId).doc(inviteeUid).set({
+      'invitedBy': _uid,
+      'status': 'pending',
+      'invitedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Real-time stream of this user's own moderator invite doc for [roomId].
+  /// Emits null whenever the doc does not exist (host hasn't invited yet,
+  /// or the invite was already accepted/ignored/deleted).
+  static Stream<Map<String, dynamic>?> streamModeratorInvite(
+      String roomId, String uid) {
+    if (roomId.isEmpty || uid.isEmpty) return Stream.value(null);
+    return _invites(roomId)
+        .doc(uid)
+        .snapshots()
+        .map((s) => s.exists ? s.data() : null)
+        .handleError((e) {
+      debugPrint('VoiceRoomService.streamModeratorInvite error (non-fatal): $e');
+      return null;
+    });
+  }
+
+  /// Deletes the pending invite doc (called on Accept and on Ignore).
+  static Future<void> deleteModeratorInvite(String roomId, String uid) async {
+    if (roomId.isEmpty || uid.isEmpty) return;
+    try {
+      await _invites(roomId).doc(uid).delete();
+    } catch (e) {
+      debugPrint('VoiceRoomService.deleteModeratorInvite error (non-fatal): $e');
+    }
+  }
+
   static Future<void> _endAllActiveRoomsFor(String uid) async {
     final existing = await _rooms
         .where('hostId', isEqualTo: uid)

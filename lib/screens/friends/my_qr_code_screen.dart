@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../widgets/brand_icons.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -53,6 +54,17 @@ class _MyQRCodeScreenState extends State<MyQRCodeScreen> {
   Future<void> _shareWhatsApp() async {
     final text = 'Add me on FaceTalk: $_friendLink';
     final url = Uri.parse('https://wa.me/?text=${Uri.encodeComponent(text)}');
+    if (await canLaunchUrl(url)) {
+      await launchUrl(url, mode: LaunchMode.externalApplication);
+    } else {
+      _copyLink();
+    }
+  }
+
+  Future<void> _shareTelegram() async {
+    final encodedUrl = Uri.encodeComponent(_friendLink);
+    final encodedText = Uri.encodeComponent('Add me on FaceTalk!');
+    final url = Uri.parse('https://t.me/share/url?url=$encodedUrl&text=$encodedText');
     if (await canLaunchUrl(url)) {
       await launchUrl(url, mode: LaunchMode.externalApplication);
     } else {
@@ -229,25 +241,31 @@ class _MyQRCodeScreenState extends State<MyQRCodeScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
                 _ShareButton(
-                  icon: Icons.chat,
+                  icon: const BrandIcon.whatsapp(color: Colors.white, size: 26),
                   color: const Color(0xFF25D366),
                   label: 'WhatsApp',
                   onTap: _shareWhatsApp,
                 ),
                 _ShareButton(
-                  icon: Icons.send_rounded,
+                  icon: const BrandIcon.telegram(color: Colors.white, size: 26),
+                  color: const Color(0xFF2AABEE),
+                  label: 'Telegram',
+                  onTap: _shareTelegram,
+                ),
+                _ShareButton(
+                  icon: const BrandIcon.messenger(color: Colors.white, size: 26),
                   color: const Color(0xFF0084FF),
                   label: 'Messenger',
                   onTap: _shareMessenger,
                 ),
                 _ShareButton(
-                  icon: Icons.link_rounded,
+                  icon: const Icon(Icons.link_rounded, color: Colors.white, size: 22),
                   color: const Color(0xFF7B68F4),
                   label: 'Copy link',
                   onTap: _copyLink,
                 ),
                 _ShareButton(
-                  icon: Icons.more_horiz_rounded,
+                  icon: const Icon(Icons.more_horiz_rounded, color: Colors.white, size: 22),
                   color: const Color(0xFF6E6E78),
                   label: 'More',
                   onTap: _shareMore,
@@ -264,7 +282,7 @@ class _MyQRCodeScreenState extends State<MyQRCodeScreen> {
 
 
 class _ShareButton extends StatelessWidget {
-  final IconData icon;
+  final Widget icon;
   final Color color;
   final String label;
   final VoidCallback onTap;
@@ -287,10 +305,10 @@ class _ShareButton extends StatelessWidget {
             width: 56,
             height: 56,
             decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.12),
+              color: color,
               shape: BoxShape.circle,
             ),
-            child: Icon(icon, color: color, size: 26),
+            child: Center(child: icon),
           ),
           const SizedBox(height: 8),
           Text(

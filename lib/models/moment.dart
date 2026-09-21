@@ -68,6 +68,21 @@ class Moment {
   final MomentVisibility visibility;
   final bool isReshare;
   final String? originalPostId;
+
+  // A "Share to Moments" voice-room card attached at post time — see
+  // VoiceRoomDetailScreen's Share flow and create_moment_screen.dart's
+  // `attachedVoiceRoom` param. Denormalized the same way `user` is (a
+  // snapshot at share time), so the card still shows a title/host even if
+  // the room is later renamed; live status is looked up fresh from
+  // voiceRooms/{voiceRoomId} when the card renders — see
+  // VoiceRoomInviteCard. `voiceRoomId` empty means no card is attached.
+  final String voiceRoomId;
+  final String voiceRoomTitle;
+  final String voiceRoomHostName;
+  final String voiceRoomHostAvatar;
+  final String voiceRoomCategory;
+  final String voiceRoomTag;
+
   final bool isDeleted;
   final DateTime? createdAt;
   final DateTime? updatedAt;
@@ -89,12 +104,20 @@ class Moment {
     this.visibility = MomentVisibility.public,
     this.isReshare = false,
     this.originalPostId,
+    this.voiceRoomId = '',
+    this.voiceRoomTitle = '',
+    this.voiceRoomHostName = '',
+    this.voiceRoomHostAvatar = '',
+    this.voiceRoomCategory = '',
+    this.voiceRoomTag = '',
     this.isDeleted = false,
     this.createdAt,
     this.updatedAt,
   });
 
   bool get hasMedia => mediaType != MomentMediaType.none;
+
+  bool get hasVoiceRoomCard => voiceRoomId.isNotEmpty;
 
   bool isLikedBy(String uid) => uid.isNotEmpty && likes.contains(uid);
 
@@ -149,6 +172,12 @@ class Moment {
       visibility: MomentVisibility.fromStorage(json['visibility']),
       isReshare: json['isReshare'] == true,
       originalPostId: json['originalPostId']?.toString(),
+      voiceRoomId: json['voiceRoomId']?.toString() ?? '',
+      voiceRoomTitle: json['voiceRoomTitle']?.toString() ?? '',
+      voiceRoomHostName: json['voiceRoomHostName']?.toString() ?? '',
+      voiceRoomHostAvatar: json['voiceRoomHostAvatar']?.toString() ?? '',
+      voiceRoomCategory: json['voiceRoomCategory']?.toString() ?? '',
+      voiceRoomTag: json['voiceRoomTag']?.toString() ?? '',
       isDeleted: json['isDeleted'] == true,
       createdAt: _asDateTime(json['createdAt']),
       updatedAt: _asDateTime(json['updatedAt']),
@@ -187,6 +216,14 @@ class Moment {
       'visibility': visibility.storageValue,
       'isReshare': isReshare,
       if (originalPostId != null) 'originalPostId': originalPostId,
+      if (voiceRoomId.isNotEmpty) ...{
+        'voiceRoomId': voiceRoomId,
+        'voiceRoomTitle': voiceRoomTitle,
+        'voiceRoomHostName': voiceRoomHostName,
+        'voiceRoomHostAvatar': voiceRoomHostAvatar,
+        'voiceRoomCategory': voiceRoomCategory,
+        'voiceRoomTag': voiceRoomTag,
+      },
       'isDeleted': false,
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
@@ -222,6 +259,12 @@ class Moment {
       'visibility': visibility.storageValue,
       'isReshare': isReshare,
       'originalPostId': originalPostId,
+      'voiceRoomId': voiceRoomId,
+      'voiceRoomTitle': voiceRoomTitle,
+      'voiceRoomHostName': voiceRoomHostName,
+      'voiceRoomHostAvatar': voiceRoomHostAvatar,
+      'voiceRoomCategory': voiceRoomCategory,
+      'voiceRoomTag': voiceRoomTag,
       'isDeleted': isDeleted,
       if (createdAt != null) 'createdAt': Timestamp.fromDate(createdAt!),
       if (updatedAt != null) 'updatedAt': Timestamp.fromDate(updatedAt!),
@@ -245,6 +288,12 @@ class Moment {
     MomentVisibility? visibility,
     bool? isReshare,
     String? originalPostId,
+    String? voiceRoomId,
+    String? voiceRoomTitle,
+    String? voiceRoomHostName,
+    String? voiceRoomHostAvatar,
+    String? voiceRoomCategory,
+    String? voiceRoomTag,
     bool? isDeleted,
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -266,6 +315,12 @@ class Moment {
       visibility: visibility ?? this.visibility,
       isReshare: isReshare ?? this.isReshare,
       originalPostId: originalPostId ?? this.originalPostId,
+      voiceRoomId: voiceRoomId ?? this.voiceRoomId,
+      voiceRoomTitle: voiceRoomTitle ?? this.voiceRoomTitle,
+      voiceRoomHostName: voiceRoomHostName ?? this.voiceRoomHostName,
+      voiceRoomHostAvatar: voiceRoomHostAvatar ?? this.voiceRoomHostAvatar,
+      voiceRoomCategory: voiceRoomCategory ?? this.voiceRoomCategory,
+      voiceRoomTag: voiceRoomTag ?? this.voiceRoomTag,
       isDeleted: isDeleted ?? this.isDeleted,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,

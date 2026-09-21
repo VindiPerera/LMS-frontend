@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import '../models/chat_message.dart';
 import '../models/user.dart';
+import '../models/voiceroom.dart';
 import '../utils/chat_time.dart';
 import '../utils/stream_fallback.dart';
 import 'auth_service.dart';
@@ -133,6 +134,64 @@ class ChatService {
   static Future<void> sendMessage({
     required AppUser other,
     required String text,
+  }) {
+    return _send(other: other, previewText: text, fields: {'text': text, 'type': 'text'});
+  }
+
+  /// Sends the "👋 Wave" a user taps on someone's Connect card
+  /// (connect_screen.dart's `_PartnerListTile`) — a lightweight, no-strings
+  /// first contact. It's just a regular text message under the hood, so it
+  /// goes through the exact same [sendMessage] path (and the same
+  /// participants-only Firestore rules — see firestore.rules'
+  /// chats/{chatId}/messages create rule) as any other message: two users
+  /// can wave/chat freely without first becoming friends or following each
+  /// other, since nothing in this app's chat model requires that.
+  static Future<void> sendWave({required AppUser other}) {
+    return sendMessage(other: other, text: '👋');
+  }
+
+  /// Sends a "join my Voice Room" invitation card into a chat thread — the
+  /// "Share to a Chat" option on voice_room_detail_screen.dart's Share
+  /// sheet. [room] is snapshotted onto the message (see ChatMessage's
+  /// roomId/roomTitle/etc. fields) so the card still renders correctly even
+  /// if the room is later renamed; VoiceRoomInviteCard looks up the room's
+  /// *live* isActive state fresh when it renders, so a stale card just
+  /// shows as ended rather than pretending it's still joinable.
+  static Future<void> sendVoiceRoomInvite({
+    required AppUser other,
+    required VoiceRoom room,
+  }) {
+    final preview = '🎙️ Invited you to "${room.title}"';
+    return _send(
+      other: other,
+      previewText: preview,
+      pushBody: '🎙️ Invited you to a Voice Room',
+      fields: {
+        'text': preview,
+        'type': 'voiceRoomInvite',
+        'roomId': room.id,
+        'roomTitle': room.title,
+        'roomHostName': room.hostName,
+        'roomHostAvatar': room.hostAvatar,
+        'roomCategory': room.category,
+        'roomTag': room.tag,
+      },
+    );
+  }
+
+  /// Shared plumbing behind [sendMessage] and [sendVoiceRoomInvite]: creates
+  /// or updates the thread document and adds one message to its
+  /// subcollection in a single batch (so a brand-new thread's very first
+  /// message always lands atomically with the thread doc that owns it),
+  /// then fires the recipient's push notification. [fields] is merged into
+  /// the message document as-is — always include `text` (the chat list's
+  /// preview also reads `lastMessage`, not the message doc directly) and
+  /// `type`.
+  static Future<void> _send({
+    required AppUser other,
+    required String previewText,
+    required Map<String, dynamic> fields,
+    String? pushBody,
   }) async {
     final uid = _uid();
     final chatId = chatIdFor(other.id);
@@ -150,7 +209,7 @@ class ChatService {
           uid: _infoFor(AuthService.instance.currentUser),
           other.id: _infoFor(other),
         },
-        'lastMessage': text,
+        'lastMessage': previewText,
         'lastMessageAt': FieldValue.serverTimestamp(),
         'lastMessageSenderId': uid,
         'unread.${other.id}': FieldValue.increment(1),
@@ -163,10 +222,9 @@ class ChatService {
     final msgRef = chatRef.collection('messages').doc();
     batch.set(msgRef, {
       'senderId': uid,
-      'text': text,
-      'type': 'text',
       'createdAt': FieldValue.serverTimestamp(),
       'participants': ids,
+      ...fields,
     });
 
     await batch.commit();
@@ -180,9 +238,29 @@ class ChatService {
     NotificationApiService.sendPush(
       recipientUid: other.id,
       title: AuthService.instance.currentUser?.name ?? 'New message',
-      body: text,
+      body: pushBody ?? previewText,
       data: {'type': 'chat', 'chatId': chatId, 'senderId': uid},
     );
+  }
+
+  /// Whether a chat thread with [otherUid] already exists — used by
+  /// connect_screen.dart to decide whether a Connect card should show the
+  /// "Wave" button (no thread yet) or a "Chat" button (already said hi).
+  /// A single doc read rather than a stream: this is checked once per row
+  /// on the Partners list, not something that needs to stay live while the
+  /// list is on screen.
+  static Future<bool> hasChatWith(String otherUid) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || otherUid.isEmpty) return false;
+    try {
+      final doc = await _chats.doc(chatIdFor(otherUid)).get();
+      return doc.exists;
+    } catch (_) {
+      // Offline or a transient read failure — fall back to "no thread yet"
+      // so the row still renders something tappable (Wave) instead of
+      // getting stuck.
+      return false;
+    }
   }
 
   /// Clears the current user's unread count for a thread — call when

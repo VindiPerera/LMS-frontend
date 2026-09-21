@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../config/api_config.dart';
 
 enum RoomMessageIcon { none, notice, gift, translate, star }
 
@@ -17,6 +18,17 @@ class RoomParticipant {
   // stage, end the room, edit the whiteboard).
   final String role;
   final bool isMuted;
+  // Waiting to be invited onto the stage — RoomParticipantService.
+  // setHandRaised/streamRaisedHands. Only ever meaningful for a
+  // non-seated (audience) participant; a seat holder has nothing left to
+  // ask for.
+  final bool handRaised;
+  // A host/moderator-initiated invite to the stage is awaiting this
+  // participant's own Accept/Ignore — RoomParticipantService.
+  // sendStageInvite/streamStageInvitePending. The mirror image of
+  // [handRaised]: that one is the audience asking to come up, this one is
+  // the host/moderator asking them to.
+  final bool stageInvitePending;
   final bool isEmptySeat;
   final String gender;
   final int age;
@@ -40,6 +52,8 @@ class RoomParticipant {
     required this.flag,
     this.role = 'listener',
     this.isMuted = false,
+    this.handRaised = false,
+    this.stageInvitePending = false,
     this.isEmptySeat = false,
     this.gender = 'female',
     this.age = 0,
@@ -74,10 +88,12 @@ class RoomParticipant {
     return RoomParticipant(
       uid: uid,
       name: data['name']?.toString() ?? 'User',
-      avatarUrl: data['avatarUrl']?.toString() ?? '',
+      avatarUrl: ApiConfig.resolveUrl(data['avatarUrl']?.toString() ?? ''),
       flag: data['countryFlag']?.toString() ?? '',
       role: data['role']?.toString() ?? 'listener',
       isMuted: data['isMuted'] != false,
+      handRaised: data['handRaised'] == true,
+      stageInvitePending: data['stageInvitePending'] == true,
       gender: data['gender']?.toString() ?? 'other',
       age: (data['age'] as num?)?.toInt() ?? 0,
       nativeLang: data['nativeLang']?.toString() ?? '',
@@ -107,8 +123,34 @@ class RoomChatMessage {
 }
 
 class BoardComment {
+  /// Firestore uid of the sender — used as the avatar seed so two users with
+  /// the same display name never share a generated avatar.
+  final String senderId;
   final String sender;
   final String text;
 
-  const BoardComment({required this.sender, required this.text});
+  const BoardComment({
+    required this.senderId,
+    required this.sender,
+    required this.text,
+  });
+}
+
+/// One live caption line — backed by `voiceRooms/{roomId}/subtitles`
+/// (RoomParticipantService.addSubtitleLine/streamSubtitles). [text] is
+/// already the English translation of what [speakerName] said; no actual
+/// speech-to-text/translation pipeline writes these yet, but the model and
+/// its Firestore-backed read/write path exist so one can be plugged in later
+/// without any UI changes — mirrors [BoardComment]/the `comments`
+/// subcollection exactly.
+class SubtitleLine {
+  final String speakerId;
+  final String speakerName;
+  final String text;
+
+  const SubtitleLine({
+    required this.speakerId,
+    required this.speakerName,
+    required this.text,
+  });
 }

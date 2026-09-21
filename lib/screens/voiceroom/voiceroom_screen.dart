@@ -1,11 +1,15 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../../data/mock_data.dart';
+import '../../models/room_participant.dart';
 import '../../models/voiceroom.dart';
+import '../../services/room_participant_service.dart';
 import '../../services/voice_room_service.dart';
 import '../../theme/app_colors.dart';
+import '../../widgets/app_avatar.dart';
+import '../../widgets/mic_etiquette_banner.dart';
 import 'live_tab.dart';
 import 'learn_tab.dart';
+import 'open_voice_room.dart';
 import 'voice_room_detail_screen.dart';
 
 class VoiceroomScreen extends StatefulWidget {
@@ -357,7 +361,7 @@ class _VoiceRoomFeed extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(14, 10, 14, 20),
       children: [
-        _WorldCupBanner(),
+        const MicEtiquetteBanner(),
         const SizedBox(height: 14),
         ...rooms.map(
           (r) => Padding(
@@ -370,70 +374,14 @@ class _VoiceRoomFeed extends StatelessWidget {
   }
 }
 
-class _WorldCupBanner extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFFEFEFF4),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Row(
-        children: [
-          const Text(
-            '⚽',
-            style: TextStyle(fontSize: 24),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: const [
-                Text(
-                  'FIFA World Cup VoiceRoom',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 14,
-                  ),
-                ),
-                SizedBox(height: 2),
-                Text(
-                  'Join global football fans to talk & practice live',
-                  style: TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _VoiceRoomCard extends StatelessWidget {
   final VoiceRoom room;
   const _VoiceRoomCard({required this.room});
 
-  // Only the host sees the reminder on their own room's card — it's
-  // guidance for the person about to speak to a live audience, not
-  // something a browsing listener needs before they've even joined.
-  bool get _isMyRoom =>
-      room.hostId.isNotEmpty && room.hostId == FirebaseAuth.instance.currentUser?.uid;
-
   @override
   Widget build(BuildContext context) {
     return InkWell(
-      onTap: () {
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => VoiceRoomDetailScreen(room: room),
-          ),
-        );
-      },
+      onTap: () => openVoiceRoom(context, room),
       borderRadius: BorderRadius.circular(18),
       child: Container(
         padding: const EdgeInsets.all(14),
@@ -501,56 +449,216 @@ class _VoiceRoomCard extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                CircleAvatar(
-                  radius: 14,
-                  backgroundImage: NetworkImage(room.hostAvatar),
-                  child: Text(room.hostName.isEmpty ? 'H' : room.hostName[0]),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  room.hostName,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textSecondary,
+                // Host block: always the room's own denormalized host
+                // fields (never waits on a live roster fetch to render
+                // correctly) — avatar, name, and a gold "Host" badge so
+                // there's no mistaking who's hosting.
+                _Avatar(seed: room.hostName, imageUrl: room.hostAvatar, size: _kHostAvatarSize, isHost: true),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              room.hostName,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(room.hostFlag, style: const TextStyle(fontSize: 12)),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      const _HostBadge(),
+                    ],
                   ),
                 ),
-                const SizedBox(width: 4),
-                Text(room.hostFlag, style: const TextStyle(fontSize: 12)),
+                const SizedBox(width: 8),
+                // Everyone else currently on stage — kept separate from,
+                // and to the right of, the host block above so the two
+                // never visually collide.
+                _StageParticipants(room: room),
               ],
             ),
-            if (_isMyRoom) ...[
-              const SizedBox(height: 10),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                decoration: BoxDecoration(
-                  color: AppColors.primaryPurple.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.mic_off_rounded, size: 14, color: AppColors.primaryPurple),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        'Please mute your mic if you are not speaking.',
-                        style: const TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.primaryPurple,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
           ],
         ),
       ),
+    );
+  }
+}
+
+// Sizing shared between _StageParticipants and _OthersCluster below — kept
+// as file-level constants (rather than nested inside one class) since both
+// widgets need to agree on them and Dart privacy is per-library anyway.
+const double _kHostAvatarSize = 44;
+const double _kOtherAvatarSize = 28;
+// Overlap only ever applies WITHIN the others cluster (each one tucked
+// slightly behind the next) — the host avatar sits apart from this group
+// entirely (see the Row in _VoiceRoomCard.build) rather than overlapping
+// it, so there's never a mismatched-size collision to misread as a badge.
+const double _kOtherOverlap = 8;
+// Up to this many other stage members before folding the rest into a "+N"
+// bubble — keeps the cluster's width predictable no matter how many people
+// are actually on stage.
+const int _kMaxOtherAvatars = 3;
+
+/// A gold "Host" pill under the host's name — a second, explicit cue (on
+/// top of the avatar's own gold ring — see [_Avatar]) so there's no
+/// mistaking who's hosting even at a glance, matching the same gold =
+/// "host" language voice_room_detail_screen.dart's speaker-grid star badge
+/// already uses inside the room itself.
+class _HostBadge extends StatelessWidget {
+  const _HostBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppColors.vipGold,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.star_rounded, size: 10, color: Colors.white),
+          SizedBox(width: 3),
+          Text(
+            'Host',
+            style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Colors.white),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Who else is on stage right now, at a glance — pinned to the right of the
+/// card, opposite the host block, so the two never visually collide (see
+/// _VoiceRoomCard.build). Replaces the old static "please mute your mic"
+/// reminder chip (which only ever spoke to the host, about their own room,
+/// after they'd already started it) with something every browser of the
+/// feed benefits from: seeing who's actually speaking before deciding to
+/// tap in, the same way Clubhouse/HelloTalk-style room cards do it.
+///
+/// Backed by a live [RoomParticipantService.streamParticipants] listener
+/// (small subcollection, one listener per visible card — the same
+/// per-list-item streaming pattern chat_list_screen.dart already uses for
+/// live online dots), so it updates in real time as people join the stage
+/// or leave — never a stale snapshot from whenever the room was created.
+class _StageParticipants extends StatelessWidget {
+  final VoiceRoom room;
+  const _StageParticipants({required this.room});
+
+  @override
+  Widget build(BuildContext context) {
+    // Decorative/mock rooms (see mock_data.dart) have no id and therefore no
+    // real Firestore roster to stream.
+    if (room.id.isEmpty) return const SizedBox.shrink();
+
+    return StreamBuilder<List<RoomParticipant>>(
+      stream: RoomParticipantService.streamParticipants(room.id),
+      builder: (context, snapshot) {
+        final roster = snapshot.data ?? const <RoomParticipant>[];
+        // The host has their own dedicated avatar in the block on the left
+        // (see _VoiceRoomCard.build) — excluded here by uid so they're
+        // never shown twice.
+        final nonHostSeated = roster.where((p) => p.isSeated && p.uid != room.hostId && !p.isEmptySeat).toList();
+        final others = nonHostSeated.take(_kMaxOtherAvatars).toList();
+        final overflow = nonHostSeated.length - others.length;
+        return _OthersCluster(others: others, overflow: overflow);
+      },
+    );
+  }
+}
+
+/// The other stage members (moderators/speakers, host excluded), fanned
+/// out with a small, uniform overlap — all the same size, so — unlike
+/// overlapping the differently-sized host — this reads as one tidy group
+/// rather than a collision.
+class _OthersCluster extends StatelessWidget {
+  final List<RoomParticipant> others;
+  final int overflow;
+  const _OthersCluster({required this.others, required this.overflow});
+
+  @override
+  Widget build(BuildContext context) {
+    final slots = others.length + (overflow > 0 ? 1 : 0);
+    if (slots == 0) return const SizedBox.shrink();
+    final width = _kOtherAvatarSize + (slots - 1) * (_kOtherAvatarSize - _kOtherOverlap);
+
+    return SizedBox(
+      width: width,
+      height: _kOtherAvatarSize,
+      child: Stack(
+        clipBehavior: Clip.none,
+        // Left-to-right paint order: each later avatar sits on top of the
+        // one before it, the usual "fanned" look for a same-size group.
+        children: [
+          for (var i = 0; i < others.length; i++)
+            Positioned(
+              left: i * (_kOtherAvatarSize - _kOtherOverlap),
+              child: _Avatar(seed: others[i].name, imageUrl: others[i].avatarUrl, size: _kOtherAvatarSize),
+            ),
+          if (overflow > 0)
+            Positioned(
+              left: others.length * (_kOtherAvatarSize - _kOtherOverlap),
+              child: Container(
+                width: _kOtherAvatarSize,
+                height: _kOtherAvatarSize,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: AppColors.primaryPurple.withValues(alpha: 0.14),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 1.5),
+                ),
+                child: Text(
+                  '+$overflow',
+                  style: const TextStyle(
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.primaryPurple,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Avatar extends StatelessWidget {
+  final String seed;
+  final String imageUrl;
+  final double size;
+  final bool isHost;
+  const _Avatar({
+    required this.seed,
+    required this.imageUrl,
+    required this.size,
+    this.isHost = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AppAvatar(
+      seed: seed.isEmpty ? 'H' : seed,
+      size: size,
+      imageUrl: imageUrl,
+      borderWidth: isHost ? 2.5 : 2,
+      borderColor: isHost ? AppColors.vipGold : Colors.white,
     );
   }
 }

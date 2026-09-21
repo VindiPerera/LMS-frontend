@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../models/user.dart';
+import '../../services/chat_service.dart';
 import '../../services/partner_service.dart';
 import '../../services/teacher_service.dart';
 import '../../theme/app_colors.dart';
@@ -267,14 +268,74 @@ class _PartnersTab extends StatelessWidget {
   }
 }
 
-class _PartnerListTile extends StatelessWidget {
+class _PartnerListTile extends StatefulWidget {
   final AppUser user;
   const _PartnerListTile({required this.user});
+
+  @override
+  State<_PartnerListTile> createState() => _PartnerListTileState();
+}
+
+class _PartnerListTileState extends State<_PartnerListTile> {
+  AppUser get user => widget.user;
+
+  // null = still checking whether a thread already exists; true/false once
+  // known. Starts null (rather than defaulting to "no thread") so the row
+  // doesn't flash a Wave button that immediately flips to Chat once the
+  // check resolves for someone already said hi to.
+  bool? _hasChat;
+  bool _sending = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkExistingChat();
+  }
+
+  Future<void> _checkExistingChat() async {
+    final hasChat = await ChatService.hasChatWith(user.id);
+    if (!mounted) return;
+    setState(() => _hasChat = hasChat);
+  }
 
   void _openProfile(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => PartnerProfileScreen(initial: user)),
     );
+  }
+
+  void _openChat(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => ChatDetailScreen(user: user)),
+    );
+  }
+
+  Future<void> _sendWave() async {
+    if (_sending) return;
+    setState(() => _sending = true);
+    try {
+      await ChatService.sendWave(other: user);
+      if (!mounted) return;
+      setState(() {
+        _hasChat = true;
+        _sending = false;
+      });
+      // Take them straight into the thread they just started — the button
+      // alone flipping to "Chat" isn't enough feedback that the wave went
+      // through, and this is exactly where they'd want to be next anyway.
+      _openChat(context);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _sending = false);
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: const Text("Wave didn't send. Please try again."),
+            backgroundColor: AppColors.badgeRed,
+          ),
+        );
+    }
   }
 
   @override
@@ -398,26 +459,12 @@ class _PartnerListTile extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            GestureDetector(
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => ChatDetailScreen(user: user)),
-              ),
-              child: Container(
-                width: 44,
-                height: 44,
-                padding: const EdgeInsets.all(7),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF3EFFF),
-                  shape: BoxShape.circle,
-                  border: Border.all(color: AppColors.primaryPurple.withValues(alpha: 0.18), width: 1),
-                ),
-                child: Image.asset(
-                  'assets/images/say_hi_hand.png',
-                  fit: BoxFit.contain,
-                ),
-              ),
+            _WaveOrChatButton(
+              hasChat: _hasChat,
+              sending: _sending,
+              onWave: _sendWave,
+              onChat: () => _openChat(context),
             ),
-
           ],
         ),
       ),
@@ -438,6 +485,58 @@ class _PartnerListTile extends StatelessWidget {
           color: color,
           fontWeight: FontWeight.w800,
         ),
+      ),
+    );
+  }
+}
+
+/// The trailing circular button on a Connect card: a waving hand while no
+/// thread exists with this person yet, or a chat bubble once one does
+/// (either because a wave was already sent, or because they've messaged
+/// before through some other entry point — chat_list_screen.dart's "Add
+/// People", a teacher's "Say Hi", etc.). `hasChat == null` means the
+/// existence check (`ChatService.hasChatWith`) hasn't resolved yet, so a
+/// neutral loading spinner shows instead of guessing either icon.
+class _WaveOrChatButton extends StatelessWidget {
+  final bool? hasChat;
+  final bool sending;
+  final VoidCallback onWave;
+  final VoidCallback onChat;
+
+  const _WaveOrChatButton({
+    required this.hasChat,
+    required this.sending,
+    required this.onWave,
+    required this.onChat,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final loading = hasChat == null || sending;
+    return GestureDetector(
+      onTap: loading
+          ? null
+          : (hasChat! ? onChat : onWave),
+      child: Container(
+        width: 44,
+        height: 44,
+        padding: const EdgeInsets.all(7),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF3EFFF),
+          shape: BoxShape.circle,
+          border: Border.all(color: AppColors.primaryPurple.withValues(alpha: 0.18), width: 1),
+        ),
+        child: loading
+            ? const Padding(
+                padding: EdgeInsets.all(9),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: AppColors.primaryPurple,
+                ),
+              )
+            : (hasChat!
+                ? const Icon(Icons.chat_bubble_rounded, color: AppColors.primaryPurple, size: 20)
+                : Image.asset('assets/images/say_hi_hand.png', fit: BoxFit.contain)),
       ),
     );
   }

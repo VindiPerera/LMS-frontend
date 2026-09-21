@@ -23,7 +23,7 @@ class ChatPreview {
   });
 }
 
-enum MessageType { text, image, voice, correction }
+enum MessageType { text, image, voice, correction, voiceRoomInvite }
 
 MessageType _typeFromString(String? value) {
   return MessageType.values.firstWhere(
@@ -39,6 +39,18 @@ class ChatMessage {
   final String text;
   final MessageType type;
   final int voiceSeconds;
+  // Only set when type == voiceRoomInvite — a snapshot of the room at the
+  // moment it was shared (see ChatService.sendVoiceRoomInvite), so the card
+  // still shows a title/host even if the room is later renamed or has
+  // ended. Live status (still active? how many people are in it now?) is
+  // looked up fresh from voiceRooms/{roomId} when the card renders — see
+  // VoiceRoomInviteCard.
+  final String roomId;
+  final String roomTitle;
+  final String roomHostName;
+  final String roomHostAvatar;
+  final String roomCategory;
+  final String roomTag;
   // Null immediately after sending, until the server timestamp round-trips
   // back down (FieldValue.serverTimestamp() reads as null on the writer's
   // own optimistic local snapshot).
@@ -50,6 +62,12 @@ class ChatMessage {
     required this.text,
     this.type = MessageType.text,
     this.voiceSeconds = 0,
+    this.roomId = '',
+    this.roomTitle = '',
+    this.roomHostName = '',
+    this.roomHostAvatar = '',
+    this.roomCategory = '',
+    this.roomTag = '',
     this.createdAt,
   });
 
@@ -63,6 +81,12 @@ class ChatMessage {
       text: data['text']?.toString() ?? '',
       type: _typeFromString(data['type']?.toString()),
       voiceSeconds: (data['voiceSeconds'] as num?)?.toInt() ?? 0,
+      roomId: data['roomId']?.toString() ?? '',
+      roomTitle: data['roomTitle']?.toString() ?? '',
+      roomHostName: data['roomHostName']?.toString() ?? '',
+      roomHostAvatar: data['roomHostAvatar']?.toString() ?? '',
+      roomCategory: data['roomCategory']?.toString() ?? '',
+      roomTag: data['roomTag']?.toString() ?? '',
       createdAt: ts is Timestamp ? ts.toDate() : null,
     );
   }

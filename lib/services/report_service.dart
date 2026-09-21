@@ -37,4 +37,31 @@ class ReportService {
     });
     await batch.commit();
   }
+
+  /// Reports a person directly rather than a specific post — the voice
+  /// room's "Report" action (room_profile_sheet.dart), available to a
+  /// room's host/moderator against any other participant. No counter to
+  /// bump here (unlike [reportPost]'s moments/{postId}.reportCount) —
+  /// there's no per-user document in this app to keep one on.
+  static Future<void> reportUser({
+    required String reportedUserId,
+    String? roomId,
+    required ReportReason reason,
+    String? details,
+  }) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || reportedUserId.isEmpty) {
+      throw StateError('You must be signed in to report someone.');
+    }
+
+    final report = ReportModel(
+      reporterId: uid,
+      reportedUserId: reportedUserId,
+      roomId: roomId,
+      reason: reason,
+      details: details,
+    );
+
+    await FirebaseFirestore.instance.collection('reports').add(report.toMap());
+  }
 }

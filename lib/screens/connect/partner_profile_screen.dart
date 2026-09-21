@@ -18,7 +18,7 @@ import '../../widgets/moment_card.dart';
 import '../../widgets/profile_map_header.dart';
 import '../hellotalk/chat_detail_screen.dart';
 import '../me/follow_list_screen.dart';
-import '../voiceroom/voice_room_detail_screen.dart';
+import '../voiceroom/open_voice_room.dart';
 
 /// Full profile screen designed according to the modern HelloTalk profile spec:
 /// - Top geographic map banner with city, country, and dynamic local time.
@@ -722,13 +722,7 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
 
           // "Go Look" Action Button
           ElevatedButton(
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => VoiceRoomDetailScreen(room: room),
-                ),
-              );
-            },
+            onPressed: () => openVoiceRoom(context, room),
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF6B47EB),
               foregroundColor: Colors.white,
