@@ -2,12 +2,14 @@ import 'dart:typed_data';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../data/countries.dart';
 import '../../models/user.dart';
 import '../../services/auth_service.dart';
 import '../../services/storage_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
 import '../../widgets/auth_widgets.dart';
+import '../../widgets/country_picker_sheet.dart';
 
 /// Lets the signed-in user edit their own profile (Firestore
 /// `users/{uid}` document). Pops with the updated AppUser on success so
@@ -27,6 +29,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   late final TextEditingController _detailController;
   late String _nativeLang;
   late String _learningLang;
+  late Country? _selectedCountry;
   late String? _avatarUrl;
   bool _loading = false;
   bool _uploadingPhoto = false;
@@ -56,6 +59,25 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _learningLang = _languages.contains(widget.user.learningLang)
         ? widget.user.learningLang
         : _languages[1];
+    _selectedCountry = _countryFromFlag(widget.user.countryFlag);
+  }
+
+  /// Reverses AppUser.countryFlag (a plain emoji string — see
+  /// data/countries.dart's own doc comment for why the model stores it
+  /// that way rather than a country code) back into the Country the
+  /// picker needs to show as already-selected. Null for an account with
+  /// no flag set yet (pre-dates the signup country step, or skipped it).
+  Country? _countryFromFlag(String flag) {
+    if (flag.isEmpty) return null;
+    for (final c in countries) {
+      if (c.flagEmoji == flag) return c;
+    }
+    return null;
+  }
+
+  Future<void> _pickCountry() async {
+    final picked = await showCountryPickerSheet(context);
+    if (picked != null && mounted) setState(() => _selectedCountry = picked);
   }
 
   @override
@@ -112,6 +134,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         if (_isTeacher) 'detail': _detailController.text.trim(),
         'nativeLang': _nativeLang,
         'learningLang': _learningLang,
+        if (_selectedCountry != null) 'countryFlag': _selectedCountry!.flagEmoji,
         if (_avatarUrl != null) 'avatarUrl': _avatarUrl,
       });
       if (!mounted) return;
@@ -239,6 +262,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     ),
                   ),
                 ],
+              ),
+              const SizedBox(height: 16),
+              CountryField(
+                label: 'Country',
+                value: _selectedCountry,
+                onTap: _pickCountry,
               ),
               const SizedBox(height: 28),
               AuthPrimaryButton(

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Supplies the FileProvider paths resource that image_picker_android's own
+  manifest references (at xml/flutter_image_picker_file_paths). The plugin
+  ships this resource inside its own AAR, but AAPT2 can fail to link it on
+  release builds in this project's toolchain combo (AGP 8.9.1, Kotlin
+  2.1.0, Gradle 8.11.1), even though the exact same code builds fine in
+  debug: "AAPT error, resource xml/flutter_image_picker_file_paths not
+  found" during processReleaseResources. Declaring it directly in the app
+  module sidesteps that AAR resource linking bug entirely; the paths below
+  cover the directories image_picker actually writes picked or cropped
+  images to.
+-->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <cache-path name="my_cache_images" path="." />
+    <external-path name="my_images" path="." />
+    <external-files-path name="my_images" path="." />
+    <external-cache-path name="my_cache_images" path="." />
+</paths>

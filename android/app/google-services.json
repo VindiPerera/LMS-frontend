@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "867397619439",
+    "project_id": "hello-52f9b",
+    "storage_bucket": "hello-52f9b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:867397619439:android:4d7b97f84ce616918c951a",
+        "android_client_info": {
+          "package_name": "com.jaan.FaceTalk_clone"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD5vjGEQp0GcyTsE82ebxynuDvKXWnUalU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

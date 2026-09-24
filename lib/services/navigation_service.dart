@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
 
+import '../screens/friends/friend_profile_screen.dart';
+import '../screens/hellotalk/chat_detail_screen.dart';
 import '../screens/moments/post_detail_screen.dart';
+import '../screens/voiceroom/open_voice_room.dart' as voice_room_nav;
+import 'partner_service.dart';
+import 'voice_room_service.dart';
 
 /// A global [NavigatorState] key, assigned to `MaterialApp.navigatorKey` in
 /// main.dart. Needed because push notifications can be tapped while there's
@@ -21,5 +26,60 @@ class NavigationService {
     navigator.push(
       MaterialPageRoute(builder: (_) => PostDetailScreen(postId: postId)),
     );
+  }
+
+  /// Deep-links to a 1:1 chat thread with [otherUid], e.g. from a tapped
+  /// "new message" push notification. ChatDetailScreen needs the other
+  /// user's full profile (not just their uid), so this does one Firestore
+  /// read first — fire-and-forget from the notification tap handler, same
+  /// as [openPost].
+  static Future<void> openChat(String otherUid) async {
+    if (otherUid.isEmpty) return;
+    final navigator = navigatorKey.currentState;
+    if (navigator == null) return;
+    try {
+      final user = await PartnerService.fetchPartner(otherUid);
+      navigator.push(
+        MaterialPageRoute(builder: (_) => ChatDetailScreen(user: user)),
+      );
+    } catch (e) {
+      debugPrint('NavigationService.openChat($otherUid) failed: $e');
+    }
+  }
+
+  /// Deep-links to [uid]'s profile — friend request/accept notifications by
+  /// default ([source] 'notification'), or a QR/link tap (deep_link_service
+  /// .dart passes 'link'). FriendProfileScreen loads the user itself, so no
+  /// fetch needed here.
+  static void openFriendProfile(String uid, {String source = 'notification'}) {
+    if (uid.isEmpty) return;
+    final navigator = navigatorKey.currentState;
+    if (navigator == null) return;
+    navigator.push(
+      MaterialPageRoute(
+        builder: (_) => FriendProfileScreen(friendId: uid, source: source),
+      ),
+    );
+  }
+
+  /// Deep-links to voice room [roomId] — from a Voice Room invite
+  /// notification. Fetches the room first since VoiceRoomDetailScreen needs
+  /// the full [VoiceRoom], not just its id; silently no-ops if the room
+  /// already ended by the time the notification is tapped. Goes through
+  /// screens/voiceroom/open_voice_room.dart like every other "open this
+  /// room" entry point in the app, so a still-banned user gets the same
+  /// "you can't join this room" dialog here too instead of the room
+  /// briefly flashing open from a tapped notification.
+  static Future<void> openVoiceRoom(String roomId) async {
+    if (roomId.isEmpty) return;
+    final context = navigatorKey.currentContext;
+    if (context == null) return;
+    try {
+      final room = await VoiceRoomService.fetchRoom(roomId);
+      if (room == null || !context.mounted) return;
+      await voice_room_nav.openVoiceRoom(context, room);
+    } catch (e) {
+      debugPrint('NavigationService.openVoiceRoom($roomId) failed: $e');
+    }
   }
 }

@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
@@ -7,8 +6,6 @@ import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
-import 'package:video_compress/video_compress.dart';
-import 'package:video_thumbnail/video_thumbnail.dart' as vt;
 
 import '../config/api_config.dart';
 
@@ -23,10 +20,6 @@ class MediaService {
 
   static Future<XFile?> pickImage(ImageSource source) {
     return _picker.pickImage(source: source, imageQuality: 95);
-  }
-
-  static Future<XFile?> pickVideo(ImageSource source) {
-    return _picker.pickVideo(source: source, maxDuration: const Duration(minutes: 5));
   }
 
   // --------------------------------------------------------------------
@@ -51,37 +44,6 @@ class MediaService {
     }
   }
 
-  /// Compresses a picked video with video_compress. Returns the original
-  /// [file] unchanged if compression fails for any reason so a post never
-  /// gets stuck just because compression didn't work on this device.
-  static Future<File> compressVideo(File file) async {
-    try {
-      final info = await VideoCompress.compressVideo(
-        file.path,
-        quality: VideoQuality.MediumQuality,
-        deleteOrigin: false,
-      );
-      return info?.file ?? file;
-    } catch (_) {
-      return file;
-    }
-  }
-
-  /// First frame of [videoPath] as JPEG bytes, for the feed/thumbnail-row
-  /// preview and as the `videoThumbnailUrl` upload.
-  static Future<Uint8List?> generateVideoThumbnail(String videoPath) async {
-    try {
-      return await vt.VideoThumbnail.thumbnailData(
-        video: videoPath,
-        imageFormat: vt.ImageFormat.JPEG,
-        maxWidth: 480,
-        quality: 70,
-      );
-    } catch (_) {
-      return null;
-    }
-  }
-
   // --------------------------------------------------------------------
   // Upload
   // --------------------------------------------------------------------
@@ -101,41 +63,6 @@ class MediaService {
       postId: postId,
       type: 'image',
       onProgress: onProgress,
-    );
-  }
-
-  static Future<String> uploadVideoFile({
-    required File file,
-    required String uid,
-    required String postId,
-    void Function(double progress)? onProgress,
-  }) async {
-    final bytes = await file.readAsBytes();
-    return _uploadToBackend(
-      bytes: bytes,
-      filename: '${_uuid.v4()}.mp4',
-      extension: 'mp4',
-      contentType: MediaType('video', 'mp4'),
-      uid: uid,
-      postId: postId,
-      type: 'video',
-      onProgress: onProgress,
-    );
-  }
-
-  static Future<String> uploadVideoThumbnail({
-    required Uint8List bytes,
-    required String uid,
-    required String postId,
-  }) {
-    return _uploadToBackend(
-      bytes: bytes,
-      filename: '${_uuid.v4()}_thumb.jpg',
-      extension: 'jpg',
-      contentType: MediaType('image', 'jpeg'),
-      uid: uid,
-      postId: postId,
-      type: 'thumbnail',
     );
   }
 

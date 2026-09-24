@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 import '../../data/mock_data.dart' as mock;
 import '../../models/chat_message.dart';
 import '../../models/user.dart';
+import '../../models/voiceroom.dart';
 import '../../services/chat_service.dart';
 import '../../services/partner_service.dart';
+import '../../services/voice_room_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
 import 'add_contact_screen.dart';
 import 'chat_detail_screen.dart';
+import '../voiceroom/open_voice_room.dart';
 
 class ChatListScreen extends StatefulWidget {
   const ChatListScreen({super.key});
@@ -19,6 +22,7 @@ class ChatListScreen extends StatefulWidget {
 class _ChatListScreenState extends State<ChatListScreen> {
   late final Stream<List<ChatPreview>> _chatsStream =
       ChatService.streamChatPreviews();
+  late final Stream<VoiceRoom?> _myVoiceRoomStream = VoiceRoomService.streamMyActiveRoom();
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   List<AppUser> _onlinePartners = [];
@@ -35,17 +39,25 @@ class _ChatListScreenState extends State<ChatListScreen> {
     super.dispose();
   }
 
+  /// "Active Partners" is meant to show who's genuinely online right now —
+  /// filtering by isOnline here is what actually makes that true, instead
+  /// of just showing any 10 partners with a decorative always-green dot.
+  /// fetchPartners already orders online-first, so a higher limit costs
+  /// little even though most of it gets filtered back out.
   Future<void> _loadOnlinePartners() async {
     try {
-      final partners = await PartnerService.fetchPartners(limit: 10);
+      final partners = await PartnerService.fetchPartners(limit: 30);
+      final online = partners.where((p) => p.isOnline).take(10).toList();
       if (!mounted) return;
       setState(() {
-        _onlinePartners = partners.isNotEmpty ? partners : mock.mockUsers;
+        _onlinePartners = online.isNotEmpty
+            ? online
+            : mock.mockUsers.where((u) => u.isOnline).toList();
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
-        _onlinePartners = mock.mockUsers;
+        _onlinePartners = mock.mockUsers.where((u) => u.isOnline).toList();
       });
     }
   }
@@ -113,6 +125,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
           return CustomScrollView(
             slivers: [
+              // Live Voice Room banner (only shown if user is hosting)
+              SliverToBoxAdapter(
+                child: _LiveVoiceRoomBanner(roomStream: _myVoiceRoomStream),
+              ),
+
               // Search Bar
               SliverToBoxAdapter(
                 child: Padding(
@@ -207,40 +224,28 @@ class _ChatListScreenState extends State<ChatListScreen> {
                               },
                               child: Column(
                                 children: [
-                                  Stack(
-                                    children: [
-                                      Container(
-                                        padding: const EdgeInsets.all(2),
-                                        decoration: BoxDecoration(
-                                          shape: BoxShape.circle,
-                                          border: Border.all(
-                                            color: AppColors.primaryPurple,
-                                            width: 2,
-                                          ),
-                                        ),
-                                        child: AppAvatar.forUser(
-                                          user,
-                                          size: 46,
-                                          showFlag: false,
-                                        ),
+                                  Container(
+                                    padding: const EdgeInsets.all(2),
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: AppColors.primaryPurple,
+                                        width: 2,
                                       ),
-                                      Positioned(
-                                        right: 2,
-                                        bottom: 2,
-                                        child: Container(
-                                          width: 13,
-                                          height: 13,
-                                          decoration: BoxDecoration(
-                                            color: AppColors.online,
-                                            shape: BoxShape.circle,
-                                            border: Border.all(
-                                              color: Colors.white,
-                                              width: 2,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ],
+                                    ),
+                                    // showOnlineDot ties this to the real
+                                    // users/{uid}.isOnline value (kept live
+                                    // by AuthService.setOnlineStatus/
+                                    // main_shell.dart's app-lifecycle
+                                    // observer) instead of a hardcoded dot
+                                    // that showed every row as "online"
+                                    // regardless of actual status.
+                                    child: AppAvatar.forUser(
+                                      user,
+                                      size: 46,
+                                      showFlag: false,
+                                      showOnlineDot: true,
+                                    ),
                                   ),
                                   const SizedBox(height: 6),
                                   SizedBox(
@@ -393,12 +398,26 @@ class _ChatListTile extends StatelessWidget {
         ),
         child: Row(
           children: [
-            // User Avatar with online indicator and country flag
-            AppAvatar.forUser(
-              chat.user,
-              size: 54,
-              showOnlineDot: true,
-              showFlag: true,
+            // User Avatar with online indicator and country flag. The
+            // isOnline on chat.user itself is a denormalized snapshot from
+            // whenever a message was last sent (see ChatService._infoFor,
+            // which doesn't even carry isOnline — it's always the AppUser
+            // default of false) — genuinely live status needs its own
+            // listener, same as chat_detail_screen.dart's header.
+            StreamBuilder<bool>(
+              stream: PartnerService.streamIsOnline(chat.user.id),
+              initialData: chat.user.isOnline,
+              builder: (context, snapshot) {
+                return AppAvatar(
+                  seed: chat.user.name,
+                  size: 54,
+                  showOnlineDot: true,
+                  isOnline: snapshot.data ?? false,
+                  showFlag: true,
+                  flag: chat.user.countryFlag,
+                  imageUrl: chat.user.avatarUrl,
+                );
+              },
             ),
             const SizedBox(width: 14),
 
@@ -507,3 +526,83 @@ class _ChatListTile extends StatelessWidget {
     );
   }
 }
+
+/// Shows a compact purple banner at the top of Chat when the signed-in user
+/// is currently hosting an active Voice Room, with "Return to Room" button.
+class _LiveVoiceRoomBanner extends StatelessWidget {
+  final Stream<VoiceRoom?> roomStream;
+  const _LiveVoiceRoomBanner({required this.roomStream});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<VoiceRoom?>(
+      stream: roomStream,
+      builder: (context, snapshot) {
+        final room = snapshot.data;
+        if (room == null) return const SizedBox.shrink();
+        return GestureDetector(
+          onTap: () => openVoiceRoom(context, room),
+          child: Container(
+            margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF8E2DE2), Color(0xFF4A00E0)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF8E2DE2).withValues(alpha: 0.3),
+                  blurRadius: 8,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.mic_rounded, color: Colors.white, size: 18),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: Colors.redAccent,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Text(
+                    'LIVE',
+                    style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w900),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    room.title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Text(
+                  'Return to Room ›',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+

@@ -1,19 +1,24 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../../data/mock_data.dart';
 import '../../models/moment.dart';
 import '../../models/user.dart';
 import '../../models/voiceroom.dart';
+import '../../services/follow_service.dart';
 import '../../services/moment_service.dart';
 import '../../services/partner_service.dart';
+import '../../services/profile_like_service.dart';
 import '../../services/teacher_service.dart';
+import '../../services/voice_room_service.dart';
 import '../../theme/app_colors.dart';
 import '../../utils/location_helper.dart';
 import '../../widgets/app_avatar.dart';
 import '../../widgets/moment_card.dart';
 import '../../widgets/profile_map_header.dart';
 import '../hellotalk/chat_detail_screen.dart';
-import '../voiceroom/voice_room_detail_screen.dart';
+import '../me/follow_list_screen.dart';
+import '../voiceroom/open_voice_room.dart';
 
 /// Full profile screen designed according to the modern HelloTalk profile spec:
 /// - Top geographic map banner with city, country, and dynamic local time.
@@ -36,42 +41,36 @@ class PartnerProfileScreen extends StatefulWidget {
 
 class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
   late AppUser _user;
-  int _likesCount = 1;
+  int _likesCount = 0;
   bool _isLiked = false;
+  StreamSubscription<bool>? _likeSub;
+  StreamSubscription<int>? _likeCountSub;
   bool _isFollowing = false;
+  StreamSubscription<bool>? _followSub;
   int _selectedTab = 0; // 0: About Me, 1: Moments, 2: Achievements
-  VoiceRoom? _userVoiceRoom;
 
   @override
   void initState() {
     super.initState();
     _user = widget.initial;
-    _findUserVoiceRoom();
     _refresh();
+    _followSub = FollowService.streamIsFollowing(_user.id).listen((following) {
+      if (mounted) setState(() => _isFollowing = following);
+    });
+    _likeSub = ProfileLikeService.streamIsLiked(_user.id).listen((liked) {
+      if (mounted) setState(() => _isLiked = liked);
+    });
+    _likeCountSub = ProfileLikeService.streamLikeCount(_user.id).listen((count) {
+      if (mounted) setState(() => _likesCount = count);
+    });
   }
 
-  void _findUserVoiceRoom() {
-    // Check if the user has an active or created voice room
-    final match = mockVoiceRooms.where((r) =>
-        r.hostName.toLowerCase() == _user.name.toLowerCase() ||
-        r.hostName.toLowerCase().contains(_user.name.toLowerCase()) ||
-        r.isCreator);
-
-    if (match.isNotEmpty) {
-      _userVoiceRoom = match.first;
-    } else if (_user.role == 'teacher' || _user.name.toLowerCase().contains('nushan')) {
-      // Provide active room for demo/teachers
-      _userVoiceRoom = VoiceRoom(
-        title: 'english',
-        hostName: _user.name,
-        hostAvatar: _user.avatarUrl.isNotEmpty ? _user.avatarUrl : _user.name[0],
-        hostFlag: _user.countryFlag.isNotEmpty ? _user.countryFlag : '🇨🇦',
-        category: 'Learning',
-        tag: 'English',
-        participantCount: 14,
-        isCreator: true,
-      );
-    }
+  @override
+  void dispose() {
+    _followSub?.cancel();
+    _likeSub?.cancel();
+    _likeCountSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _refresh() async {
@@ -82,19 +81,54 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
     } catch (_) {}
   }
 
-  void _toggleLike() {
+  Future<void> _toggleLike() async {
     HapticFeedback.lightImpact();
+    final wasLiked = _isLiked;
     setState(() {
-      _isLiked = !_isLiked;
-      _likesCount += _isLiked ? 1 : -1;
+      _isLiked = !wasLiked;
+      _likesCount += _isLiked ? 1 : -1; // optimistic
     });
+
+    try {
+      if (wasLiked) {
+        await ProfileLikeService.unlike(_user.id);
+      } else {
+        await ProfileLikeService.like(_user.id);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLiked = wasLiked; // revert
+        _likesCount += wasLiked ? 1 : -1;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not update like. Try again.')),
+      );
+    }
   }
 
-  void _toggleFollow() {
+  Future<void> _toggleFollow() async {
     HapticFeedback.selectionClick();
-    setState(() {
-      _isFollowing = !_isFollowing;
-    });
+    final wasFollowing = _isFollowing;
+    setState(() => _isFollowing = !wasFollowing); // optimistic
+
+    try {
+      if (wasFollowing) {
+        await FollowService.unfollow(_user.id);
+      } else {
+        await FollowService.follow(_user);
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isFollowing = wasFollowing); // revert
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not update follow status. Try again.')),
+        );
+      }
+      return;
+    }
+
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(_isFollowing ? 'Following ${_user.name}' : 'Unfollowed ${_user.name}'),
@@ -176,26 +210,8 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
                             Positioned(
                               bottom: 2,
                               left: 2,
-                              child: Container(
-                                width: 26,
-                                height: 26,
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(color: Colors.white, width: 1.5),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withValues(alpha: 0.18),
-                                      blurRadius: 4,
-                                    ),
-                                  ],
-                                ),
-                                child: Center(
-                                  child: Text(
-                                    user.countryFlag.isNotEmpty ? user.countryFlag : location.flag,
-                                    style: const TextStyle(fontSize: 14),
-                                  ),
-                                ),
+                              child: CountryFlagBadge(
+                                flag: user.countryFlag.isNotEmpty ? user.countryFlag : location.flag,
                               ),
                             ),
                           ],
@@ -328,11 +344,22 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
 
                         const SizedBox(height: 16),
 
-                        // 6. Created VoiceRoom Card (if user has active/created room)
-                        if (_userVoiceRoom != null) ...[
-                          _buildVoiceRoomCard(_userVoiceRoom!),
-                          const SizedBox(height: 16),
-                        ],
+                        // 6. Created VoiceRoom Card (Firestore live stream)
+                        StreamBuilder<VoiceRoom?>(
+                          stream: VoiceRoomService.streamActiveRoomForUser(
+                            user.id.isNotEmpty ? user.id : '',
+                          ),
+                          builder: (context, snap) {
+                            final room = snap.data;
+                            if (room == null) return const SizedBox.shrink();
+                            return Column(
+                              children: [
+                                _buildVoiceRoomCard(room),
+                                const SizedBox(height: 16),
+                              ],
+                            );
+                          },
+                        ),
 
                         // 7. Self-introduction / Bio
                         Text(
@@ -496,17 +523,45 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
   Widget _buildSocialStatsRow(AppUser user) {
     return Row(
       children: [
-        _statItem('1', 'Following'),
+        StreamBuilder<int>(
+          stream: FollowService.streamFollowingCount(user.id),
+          initialData: 0,
+          builder: (context, snapshot) => _statItem(
+            '${snapshot.data ?? 0}',
+            'Following',
+            onTap: () => _openFollowList(context, user, 0),
+          ),
+        ),
         const SizedBox(width: 18),
-        _statItem('1', 'Followers'),
+        StreamBuilder<int>(
+          stream: FollowService.streamFollowersCount(user.id),
+          initialData: 0,
+          builder: (context, snapshot) => _statItem(
+            '${snapshot.data ?? 0}',
+            'Followers',
+            onTap: () => _openFollowList(context, user, 1),
+          ),
+        ),
         const SizedBox(width: 18),
         _statItem('10d', 'Joined'),
       ],
     );
   }
 
-  Widget _statItem(String number, String label) {
-    return Row(
+  void _openFollowList(BuildContext context, AppUser user, int initialTab) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => FollowListScreen(
+          uid: user.id,
+          userName: user.name,
+          initialTab: initialTab,
+        ),
+      ),
+    );
+  }
+
+  Widget _statItem(String number, String label, {VoidCallback? onTap}) {
+    final content = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
@@ -528,6 +583,8 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
         ),
       ],
     );
+    if (onTap == null) return content;
+    return InkWell(onTap: onTap, borderRadius: BorderRadius.circular(6), child: content);
   }
 
   Widget _buildVoiceRoomCard(VoiceRoom room) {
@@ -647,13 +704,7 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
 
           // "Go Look" Action Button
           ElevatedButton(
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => VoiceRoomDetailScreen(room: room),
-                ),
-              );
-            },
+            onPressed: () => openVoiceRoom(context, room),
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF6B47EB),
               foregroundColor: Colors.white,
@@ -813,6 +864,11 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
 
           if (user.tags.isNotEmpty) ...[
             const SizedBox(height: 14),
+            const Text(
+              'Interest & Hobbies',
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
+            ),
+            const SizedBox(height: 8),
             Wrap(
               spacing: 6,
               runSpacing: 6,

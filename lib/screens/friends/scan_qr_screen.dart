@@ -15,6 +15,7 @@ class ScanQRScreen extends StatefulWidget {
 
 class _ScanQRScreenState extends State<ScanQRScreen> {
   bool _hasScanned = false;
+  bool _resolving = false;
   final MobileScannerController _scannerController = MobileScannerController(
     detectionSpeed: DetectionSpeed.noDuplicates,
     facing: CameraFacing.back,
@@ -38,15 +39,8 @@ class _ScanQRScreenState extends State<ScanQRScreen> {
     _processQrData(rawValue);
   }
 
-  void _processQrData(String rawData) {
-    if (_hasScanned) return;
-
-    final friendId = FriendLinkService.instance.extractFriendId(rawData);
-
-    if (friendId == null || friendId.isEmpty) {
-      _showSnackBar('Invalid QR code scanned');
-      return;
-    }
+  Future<void> _processQrData(String rawData) async {
+    if (_hasScanned || _resolving) return;
 
     // This screen is only reachable once signed in, so currentUser should
     // never be null here — but if Firebase Auth's session ever drops mid-scan,
@@ -58,7 +52,18 @@ class _ScanQRScreenState extends State<ScanQRScreen> {
       return;
     }
 
-    if (friendId == currentUid) {
+    setState(() => _resolving = true);
+    final resolved = await FriendLinkService.instance.resolveCode(rawData);
+    if (!mounted) return;
+
+    if (resolved == null) {
+      setState(() => _resolving = false);
+      _showSnackBar('Invalid QR code scanned');
+      return;
+    }
+
+    if (resolved.uid == currentUid) {
+      setState(() => _resolving = false);
       _showSnackBar("That's your own code!");
       return;
     }
@@ -68,7 +73,7 @@ class _ScanQRScreenState extends State<ScanQRScreen> {
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) => FriendProfileScreen(
-          friendId: friendId,
+          friendId: resolved.uid,
           source: 'qr',
         ),
       ),
@@ -185,6 +190,16 @@ class _ScanQRScreenState extends State<ScanQRScreen> {
                 border: Border.all(color: AppColors.primaryPurple, width: 3),
                 borderRadius: BorderRadius.circular(24),
               ),
+              // Resolving the scanned code against the backend takes a beat
+              // — show that instead of leaving the frame looking stuck.
+              child: _resolving
+                  ? const Center(
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.4,
+                        color: AppColors.primaryPurple,
+                      ),
+                    )
+                  : null,
             ),
           ),
 

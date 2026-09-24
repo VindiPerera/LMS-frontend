@@ -3,6 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:google_sign_in/google_sign_in.dart';
 import '../models/user.dart';
+import 'deep_link_service.dart';
+import 'moment_service.dart';
 import 'push_notification_service.dart';
 
 /// Result of a successful register/login/Google sign-in.
@@ -89,6 +91,11 @@ class AuthService {
     });
 
     _afterSignIn();
+    // Always a brand-new account (unlike login()) — see DeepLinkService.
+    // checkClipboardFallback's doc comment for why this only runs here and
+    // in loginWithGoogle's isNewUser branch, never on an ordinary login.
+    // ignore: discarded_futures
+    DeepLinkService.instance.checkClipboardFallback();
     return (await refreshCurrentUser())!;
   }
 
@@ -101,7 +108,20 @@ class AuthService {
       password: password,
     );
     _afterSignIn();
-    return (await refreshCurrentUser())!;
+    final user = await refreshCurrentUser();
+    if (user == null) {
+      // Auth succeeded but there is no matching Firestore profile — the
+      // account may have been created directly in the Firebase console or
+      // the document was deleted. Sign out so the app doesn't end up in a
+      // half-authenticated state, then surface a clear message.
+      await FirebaseAuth.instance.signOut();
+      throw FirebaseAuthException(
+        code: 'user-not-found',
+        message:
+            'No profile found for this account. Please sign up to create one.',
+      );
+    }
+    return user;
   }
 
   /// "Continue with Google". [role] is only used the first time this Google
@@ -158,6 +178,10 @@ class AuthService {
     }
 
     _afterSignIn();
+    if (isNewUser) {
+      // ignore: discarded_futures
+      DeepLinkService.instance.checkClipboardFallback();
+    }
     return AuthResult((await refreshCurrentUser())!, isNewUser: isNewUser);
   }
 
@@ -176,10 +200,39 @@ class AuthService {
     if (uid == null) throw StateError('Not signed in.');
 
     await _users.doc(uid).update({...fields, 'profileCompleted': true});
+    final updated = (await refreshCurrentUser())!;
+
+    // Old posts embed a snapshot of the author's name/avatar — keep it from
+    // going stale. Fire-and-forget: shouldn't block returning the updated
+    // profile, and it's non-critical if it fails (see
+    // MomentService.updateAuthorInfoAcrossMoments's doc comment).
+    if (fields.containsKey('name') || fields.containsKey('avatarUrl')) {
+      // ignore: discarded_futures
+      MomentService.updateAuthorInfoAcrossMoments(
+        uid: uid,
+        name: updated.name,
+        avatarUrl: updated.avatarUrl,
+      );
+    }
+
+    return updated;
+  }
+
+  /// Settings > Notifications toggle. Unlike [updateProfile], this never
+  /// touches `profileCompleted` — flipping a notification preference isn't
+  /// "finishing your profile".
+  Future<AppUser> setVoiceRoomNotificationsEnabled(bool enabled) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) throw StateError('Not signed in.');
+
+    await _users.doc(uid).update({'voiceRoomNotificationsEnabled': enabled});
     return (await refreshCurrentUser())!;
   }
 
   Future<void> logout() async {
+    // Before signOut() clears FirebaseAuth.instance.currentUser — otherwise
+    // setOnlineStatus has no uid left to write to.
+    await setOnlineStatus(false);
     await FirebaseAuth.instance.signOut();
     try {
       await GoogleSignIn().signOut();
@@ -195,6 +248,32 @@ class AuthService {
   void _afterSignIn() {
     // ignore: discarded_futures
     PushNotificationService.instance.initialize();
+    // ignore: discarded_futures
+    setOnlineStatus(true);
+  }
+
+  /// Marks the signed-in user online/offline — see main_shell.dart's
+  /// WidgetsBindingObserver, which calls this on every app foreground/
+  /// background transition, plus [_afterSignIn]/[logout] for sign-in/out.
+  ///
+  /// Known gap: Firestore has no built-in "disconnect" detection (unlike
+  /// Realtime Database's onDisconnect()), so an abrupt kill/crash — as
+  /// opposed to a normal background/logout — leaves `isOnline: true`
+  /// stuck until the next lifecycle event flips it back. `lastSeenAt` is
+  /// written alongside it so a "stale after N minutes" check could paper
+  /// over that later if it matters; nothing currently reads it.
+  Future<void> setOnlineStatus(bool online) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      await _users.doc(uid).update({
+        'isOnline': online,
+        'lastSeenAt': FieldValue.serverTimestamp(),
+      });
+    } catch (_) {
+      // Offline, or the profile doc doesn't exist yet — non-critical, the
+      // next successful call catches up.
+    }
   }
 
   /// Build a unique @handle from a display name, e.g. "Vinuk Lakvindu" ->

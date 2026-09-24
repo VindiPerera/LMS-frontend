@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'navigation_service.dart';
+import 'notification_api_service.dart';
 
 /// Web Push certificate key, from Firebase Console → Project settings →
 /// Cloud Messaging → "Web configuration" → Generate key pair. Only needed
@@ -18,6 +19,20 @@ const AndroidNotificationChannel _momentsChannel = AndroidNotificationChannel(
   'moments_channel',
   'Moments',
   description: 'Likes, comments, reshares and mentions on your moments.',
+  importance: Importance.high,
+);
+
+const AndroidNotificationChannel _chatChannel = AndroidNotificationChannel(
+  'chat_channel',
+  'Messages',
+  description: 'New chat messages from your language partners.',
+  importance: Importance.high,
+);
+
+const AndroidNotificationChannel _socialChannel = AndroidNotificationChannel(
+  'social_channel',
+  'Friends & Voice Rooms',
+  description: 'Friend requests, accepted requests, and Voice Room invites.',
   importance: Importance.high,
 );
 
@@ -43,6 +58,13 @@ class PushNotificationService {
 
   final _localNotifications = FlutterLocalNotificationsPlugin();
   bool _initialized = false;
+
+  /// The chat thread the user currently has open, if any — set/cleared by
+  /// chat_detail_screen.dart. Lets [_showForegroundNotification] skip
+  /// popping up a banner for a message that's already visible on screen.
+  String? activeChatId;
+
+  void setActiveChat(String? chatId) => activeChatId = chatId;
 
   Future<void> initialize() async {
     if (_initialized) return;
@@ -111,21 +133,43 @@ class PushNotificationService {
         .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>();
     await androidPlugin?.createNotificationChannel(_momentsChannel);
+    await androidPlugin?.createNotificationChannel(_chatChannel);
+    await androidPlugin?.createNotificationChannel(_socialChannel);
+  }
+
+  AndroidNotificationChannel _channelFor(String? type) {
+    switch (type) {
+      case 'chat':
+        return _chatChannel;
+      case 'friendRequest':
+      case 'friendAccept':
+      case 'voiceroom':
+        return _socialChannel;
+      default:
+        return _momentsChannel;
+    }
   }
 
   Future<void> _showForegroundNotification(RemoteMessage message) async {
     final notification = message.notification;
     if (notification == null) return;
 
+    final type = message.data['type'];
+    // Already looking at this exact thread — the message is showing up in
+    // the chat itself in real time, a system banner on top would just be
+    // noise.
+    if (type == 'chat' && message.data['chatId'] == activeChatId) return;
+
+    final channel = _channelFor(type);
     await _localNotifications.show(
       id: message.hashCode,
       title: notification.title,
       body: notification.body,
       notificationDetails: NotificationDetails(
         android: AndroidNotificationDetails(
-          _momentsChannel.id,
-          _momentsChannel.name,
-          channelDescription: _momentsChannel.description,
+          channel.id,
+          channel.name,
+          channelDescription: channel.description,
           importance: Importance.high,
           priority: Priority.high,
         ),
@@ -136,9 +180,37 @@ class PushNotificationService {
   }
 
   void _openFromData(Map<String, String> data) {
-    final postId = data['postId'];
-    if (postId != null && postId.isNotEmpty) {
-      NavigationService.openPost(postId);
+    switch (data['type']) {
+      case 'chat':
+        final senderId = data['senderId'];
+        if (senderId != null && senderId.isNotEmpty) {
+          NavigationService.openChat(senderId);
+        }
+        return;
+
+      case 'friendRequest':
+      case 'friendAccept':
+        final actorId = data['actorId'];
+        if (actorId != null && actorId.isNotEmpty) {
+          NavigationService.openFriendProfile(actorId);
+        }
+        return;
+
+      case 'voiceroom':
+        final roomId = data['roomId'];
+        if (roomId != null && roomId.isNotEmpty) {
+          NavigationService.openVoiceRoom(roomId);
+        }
+        return;
+
+      default:
+        // Moments (like/comment/reshare/mention) — the only types that
+        // predate `type` being sent at all, so also fall back to a bare
+        // postId with no type for backwards compatibility.
+        final postId = data['postId'];
+        if (postId != null && postId.isNotEmpty) {
+          NavigationService.openPost(postId);
+        }
     }
   }
 
@@ -153,5 +225,10 @@ class PushNotificationService {
     } catch (_) {
       // Non-critical — the user just won't be reachable by push yet.
     }
+    // This is the copy that actually matters now — NotificationApiService
+    // (hello-backend) is what sends pushes, not Firestore/Cloud Functions.
+    // The write above is kept too: harmless, and picks up automatically if
+    // Cloud Functions ever get deployed later.
+    await NotificationApiService.saveToken(uid: uid, token: token);
   }
 }

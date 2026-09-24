@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../data/countries.dart';
 import '../theme/app_colors.dart';
 
 /// Shared text field styling for auth screens (login/signup/profile).
@@ -259,6 +260,75 @@ class LanguageDropdown extends StatelessWidget {
               onChanged: (v) {
                 if (v != null) onChanged(v);
               },
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Label + tappable field for choosing a country — same visual shape as
+/// [LanguageDropdown], just backed by widgets/country_picker_sheet.dart's
+/// searchable sheet ([onTap]) instead of a plain DropdownButton, since the
+/// full country list is far too long to browse without a search box.
+class CountryField extends StatelessWidget {
+  final String label;
+  final Country? value;
+  final VoidCallback onTap;
+
+  const CountryField({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: AppColors.textPrimary,
+          ),
+        ),
+        const SizedBox(height: 8),
+        GestureDetector(
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceLight,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Row(
+              children: [
+                if (value != null) ...[
+                  Text(value!.flagEmoji, style: const TextStyle(fontSize: 18)),
+                  const SizedBox(width: 8),
+                ],
+                Expanded(
+                  child: Text(
+                    value?.name ?? 'Select your country',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: value != null
+                          ? AppColors.textPrimary
+                          : AppColors.textTertiary,
+                    ),
+                  ),
+                ),
+                const Icon(
+                  Icons.keyboard_arrow_down_rounded,
+                  color: AppColors.textTertiary,
+                ),
+              ],
             ),
           ),
         ),

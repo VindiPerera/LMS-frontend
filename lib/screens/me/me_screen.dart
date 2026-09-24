@@ -2,15 +2,25 @@ import 'package:flutter/material.dart';
 import '../../data/mock_data.dart' as mock;
 import '../../models/moment.dart';
 import '../../models/user.dart';
+import '../../models/voiceroom.dart';
 import '../../services/auth_service.dart';
+import '../../services/exchange_rate_service.dart';
+import '../../services/follow_service.dart';
 import '../../services/moment_service.dart';
+import '../../services/payment_api_service.dart';
+import '../../services/voice_room_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
+import '../../widgets/payment_method_sheet.dart';
 import '../auth/splash_screen.dart';
 import '../friends/my_qr_code_screen.dart';
 import '../moments/user_moments_screen.dart';
+import '../voiceroom/open_voice_room.dart';
 import 'course_detail_sheet.dart';
 import 'edit_profile_screen.dart';
+import 'follow_list_screen.dart';
+import 'notification_settings_screen.dart';
+import 'vip_calendar_screen.dart';
 
 class MeScreen extends StatefulWidget {
   const MeScreen({super.key});
@@ -33,6 +43,10 @@ class _MeScreenState extends State<MeScreen> {
     AuthService.instance.refreshCurrentUser().then((_) {
       if (mounted) setState(() {});
     });
+    // Pre-warms the USD/LKR rate _VipBenefitsCard prices off of, so it's
+    // usually already loaded by the time the user opens the VIP sheet.
+    // ignore: discarded_futures
+    ExchangeRateService.instance.ensureLoaded();
   }
 
   Future<void> _editProfile() async {
@@ -46,16 +60,35 @@ class _MeScreenState extends State<MeScreen> {
   Widget build(BuildContext context) {
     final user = _user;
     return Scaffold(
+      appBar: AppBar(
+        backgroundColor: AppColors.background,
+        elevation: 0,
+        automaticallyImplyLeading: false,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings_outlined, color: AppColors.textPrimary),
+            tooltip: 'Notification settings',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const NotificationSettingsScreen()),
+            ),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.fromLTRB(14, 8, 14, 24),
           children: [
-            _TopBar(),
-            const SizedBox(height: 14),
             _VipPromoBanner(),
             const SizedBox(height: 18),
             _ProfileHeader(user: user, onEdit: _editProfile),
+            const SizedBox(height: 14),
+            _VipMembershipBanner(),
+            if (user.tags.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              _InterestsSection(tags: user.tags),
+            ],
             const SizedBox(height: 18),
+            _MyVoiceRoomBanner(),
             Row(
               children: [
                 Expanded(
@@ -74,6 +107,10 @@ class _MeScreenState extends State<MeScreen> {
             ),
             const SizedBox(height: 12),
             _MomentsRow(user: user),
+            if (user.isVip) ...[
+              const SizedBox(height: 12),
+              _VipCalendarRow(user: user),
+            ],
             // const SizedBox(height: 18),
             // _VipBenefitsCard(),
             const SizedBox(height: 22),
@@ -92,72 +129,29 @@ class _MeScreenState extends State<MeScreen> {
   }
 }
 
-class _TopBar extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        _pillBadge('HT', '0'),
-        const SizedBox(width: 10),
-        _circleIcon(Icons.storefront_outlined),
-        const SizedBox(width: 10),
-        _circleIcon(Icons.shopping_bag_outlined),
-        const Spacer(),
-        _circleIcon(Icons.ios_share_rounded),
-        const SizedBox(width: 10),
-        _circleIcon(Icons.settings_outlined),
-      ],
-    );
-  }
-
-  Widget _pillBadge(String text, String count) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceLight,
-        borderRadius: BorderRadius.circular(20),
+/// Opens the VIP benefits comparison sheet (_VipBenefitsCard) — shared by
+/// every "see VIP benefits" entry point on this screen (_VipPromoBanner's
+/// "View Now" and _VipMembershipBanner's "VIP Benefits" button) so they
+/// stay in sync instead of each carrying their own copy of this same
+/// modal-sheet boilerplate.
+void _showVipBenefitsSheet(BuildContext context) {
+  showModalBottomSheet(
+    context: context,
+    backgroundColor: Colors.transparent,
+    isScrollControlled: true,
+    builder: (context) => Padding(
+      padding: const EdgeInsets.all(16.0),
+      // The benefits list is taller than some screens, so this
+      // caps the sheet below full height and lets it scroll
+      // instead of overflowing off the bottom.
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.85,
+        ),
+        child: SingleChildScrollView(child: _VipBenefitsCard()),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 18,
-            height: 18,
-            decoration: const BoxDecoration(
-              color: AppColors.vipGold,
-              shape: BoxShape.circle,
-            ),
-            alignment: Alignment.center,
-            child: const Text(
-              'HT',
-              style: TextStyle(
-                fontSize: 7,
-                fontWeight: FontWeight.w800,
-                color: Colors.black,
-              ),
-            ),
-          ),
-          const SizedBox(width: 6),
-          Text(
-            count,
-            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _circleIcon(IconData icon) {
-    return Container(
-      width: 38,
-      height: 38,
-      decoration: const BoxDecoration(
-        color: AppColors.surfaceLight,
-        shape: BoxShape.circle,
-      ),
-      child: Icon(icon, size: 18),
-    );
-  }
+    ),
+  );
 }
 
 class _VipPromoBanner extends StatelessWidget {
@@ -182,16 +176,7 @@ class _VipPromoBanner extends StatelessWidget {
             ),
           ),
           GestureDetector(
-            onTap: () {
-              showModalBottomSheet(
-                context: context,
-                backgroundColor: Colors.transparent,
-                builder: (_) => Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: _VipBenefitsCard(),
-                ),
-              );
-            },
+            onTap: () => _showVipBenefitsSheet(context),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
               decoration: BoxDecoration(
@@ -206,6 +191,152 @@ class _VipPromoBanner extends StatelessWidget {
                   fontSize: 12.5,
                 ),
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The "FaceTalk VIP Membership" card shown directly under the user's own
+/// profile picture/name/Edit row (_ProfileHeader) — a short, glanceable
+/// highlight reel of a few VIP perks with its own "VIP Benefits" button,
+/// distinct from _VipPromoBanner above (a plain text-link-style nudge sitting
+/// above the profile picture, left as-is). Both open the exact same
+/// _VipBenefitsCard sheet (_showVipBenefitsSheet) — this card is just a
+/// second, more visually prominent entry point to it, matching the
+/// dark purple/blue gradient "membership card" look of similar VIP promos
+/// elsewhere in the app (see _MyVoiceRoomBanner's own gradient below) rather
+/// than introducing a brand new color language.
+class _VipMembershipBanner extends StatelessWidget {
+  static const _gold = Color(0xFFFFC857);
+  static const _goldText = Color(0xFF3A1F00);
+
+  static const _benefits = [
+    'Unlimited Talk Time for 01 Month',
+    'White Board JPG uploading',
+    'White Board Text typing',
+    'Subtitles on and read',
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF2B1B6B), Color(0xFF4A00E0), Color(0xFF00B4DB)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: RichText(
+                  text: const TextSpan(
+                    children: [
+                      TextSpan(
+                        text: 'FaceTalk ',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 17),
+                      ),
+                      TextSpan(
+                        text: 'VIP',
+                        style: TextStyle(
+                          color: _gold,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 17,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                      TextSpan(
+                        text: ' Membership',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 17),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Benefits',
+                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13.5),
+                    ),
+                    const SizedBox(height: 8),
+                    for (final benefit in _benefits) _BenefitLine(text: benefit),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(color: _gold, borderRadius: BorderRadius.circular(8)),
+                child: const Text(
+                  'VIP+',
+                  style: TextStyle(color: _goldText, fontWeight: FontWeight.w900, fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          // width: double.infinity + a plain Container (no fixed height)
+          // under the GestureDetector keeps the whole pill tappable
+          // edge-to-edge and lets it size itself naturally at any screen
+          // width, rather than a narrow/fixed-size hit target.
+          GestureDetector(
+            onTap: () => _showVipBenefitsSheet(context),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(colors: [_gold, Color(0xFFFFA53D)]),
+                borderRadius: BorderRadius.circular(24),
+              ),
+              alignment: Alignment.center,
+              child: const Text(
+                'VIP Benefits  ›',
+                style: TextStyle(color: _goldText, fontWeight: FontWeight.w800, fontSize: 14),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BenefitLine extends StatelessWidget {
+  final String text;
+  const _BenefitLine({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.check_circle_rounded, color: Colors.white, size: 15),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.3),
             ),
           ),
         ],
@@ -268,6 +399,15 @@ class _ProfileHeader extends StatelessWidget {
                 ),
               ),
             ),
+            // Set during signup (CreateProfileScreen's country picker) —
+            // empty for any account that signed up before that existed, so
+            // this only shows once there's actually a flag to show.
+            if (user.countryFlag.isNotEmpty)
+              Positioned(
+                bottom: 2,
+                left: -4,
+                child: CountryFlagBadge(flag: user.countryFlag),
+              ),
           ],
         ),
         const SizedBox(width: 14),
@@ -335,27 +475,24 @@ class _ProfileHeader extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Row(
-                children: const [
-                  Text(
-                    '1 ',
-                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-                  ),
-                  Text(
-                    'Following  ',
-                    style: TextStyle(
-                      color: AppColors.textTertiary,
-                      fontSize: 13,
+                children: [
+                  StreamBuilder<int>(
+                    stream: FollowService.streamFollowingCount(user.id),
+                    initialData: 0,
+                    builder: (context, snapshot) => _FollowStat(
+                      count: snapshot.data ?? 0,
+                      label: 'Following',
+                      onTap: () => _openFollowList(context, user, 0),
                     ),
                   ),
-                  Text(
-                    '1 ',
-                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-                  ),
-                  Text(
-                    'Followers',
-                    style: TextStyle(
-                      color: AppColors.textTertiary,
-                      fontSize: 13,
+                  const SizedBox(width: 14),
+                  StreamBuilder<int>(
+                    stream: FollowService.streamFollowersCount(user.id),
+                    initialData: 0,
+                    builder: (context, snapshot) => _FollowStat(
+                      count: snapshot.data ?? 0,
+                      label: 'Followers',
+                      onTap: () => _openFollowList(context, user, 1),
                     ),
                   ),
                 ],
@@ -390,6 +527,105 @@ class _ProfileHeader extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+
+  void _openFollowList(BuildContext context, AppUser user, int initialTab) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => FollowListScreen(
+          uid: user.id,
+          userName: user.name,
+          initialTab: initialTab,
+        ),
+      ),
+    );
+  }
+}
+
+class _FollowStat extends StatelessWidget {
+  final int count;
+  final String label;
+  final VoidCallback onTap;
+
+  const _FollowStat({
+    required this.count,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '$count ',
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+          ),
+          Text(
+            label,
+            style: const TextStyle(color: AppColors.textTertiary, fontSize: 13),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Chips for `AppUser.tags` (picked on select_interests_screen.dart right
+/// after signup) — the signed-in user's own equivalent of the "Interest &
+/// Hobbies" chips shown on partner_profile_screen.dart / friend_profile_
+/// screen.dart for other people.
+class _InterestsSection extends StatelessWidget {
+  final List<String> tags;
+  const _InterestsSection({required this.tags});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Interest & Hobbies',
+            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: tags
+                .map((t) => Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.surfaceLight,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        t,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                    ))
+                .toList(),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -525,6 +761,58 @@ class _MomentsRow extends StatelessWidget {
   }
 }
 
+class _VipCalendarRow extends StatelessWidget {
+  final AppUser user;
+  const _VipCalendarRow({required this.user});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => VipCalendarScreen(user: user)),
+        );
+      },
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: AppColors.card,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: AppColors.vipGold.withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.calendar_month_rounded,
+                color: AppColors.vipGold,
+                size: 18,
+              ),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'VIP membership calendar',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+              ),
+            ),
+            const Icon(
+              Icons.chevron_right_rounded,
+              color: AppColors.textTertiary,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _VipBenefitsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -537,72 +825,158 @@ class _VipBenefitsCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Header uses the same 3/1/1 column split as each benefit row
+          // below, so "Non-VIP"/"VIP" line up exactly over their columns.
           Row(
             children: [
-              const Text('👑', style: TextStyle(fontSize: 16)),
-              const SizedBox(width: 6),
-              Text(
-                'VIP benefits',
-                style: TextStyle(
-                  color: AppColors.vipCardText,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 15,
+              const Expanded(
+                flex: 3,
+                child: Row(
+                  children: [
+                    Text('👑', style: TextStyle(fontSize: 16)),
+                    SizedBox(width: 6),
+                    Text(
+                      'VIP benefits',
+                      style: TextStyle(
+                        color: AppColors.vipCardText,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const Spacer(),
-              Text(
-                'Free',
-                style: TextStyle(
-                  color: AppColors.vipCardText.withValues(alpha: 0.5),
-                  fontWeight: FontWeight.w700,
-                  fontSize: 12,
+              Expanded(
+                flex: 1,
+                child: Text(
+                  'Non-VIP',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: AppColors.vipCardText.withValues(alpha: 0.5),
+                    fontWeight: FontWeight.w700,
+                    fontSize: 11,
+                  ),
                 ),
               ),
-              const SizedBox(width: 26),
-              Text(
-                'VIP',
-                style: TextStyle(
-                  color: AppColors.vipCardText,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 13,
+              Expanded(
+                flex: 1,
+                child: Text(
+                  'VIP',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: AppColors.vipGold,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 12.5,
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 14),
-          _benefitRow('Unlimited Translations', '5 times/day', true),
           const SizedBox(height: 10),
-          _benefitRow('Unlock Visitors page', '—', true),
-          const SizedBox(height: 10),
-          _benefitRow('Search nearby Users', '—', true),
+          Divider(
+            height: 1,
+            thickness: 1,
+            color: AppColors.vipCardText.withValues(alpha: 0.12),
+          ),
+          const SizedBox(height: 12),
+          _benefitRow(
+            'Unlimited AI Translation & Original Subtitles',
+            freeValue: '5 times/day',
+            vipValue: 'Unlimited',
+          ),
+          const SizedBox(height: 12),
+          _benefitRow('Unlock Visitors page'),
+          const SizedBox(height: 12),
+          _benefitRow('Search nearby Users'),
+          const SizedBox(height: 12),
+          _benefitRow('9x Exposure Boost', vipValue: 'Up to 9x'),
+          const SizedBox(height: 12),
+          _benefitRow(
+            'Meet more native speakers',
+            freeValue: '1 of each',
+            vipValue: '3 of each',
+          ),
+          const SizedBox(height: 12),
+          _benefitRow('Unlimited Live & Voiceroom'),
+          const SizedBox(height: 12),
+          _benefitRow('Search around the World'),
+          const SizedBox(height: 12),
+          _benefitRow('Filter Partners by Gender'),
+          const SizedBox(height: 12),
+          _benefitRow(
+            'Get More Language Partners',
+            freeValue: '10/day',
+            vipValue: '25/day',
+          ),
+          const SizedBox(height: 12),
+          _benefitRow('View Nearby Moments'),
           const SizedBox(height: 18),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: () {},
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primaryPurple,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(24),
-                ),
-              ),
-              child: const Text(
-                'See all VIP Features',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 14.5,
-                ),
-              ),
-            ),
+          ValueListenableBuilder<double?>(
+            valueListenable: ExchangeRateService.instance.rate,
+            builder: (context, usdToLkrRate, _) {
+              final plan = VipPlan.thirtyDaysFor(usdToLkrRate);
+              return Column(
+                children: [
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () => _subscribe(context, plan),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primaryPurple,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(24),
+                        ),
+                      ),
+                      child: Text(
+                        'Subscribe — \$${plan.amount.toStringAsFixed(2)} / 30 days',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14.5,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '≈ Rs. ${VipPlan.lkrTargetPrice.toStringAsFixed(0)} at today\'s exchange rate',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.vipCardText.withValues(alpha: 0.6),
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         ],
       ),
     );
   }
 
-  Widget _benefitRow(String label, String freeValue, bool vipCheck) {
+  Future<void> _subscribe(BuildContext context, VipPlan plan) async {
+    // Captured before any pop below — a plain `context` variable stops
+    // being safely usable for widget lookups once the sheet that owns it
+    // closes, but this messenger reference stays valid.
+    final messenger = ScaffoldMessenger.of(context);
+
+    final purchased = await PaymentMethodSheet.show(context, plan: plan);
+    if (purchased != true) return;
+
+    await AuthService.instance.refreshCurrentUser();
+    if (!context.mounted) return;
+    Navigator.of(context).pop(); // close this VIP-benefits sheet too — done.
+    messenger.showSnackBar(
+      const SnackBar(content: Text("🎉 You're VIP for the next 30 days!")),
+    );
+  }
+
+  // `freeValue`/`vipValue` show a plan-specific figure (e.g. "5 times/day",
+  // "Unlimited"); when omitted, the column falls back to a lock (Free — not
+  // included) or a check (VIP — included) icon instead.
+  Widget _benefitRow(String label, {String? freeValue, String? vipValue}) {
     return Row(
       children: [
         Expanded(
@@ -614,21 +988,49 @@ class _VipBenefitsCard extends StatelessWidget {
         ),
         Expanded(
           flex: 1,
-          child: Text(
-            freeValue,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: AppColors.vipCardText.withValues(alpha: 0.45),
-              fontSize: 12.5,
-            ),
+          child: Center(
+            child: freeValue != null
+                ? Text(
+                    freeValue,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.vipCardText.withValues(alpha: 0.45),
+                      fontSize: 12.5,
+                    ),
+                  )
+                : Icon(
+                    Icons.lock_rounded,
+                    color: AppColors.vipCardText.withValues(alpha: 0.35),
+                    size: 15,
+                  ),
           ),
         ),
         Expanded(
           flex: 1,
-          child: Icon(
-            Icons.check_rounded,
-            color: AppColors.vipCardText,
-            size: 18,
+          child: Center(
+            child: vipValue != null
+                ? Text(
+                    vipValue,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.vipGold,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 12.5,
+                    ),
+                  )
+                : Container(
+                    width: 20,
+                    height: 20,
+                    decoration: const BoxDecoration(
+                      color: AppColors.vipGold,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.check_rounded,
+                      color: Colors.white,
+                      size: 14,
+                    ),
+                  ),
           ),
         ),
       ],
@@ -788,6 +1190,121 @@ class _SettingsList extends StatelessWidget {
           );
         }),
       ),
+    );
+  }
+}
+
+/// Banner that appears on the Me tab when the signed-in user is currently
+/// hosting a Voice Room — shows a gradient live card with "End Room" option.
+class _MyVoiceRoomBanner extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<VoiceRoom?>(
+      stream: VoiceRoomService.streamMyActiveRoom(),
+      builder: (context, snapshot) {
+        final room = snapshot.data;
+        if (room == null) return const SizedBox.shrink();
+        return Container(
+          margin: const EdgeInsets.only(bottom: 16),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF8E2DE2), Color(0xFF4A00E0)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF8E2DE2).withValues(alpha: 0.35),
+                blurRadius: 12,
+                offset: const Offset(0, 5),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              // Pulsing mic icon
+              const CircleAvatar(
+                radius: 22,
+                backgroundColor: Colors.white24,
+                child: Icon(Icons.mic_rounded, color: Colors.white, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.redAccent,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Text(
+                            '● LIVE',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '${room.participantCount} listener${room.participantCount == 1 ? '' : 's'}',
+                          style: const TextStyle(color: Colors.white70, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      room.title,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Column(
+                children: [
+                  ElevatedButton(
+                    onPressed: () => openVoiceRoom(context, room),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: AppColors.primaryPurple,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      minimumSize: Size.zero,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text('Go Live', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                  ),
+                  const SizedBox(height: 4),
+                  GestureDetector(
+                    onTap: () async {
+                      await VoiceRoomService.endRoom(room.id);
+                    },
+                    child: const Text(
+                      'End Room',
+                      style: TextStyle(color: Colors.white60, fontSize: 11, decoration: TextDecoration.underline, decorationColor: Colors.white60),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

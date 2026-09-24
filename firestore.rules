@@ -3,17 +3,14 @@ rules_version = '2';
 // ============================================================================
 // FaceTalk — Firestore Security Rules
 // ============================================================================
-// SCOPE WARNING: this file only covers the collections the Moments feature
-// touches — moments/{postId} (+ comments subcollection), notifications,
-// reports, users (read/own-write only), and friendships (read/own-write
-// only, needed for the "friends"-visibility check below). It does NOT cover
-// chats/messages, voicerooms, or partner/connect data used elsewhere in the
-// app. Firestore rules are deny-by-default outside matched paths, so if this
-// project currently has no firestore.rules deployed (it didn't at the time
-// this file was written — Firestore was presumably running on its default
-// console rules), deploying this file as-is WILL break every collection not
-// listed here. Merge this into a complete rules file covering the rest of
-// the app's collections before running `firebase deploy --only firestore:rules`.
+// This is the single, authoritative rules file for this project (deploy
+// with `firebase deploy --only firestore:rules` from this hello-frontend/
+// directory). It covers every collection the app writes to: users (+
+// friend_requests/following/followers/profileLikes subcollections),
+// friendships, moments (+ comments), notifications, reports, chats (+
+// messages), voiceRooms, and voiceRoomInvites. Firestore rules are
+// deny-by-default outside matched paths, so a new collection needs a match
+// block added here before the client can read/write it.
 // ============================================================================
 
 service cloud.firestore {
@@ -60,6 +57,68 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow create, update: if isOwner(uid);
       allow delete: if false;
+
+      // ----------------------------------------------------------------
+      // users/{uid}/friend_requests/{requestId} — written under the
+      // RECIPIENT's uid (`uid` here) by the SENDER (`fromUserId`) — see
+      // FriendService.sendFriendRequest/cancelRequest. Both sides need
+      // some access: the recipient to read/accept/decline their inbox,
+      // the sender to write the initial request and cancel it later.
+      // ------------------------------------------------------------------
+      match /friend_requests/{requestId} {
+        allow read: if isOwner(uid);
+
+        // Without checking fromUserId here, any signed-in user could drop
+        // a friend_requests doc into ANY user's inbox claiming to be from
+        // someone else (spoofing who the request is "from").
+        allow create: if isSignedIn() && request.auth.uid == request.resource.data.fromUserId;
+
+        allow update: if isOwner(uid);
+
+        // The recipient can delete when declining; the original sender
+        // needs this too for "cancel" (FriendService.cancelRequest) —
+        // restricting delete to just the recipient silently breaks
+        // canceling an outgoing request (the whole batch, including the
+        // friendships doc update, fails since batches are all-or-nothing).
+        allow delete: if isOwner(uid) ||
+          (resource != null && request.auth.uid == resource.data.fromUserId);
+      }
+
+      // ------------------------------------------------------------------
+      // users/{uid}/following/{targetUid} — exists iff `uid` follows
+      // `targetUid`. Only the follower (`uid` here) manages their own
+      // following list — see FollowService.follow/unfollow, which writes
+      // this and the mirroring followers/ doc below in one batch.
+      // ------------------------------------------------------------------
+      match /following/{targetUid} {
+        allow read: if isSignedIn();
+        allow create, delete: if isOwner(uid);
+        allow update: if false;
+      }
+
+      // ------------------------------------------------------------------
+      // users/{uid}/followers/{followerUid} — the mirror image, written
+      // under the person being followed (`uid`) by the follower
+      // (`followerUid`) — same "written under the other party" shape as
+      // friend_requests above, with the same spoofing check.
+      // ------------------------------------------------------------------
+      match /followers/{followerUid} {
+        allow read: if isSignedIn();
+        allow create, delete: if isSignedIn() && request.auth.uid == followerUid;
+        allow update: if false;
+      }
+
+      // ------------------------------------------------------------------
+      // users/{uid}/profileLikes/{likerUid} — the thumbs-up "like" button
+      // on partner_profile_screen.dart, exists iff likerUid liked uid's
+      // profile. Same "written under the other party" shape as followers/
+      // above — see ProfileLikeService.
+      // ------------------------------------------------------------------
+      match /profileLikes/{likerUid} {
+        allow read: if isSignedIn();
+        allow create, delete: if isSignedIn() && request.auth.uid == likerUid;
+        allow update: if false;
+      }
     }
 
     // ------------------------------------------------------------------
@@ -167,29 +226,445 @@ service cloud.firestore {
 
     // ------------------------------------------------------------------
     // reports/{reportId} — any signed-in user may file one about someone
-    // else's post; only admins (users/{uid}.role == 'admin') may read them.
+    // else's post (postId set) or directly about another person
+    // (reportedUserId set, e.g. a voice room's "Report" action) — each
+    // branch validates reason against its own taxonomy (ReportReason vs
+    // UserReportReason, see report_model.dart). Only admins
+    // (users/{uid}.role == 'admin') may read them; writes other than
+    // create are otherwise client-blocked — the admin panel's
+    // service-account credential updates status server-side, bypassing
+    // these rules entirely, same precedent as users/{uid} field updates.
     // ------------------------------------------------------------------
     match /reports/{reportId} {
       allow read: if isAdmin();
       allow create: if isSignedIn() &&
         request.resource.data.reporterId == request.auth.uid &&
-        request.resource.data.reason in ['spam', 'inappropriate', 'harassment', 'other'];
+        ((request.resource.data.get('postId', null) != null &&
+          request.resource.data.reason in ['spam', 'inappropriate', 'harassment', 'other']) ||
+         (request.resource.data.get('reportedUserId', null) != null &&
+          request.resource.data.reason in ['languagesMismatch', 'fraud', 'sexualContent', 'abusiveLanguage', 'religiousPoliticalContent', 'other']));
       allow update, delete: if false;
     }
 
     // ------------------------------------------------------------------
     // chats/{chatId} and chats/{chatId}/messages/{messageId}
+    //
+    // Previously `allow create, update: if isSignedIn()` with no ownership
+    // check at all — ANY signed-in user could read, create, or overwrite
+    // ANY other pair's chat thread (messages included), since chatId is
+    // deterministic (ChatService.chatIdFor: sorted uids joined with "_")
+    // and therefore guessable/computable from two known uids. Fixed to
+    // require the caller be one of the thread's two participants, and to
+    // tie chatId itself to those participants so a doc can't be written
+    // under someone else's chatId by supplying a fake `participants` list
+    // client-side (which client code otherwise fully controls).
     // ------------------------------------------------------------------
     match /chats/{chatId} {
-      allow read: if isSignedIn();
-      allow create, update: if isSignedIn();
+      function idMatchesParticipants(participants) {
+        return participants is list && participants.size() == 2 &&
+          chatId == (participants[0] < participants[1]
+            ? participants[0] + '_' + participants[1]
+            : participants[1] + '_' + participants[0]);
+      }
+
+      allow read: if isSignedIn() && request.auth.uid in resource.data.participants;
+
+      allow create: if isSignedIn() &&
+        request.auth.uid in request.resource.data.participants &&
+        idMatchesParticipants(request.resource.data.participants);
+
+      // Participants never change after creation — only per-message fields
+      // (lastMessage, unread.*, participantInfo) do — see ChatService.
+      allow update: if isSignedIn() &&
+        request.auth.uid in resource.data.participants &&
+        request.resource.data.participants == resource.data.participants;
+
       allow delete: if false;
 
       match /messages/{messageId} {
-        allow read: if isSignedIn();
-        allow create: if isSignedIn() && request.resource.data.senderId == request.auth.uid;
+        // Each message also carries its own `participants` snapshot (see
+        // ChatService.sendMessage) so this rule never needs a get() on the
+        // parent doc for participant checks — which would silently fail
+        // closed for the very first message of a brand-new thread, since
+        // get() inside a batched write only ever sees the pre-commit state,
+        // not sibling writes in the same batch. `idMatchesParticipants`
+        // still ties that snapshot back to the real chatId, so it can't be
+        // spoofed.
+        allow read: if isSignedIn() && request.auth.uid in resource.data.participants;
+
+        // Blocks a reply into a broadcast/announcement thread (admin panel
+        // -> hello-backend's FirestoreChatBroadcastService, which sets
+        // isReadOnly: true on the parent chat doc — see ChatService.
+        // systemUid on the Flutter side, which hides the composer for the
+        // same reason but doesn't stop a hand-crafted write without this).
+        //
+        // `!exists(...)` short-circuits the isReadOnly get() for a
+        // brand-new thread (no chat doc yet — ChatService.sendMessage
+        // creates the chat doc and the first message in the same batch, so
+        // that sibling write isn't visible here). Without it, get() on a
+        // not-yet-existing chat doc throws and the whole rule evaluates to
+        // false, rejecting every thread's very first message — including
+        // the "Wave" a user sends the first time they contact someone —
+        // with permission-denied. A brand-new thread was never created
+        // read-only to begin with (only the admin broadcast flow does
+        // that), so treating "doesn't exist yet" as "not read-only" is safe.
+        allow create: if isSignedIn() &&
+          request.resource.data.senderId == request.auth.uid &&
+          request.auth.uid in request.resource.data.participants &&
+          idMatchesParticipants(request.resource.data.participants) &&
+          (!exists(/databases/$(database)/documents/chats/$(chatId)) ||
+            get(/databases/$(database)/documents/chats/$(chatId)).data.get('isReadOnly', false) == false);
+
         allow update, delete: if false;
       }
+    }
+
+    // ------------------------------------------------------------------
+    // voiceRooms/{roomId} — a user's live/active voice room. Every room the
+    // app creates today is public (there is no private-room option in the
+    // UI). `audience` is a denormalized "who may read this room" list —
+    // always `['public']` for a room created now — same pattern as
+    // moments/{postId}.audience above and for the same reason (a list query
+    // needs a matching filter to be provably rule-compliant; see
+    // lib/services/voice_room_service.dart's _audienceKeysForReader). The
+    // rules below still also accept a restricted, non-'public' audience
+    // list purely so any room document written before rooms went
+    // public-only keeps working unchanged. "Ending" a room is a soft update
+    // (isActive: false), never a delete — see voice_room_service.dart.
+    // ------------------------------------------------------------------
+    match /voiceRooms/{roomId} {
+      // `!('audience' in resource.data)` keeps any room document written
+      // before this field existed publicly readable (fail-open to the old
+      // behavior) rather than erroring on a missing map key — every room
+      // created from here on always gets one (see the create rule below).
+      function isInAudience() {
+        return !('audience' in resource.data) ||
+          resource.data.audience.hasAny(['public', request.auth.uid]);
+      }
+
+      // Used by the participants/comments/whiteboard subcollections below:
+      // a room's own audience list gates access to everything inside it
+      // too, not just the room doc itself, otherwise a private room's
+      // roster/chat/whiteboard would stay readable by anyone who somehow
+      // learns its roomId even once they can no longer see the room doc.
+      function canAccessRoom(rid) {
+        let room = get(/databases/$(database)/documents/voiceRooms/$(rid)).data;
+        return !('audience' in room) || room.audience.hasAny(['public', request.auth.uid]);
+      }
+
+      // Whether the caller is still serving a RoomParticipantService.
+      // kickParticipant ban for this room — see the bans/{uid} subcollection
+      // below and the participants/{uid} create rule, which is where this
+      // actually blocks a rejoin. `bannedAt` is always a server timestamp
+      // (enforced on bans/{uid}'s own create rule, never client-supplied),
+      // so this 24h window can't be shortened or bypassed by a client with
+      // a wrong or adversarial clock — only `request.time`, itself
+      // server-authoritative, is ever compared against it.
+      function isBanned(rid) {
+        let banPath = /databases/$(database)/documents/voiceRooms/$(rid)/bans/$(request.auth.uid);
+        return exists(banPath) &&
+          request.time < get(banPath).data.bannedAt + duration.value(24, 'h');
+      }
+
+      allow read: if isSignedIn() && isInAudience();
+
+      // The app always creates `audience: ['public']`. The second branch
+      // (own uid in audience) is only kept so a restricted-audience create
+      // — which the current UI never issues — would still at least include
+      // its own host rather than lock them out of a room the instant it's
+      // created (isInAudience() above wouldn't otherwise match their uid).
+      allow create: if isSignedIn() && request.resource.data.hostId == request.auth.uid &&
+        request.resource.data.audience is list &&
+        (request.resource.data.audience.hasAny(['public']) ||
+          request.auth.uid in request.resource.data.audience);
+
+      // Four distinct writers: the host, who may change anything except
+      // hostId/createdAt; any signed-in participant, who may only adjust
+      // participantCount (RoomParticipantService.join/leave bumping it as
+      // people come and go); a live moderator, who may only flip isActive
+      // (ending the room — see VoiceRoomService.endRoom — so a room can
+      // still be closed once its original host has left, per the Host ->
+      // Moderator handoff); and a listener who was just invited to
+      // moderate (RoomParticipantService.sendModeratorInvite — host-only,
+      // sets moderatorInvitePending:true on the invitee's OWN participant
+      // doc, a write the host branch of participants/{uid}'s update rule
+      // below already permits with no rules change needed), who — ONLY
+      // while that flag is still set on their own participant doc — may
+      // set moderatorUid to their own uid and nothing else. This is what
+      // makes VoiceRoomDetailScreen's Accept button's
+      // RoomParticipantService.promoteToModerator -> VoiceRoomService.
+      // setModerator call work for a self-accepting invitee rather than
+      // permission-denied (only the host could write moderatorUid at all
+      // before this branch existed) — see the matching addition on
+      // participants/{uid}'s update rule, which is what lets that same
+      // Accept flow's OWN role flip to 'moderator' in the first place.
+      allow update: if isSignedIn() && (
+        (resource.data.hostId == request.auth.uid &&
+          request.resource.data.hostId == resource.data.hostId &&
+          request.resource.data.createdAt == resource.data.createdAt) ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['participantCount']) ||
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isActive']) &&
+          get(/databases/$(database)/documents/voiceRooms/$(roomId)/participants/$(request.auth.uid)).data.role == 'moderator') ||
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['moderatorUid']) &&
+          request.resource.data.moderatorUid == request.auth.uid &&
+          get(/databases/$(database)/documents/voiceRooms/$(roomId)/participants/$(request.auth.uid)).data.get('moderatorInvitePending', false) == true)
+      );
+
+      allow delete: if false;
+
+      // ------------------------------------------------------------------
+      // participants/{uid} — who's actually present in this room right now
+      // and their seat/mute state (RoomParticipantService). Replaces the
+      // old boardSpeakers/boardComments mock data in the room screen.
+      // Readable (the live speaker grid) by anyone already in the parent
+      // room's audience — see canAccessRoom() above. On create,
+      // a user may only claim 'host' if they really are this room's host
+      // (per voiceRooms/{roomId}.hostId), otherwise they join as
+      // 'listener' — never 'moderator' or 'speaker' straight out of the
+      // gate (RoomParticipantService.join no longer auto-restores a
+      // rejoining moderator's seat either — see its own doc comment). On
+      // update, a self-write may leave `role` untouched (mic mute/etc.),
+      // move it between 'listener'/'speaker' (requestToSpeak), or
+      // self-promote to 'moderator' specifically when they're already this
+      // room's designated moderatorUid (RoomParticipantService.raiseHand/
+      // acceptStageInvite reclaiming a seat after a rejoin) or have a
+      // pending moderator invite — but never self-promote to 'host'. The
+      // room's host may change any other participant's doc freely
+      // (removeFromStage, promoteToModerator, inviteToStage); a live
+      // moderator may move someone else between 'listener' (removeFromStage)
+      // and 'speaker' (inviteToStage), and may also restore 'moderator'
+      // specifically for the one person already recorded as moderatorUid
+      // (RoomParticipantService.acceptRaisedHand/acceptStageInvite) — never
+      // promote a new, different person to moderator themselves.
+      // ------------------------------------------------------------------
+      match /participants/{uid} {
+        allow read: if isSignedIn() && canAccessRoom(roomId);
+        // canAccessRoom(roomId) is what actually stops a random signed-in
+        // user from joining (creating a participant doc in) a private room
+        // they were never invited to — the host/listener/moderator branches
+        // below only ever govern which *role* a join could claim, not whether
+        // the room itself was joinable at all.
+        //
+        // Three branches:
+        //  1. 'host'     — only the room's original creator (hostId).
+        //  2. 'listener' — anyone else joining cold.
+        //  3. 'moderator'— a user the host previously designated via
+        //     RoomParticipantService.promoteToModerator, whose uid is stored
+        //     on the room doc as `moderatorUid` (see VoiceRoomService
+        //     .setModerator). Without this branch, a moderator who leaves
+        //     cleanly (their participant doc is deleted by leave()) and
+        //     rejoins would be rejected with permission-denied when join()
+        //     tries to recreate their doc with role:'moderator', kicking
+        //     them out entirely instead of restoring their role.
+        allow create: if isSignedIn() && request.auth.uid == uid && request.resource.data.uid == uid &&
+          canAccessRoom(roomId) && !isBanned(roomId) &&
+          ((request.resource.data.role == 'host' &&
+              get(/databases/$(database)/documents/voiceRooms/$(roomId)).data.hostId == request.auth.uid) ||
+            (request.resource.data.role == 'listener' &&
+              get(/databases/$(database)/documents/voiceRooms/$(roomId)).data.hostId != request.auth.uid) ||
+            // Returning moderator: the room doc's `moderatorUid` field must
+            // match the joining user, AND they must not be the original host
+            // (belt-and-suspenders: the host branch already handles that case
+            // and we never want a host to claim moderator role instead).
+            (request.resource.data.role == 'moderator' &&
+              get(/databases/$(database)/documents/voiceRooms/$(roomId)).data.get('moderatorUid', '') == request.auth.uid &&
+              get(/databases/$(database)/documents/voiceRooms/$(roomId)).data.hostId != request.auth.uid));
+        // The `resource.data.get('moderatorInvitePending', false) == true`
+        // arm here is what lets a self-accepting invitee flip their own
+        // role to 'moderator' (VoiceRoomDetailScreen's Accept button ->
+        // RoomParticipantService.promoteToModerator) — sendModeratorInvite
+        // sets that flag (host-only write, via the host branch below —
+        // no rules change needed for the invite itself), and this checks
+        // it on `resource.data` (the doc's state BEFORE this write), so it
+        // stops applying the instant promoteToModerator's own follow-up
+        // clearModeratorInvitePending call clears it. See the matching
+        // arm on voiceRooms/{roomId}'s own update rule, which is what lets
+        // that same Accept flow persist moderatorUid too (without it,
+        // Accept would flip the role but the promotion wouldn't survive a
+        // later leave-and-rejoin).
+        // The third branch's extra `role == 'moderator'` arm is what lets a
+        // moderator-acceptor (not just the host) restore ANOTHER
+        // participant's full moderator role via RoomParticipantService.
+        // acceptRaisedHand/acceptStageInvite's _seatRoleFor — see
+        // room_participant_service.dart's join() doc comment for why a
+        // rejoined moderator's seat isn't auto-restored and instead comes
+        // back through this same accept flow. Narrowly scoped: `uid` (the
+        // target) must already BE this room's own moderatorUid, so this
+        // only ever restores the one person already entitled to the role —
+        // it can never promote a new, arbitrary person, which stays
+        // host-only via the existing promoteToModerator/sendModeratorInvite
+        // self-accept flow (first arm of this same allow, and the
+        // voiceRooms/{roomId} update rule's matching moderatorUid arm).
+        // `!(resource.data.role in ['host', 'moderator'])` on the
+        // moderator-actor branch below is what stops a moderator writing
+        // ANY change (removeFromStage, demoteModeratorToSpeaker, muting)
+        // onto the host's or another moderator's own doc — mirrors the
+        // delete rule's own `!(resource.data.role in ['host',
+        // 'moderator'])` guard just below, which already had this
+        // protection; the update rule was missing its counterpart, letting
+        // a moderator move the host back to the audience via
+        // RoomParticipantService.removeFromStage (room_profile_sheet.dart's
+        // "Remove" pill used to offer this to a moderator with no such
+        // guard client-side either — see its own updated condition).
+        // Doesn't affect the moderator-restore arm just below: that only
+        // ever fires while the target's CURRENT role is 'listener' (a
+        // designated moderator who rejoined but hasn't been reseated yet —
+        // see join()'s doc comment), which already isn't 'host'/'moderator'.
+        allow update: if isSignedIn() &&
+          ((request.auth.uid == uid &&
+              (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']) ||
+                request.resource.data.role in ['listener', 'speaker'] ||
+                (request.resource.data.role == 'moderator' &&
+                  (get(/databases/$(database)/documents/voiceRooms/$(roomId)).data.get('moderatorUid', '') == request.auth.uid ||
+                    resource.data.get('moderatorInvitePending', false) == true)))) ||
+            get(/databases/$(database)/documents/voiceRooms/$(roomId)).data.hostId == request.auth.uid ||
+            (get(/databases/$(database)/documents/voiceRooms/$(roomId)/participants/$(request.auth.uid)).data.role == 'moderator' &&
+              !(resource.data.role in ['host', 'moderator']) &&
+              (request.resource.data.role in ['listener', 'speaker'] ||
+                (request.resource.data.role == 'moderator' &&
+                  uid == get(/databases/$(database)/documents/voiceRooms/$(roomId)).data.get('moderatorUid', '')))));
+        // Self-delete (leaving normally) always works. Anyone else
+        // signed in may also delete a participant doc whose own
+        // heartbeat (lastActiveAt — RoomParticipantService.heartbeat)
+        // has gone stale for 90s+ — this is what lets any client in the
+        // room act as a decentralized janitor for someone who
+        // disconnected without a clean leave() (closed tab, crashed,
+        // lost network), since this project has no server-side sweep.
+        // The 90s threshold is server-time-authoritative here, so a
+        // client can never evict someone who's actually still sending
+        // heartbeats, regardless of what it claims client-side. The host
+        // may also delete anyone's (active or not) doc outright — "Kick
+        // Out" (RoomParticipantService.kickParticipant); a moderator may
+        // do the same only to someone who isn't the host or another
+        // moderator, the same hierarchy the role-update branches above
+        // already enforce.
+        allow delete: if isSignedIn() &&
+          (request.auth.uid == uid ||
+            (resource.data.lastActiveAt is timestamp &&
+              request.time > resource.data.lastActiveAt + duration.value(90, 's')) ||
+            get(/databases/$(database)/documents/voiceRooms/$(roomId)).data.hostId == request.auth.uid ||
+            (get(/databases/$(database)/documents/voiceRooms/$(roomId)/participants/$(request.auth.uid)).data.role == 'moderator' &&
+              !(resource.data.role in ['host', 'moderator'])));
+      }
+
+      // ------------------------------------------------------------------
+      // bans/{uid} — exists iff `uid` was kicked from this room
+      // (RoomParticipantService.kickParticipant) and is still within the
+      // resulting 24h rejoin restriction; see isBanned() above, which is
+      // the actual enforcement (on participants/{uid}'s create rule).
+      // Immutable once written — a ban is never edited or lifted early, it
+      // just stops mattering once `isBanned()` sees 24h have passed — so
+      // there's no update, and no delete either (nothing in this app ever
+      // needs to remove one; an expired doc is simply inert forever after).
+      // ------------------------------------------------------------------
+      match /bans/{uid} {
+        // A banned user can read their own ban doc to show "you can rejoin
+        // in Xh Ym" (see RoomParticipantService.join's pre-check) — nobody
+        // else needs read access here, including other participants.
+        allow read: if isOwner(uid);
+
+        // Same host/moderator-over-non-host-non-moderator hierarchy as the
+        // participants/{uid} delete rule above (a ban is always written
+        // alongside that same delete, in the same batch — see
+        // kickParticipant). `bannedAt == request.time` forces the
+        // timestamp to genuinely be FieldValue.serverTimestamp() rather
+        // than a client-supplied value — otherwise a 24h ban could be
+        // written to already read as expired (backdated) or, the opposite
+        // direction, extended arbitrarily.
+        allow create: if isSignedIn() && request.auth.uid != uid &&
+          request.resource.data.bannedAt == request.time &&
+          (get(/databases/$(database)/documents/voiceRooms/$(roomId)).data.hostId == request.auth.uid ||
+            (get(/databases/$(database)/documents/voiceRooms/$(roomId)/participants/$(request.auth.uid)).data.role == 'moderator' &&
+              get(/databases/$(database)/documents/voiceRooms/$(roomId)/participants/$(uid)).data.role in ['listener', 'speaker']));
+
+        allow update, delete: if false;
+      }
+
+      // ------------------------------------------------------------------
+      // comments/{commentId} — the room board's live comment feed. Anyone
+      // in the parent room's audience can read (see canAccessRoom() above),
+      // but only a current stage participant (host, moderator, or speaker —
+      // never a queued listener) can post; never edited or deleted once
+      // sent.
+      // ------------------------------------------------------------------
+      match /comments/{commentId} {
+        allow read: if isSignedIn() && canAccessRoom(roomId);
+        allow create: if isSignedIn() && request.resource.data.senderId == request.auth.uid &&
+          get(/databases/$(database)/documents/voiceRooms/$(roomId)/participants/$(request.auth.uid)).data.role in ['host', 'moderator', 'speaker'];
+        allow update, delete: if false;
+      }
+
+      // ------------------------------------------------------------------
+      // subtitles/{lineId} — live caption feed (RoomParticipantService.
+      // addSubtitleLine/streamSubtitles). Same shape and same rules as
+      // comments/{commentId} above: a caption is only ever produced by
+      // whoever is actually on stage, readable by anyone in the room's
+      // audience, and immutable once written. No writer exists yet (no
+      // speech-to-text pipeline is wired up) — this just reserves the
+      // access path a future one will use.
+      // ------------------------------------------------------------------
+      match /subtitles/{lineId} {
+        allow read: if isSignedIn() && canAccessRoom(roomId);
+        allow create: if isSignedIn() && request.resource.data.senderId == request.auth.uid &&
+          get(/databases/$(database)/documents/voiceRooms/$(roomId)/participants/$(request.auth.uid)).data.role in ['host', 'moderator', 'speaker'];
+        allow update, delete: if false;
+      }
+
+      // ------------------------------------------------------------------
+      // whiteboard/{itemId} — shared images/text notes on the room's stage
+      // card (WhiteboardService). Anyone in the parent room's audience can
+      // view (see canAccessRoom() above); only the room's host or a live
+      // moderator can add, edit, or remove items.
+      // ------------------------------------------------------------------
+      match /whiteboard/{itemId} {
+        allow read: if isSignedIn() && canAccessRoom(roomId);
+        allow create, update, delete: if isSignedIn() &&
+          get(/databases/$(database)/documents/voiceRooms/$(roomId)/participants/$(request.auth.uid)).data.role in ['host', 'moderator'];
+      }
+
+      // ------------------------------------------------------------------
+      // moderatorInvites/{inviteeUid} — a pending moderator invitation the
+      // host sends to a stage speaker via VoiceRoomService.writeModeratorInvite.
+      // The invitee streams their own doc and sees an Accept/Ignore dialog;
+      // Accept calls RoomParticipantService.promoteToModerator (which also
+      // deletes this doc); Ignore deletes it directly. Only one invite doc
+      // per room exists at a time (always keyed by the invitee's uid).
+      // ------------------------------------------------------------------
+      match /moderatorInvites/{inviteeUid} {
+        // The invitee reads their own pending invitation. Anyone in the room
+        // audience may read (the host needs to verify the invite is still
+        // pending before opening the panel).
+        allow read: if isSignedIn() && canAccessRoom(roomId);
+
+        // Only the room's host may write (create or overwrite) an invite.
+        allow create, update: if isSignedIn() &&
+          get(/databases/$(database)/documents/voiceRooms/$(roomId)).data.hostId == request.auth.uid &&
+          request.resource.data.status == 'pending' &&
+          request.resource.data.invitedBy == request.auth.uid;
+
+        // The invitee may delete (Ignore). The host may also delete
+        // (cancelling the invite, or cleaning up after promotion).
+        allow delete: if isSignedIn() && (
+          request.auth.uid == inviteeUid ||
+          get(/databases/$(database)/documents/voiceRooms/$(roomId)).data.hostId == request.auth.uid
+        );
+      }
+    }
+
+    // ------------------------------------------------------------------
+    // voiceRoomInvites/{inviteId} — a host inviting one specific friend to
+    // their live room. This is a client-writable trigger doc only, not the
+    // notification itself: functions/index.js's onVoiceRoomInviteCreate
+    // turns it into a real notifications/{recipientId}/items entry (Admin
+    // SDK, bypasses rules) — a client can never write directly into
+    // someone else's notification feed, matching every other notification
+    // type in this app.
+    // ------------------------------------------------------------------
+    match /voiceRoomInvites/{inviteId} {
+      allow read: if isSignedIn() &&
+        (request.auth.uid == resource.data.hostId || request.auth.uid == resource.data.recipientId);
+      allow create: if isSignedIn() && request.resource.data.hostId == request.auth.uid;
+      allow update, delete: if false;
     }
   }
 }

@@ -1,6 +1,31 @@
 /**
  * Cloud Functions for FaceTalk's Moments feature.
  *
+ * ⚠️ NOT CURRENTLY DEPLOYED. Deploying Cloud Functions requires the project
+ * to be on Firebase's Blaze (pay-as-you-go) plan — Cloud Functions 2nd gen
+ * needs Cloud Run/Cloud Build/Artifact Registry underneath it, which Google
+ * gates behind having a billing account attached, even though actual usage
+ * at this app's scale would land at ~$0/month. The decision was made to
+ * stay on the free Spark plan instead and not attach billing at all, so
+ * this file is kept as reference/for-later but nothing here runs.
+ *
+ * Concretely, that means: `likeCount`/`commentCount`/`reshareCount`/
+ * `reportCount` are all maintained CLIENT-SIDE instead (see
+ * moment_service.dart, comment_service.dart, report_service.dart) — the
+ * onCommentCreate/onCommentDelete/onReshare/onReportCreate functions below
+ * are redundant with that, not a second source of truth. The profile
+ * name/avatar fan-out (onUserProfileUpdate) also has a client-side
+ * equivalent (MomentService.updateAuthorInfoAcrossMoments). Everything
+ * else here — writing to `notifications/{uid}/items` and sending FCM
+ * pushes for likes/comments/reshares/mentions/chat messages/friend
+ * requests/voice room invites — has NO client-side equivalent and simply
+ * doesn't happen: a client can't write into another user's notifications
+ * feed (firestore.rules only allows the owner to), and sending someone
+ * else a push notification fundamentally requires privileged server-side
+ * credentials that can't safely live in the app. If billing ever gets
+ * turned on, `firebase deploy --only functions` makes all of this live
+ * immediately with no further changes needed.
+ *
  * Schema note: unlike a flat `userId`/`userName`/`userAvatar` shape, this
  * app denormalizes the author onto every moments/comments/notifications doc
  * as a `user`/`actor` object ({ id, name, avatarUrl, ... }) — the same shape
@@ -39,8 +64,28 @@ async function writeNotification(uid, payload) {
   });
 }
 
+/** Maps a notification `type` to one of the three Android channels created
+ * client-side in push_notification_service.dart (all Importance.high) —
+ * must stay in sync with that file's `_channelFor`. */
+function androidChannelFor(type) {
+  if (type === "chat") return "chat_channel";
+  if (type === "friendRequest" || type === "friendAccept" || type === "voiceroom") {
+    return "social_channel";
+  }
+  return "moments_channel"; // like / comment / reshare / mention
+}
+
 /** Sends an FCM push to a single user's registered token, if any. Never
- * throws — a missing/stale token should not fail the triggering write. */
+ * throws — a missing/stale token should not fail the triggering write.
+ *
+ * The `android` block below is not optional decoration: without an
+ * explicit channelId, a backgrounded/terminated app has this notification
+ * rendered by the OS itself (our own foreground handler in
+ * push_notification_service.dart never runs), which falls back to a
+ * generic low-priority system channel — no heads-up popup, no screen
+ * wake, and default (not lock-screen-visible) visibility. Routing it to
+ * one of our own pre-created high-importance channels is what actually
+ * fixes that. */
 async function sendPushToUser(uid, { title, body, data }) {
   if (!uid) return;
   try {
@@ -51,6 +96,21 @@ async function sendPushToUser(uid, { title, body, data }) {
     await getMessaging().send({
       token,
       notification: { title, body },
+      android: {
+        priority: "high",
+        notification: {
+          channelId: androidChannelFor(data && data.type),
+          priority: "max",
+          visibility: "public",
+          defaultSound: true,
+          defaultVibrateTimings: true,
+        },
+      },
+      apns: {
+        payload: {
+          aps: { sound: "default", contentAvailable: true },
+        },
+      },
       data: Object.fromEntries(
         Object.entries(data || {}).map(([k, v]) => [k, String(v)])
       ),
@@ -298,3 +358,150 @@ exports.onReportCreate = onDocumentCreated("reports/{reportId}", async (event) =
     tx.update(postRef, { reportCount: current + 1 });
   });
 });
+
+// ----------------------------------------------------------------------
+// Bonus: onChatMessageCreate — push notification for a new 1:1 chat
+// message. Not part of the original Moments spec, but chat had zero push
+// support (only the in-app unread badge — see chat_service.dart's
+// streamTotalUnread) until this: the recipient now gets notified even while
+// the app is backgrounded or they're sitting on a different tab. No
+// in-app `notifications/{uid}/items` entry is written here on purpose —
+// that feed (notification_screen.dart) is Moments-flavored (renders a
+// post thumbnail, taps open a post) and chat already has its own read/
+// unread model per-thread; mixing the two would need a screen rewrite for
+// no real benefit over the existing chat badge.
+// ----------------------------------------------------------------------
+exports.onChatMessageCreate = onDocumentCreated(
+  "chats/{chatId}/messages/{messageId}",
+  async (event) => {
+    const { chatId } = event.params;
+    const message = event.data.data();
+    if (!message) return;
+
+    const senderId = message.senderId;
+    // sendMessage() (chat_service.dart) stores the sorted participant pair
+    // on every message doc, so the recipient can be read straight off it
+    // without an extra fetch of the parent chat document.
+    const participants = Array.isArray(message.participants) ? message.participants : [];
+    const recipientId = participants.find((id) => id && id !== senderId);
+    if (!recipientId || !senderId) return;
+
+    let senderName = "Someone";
+    try {
+      const chatSnap = await db.collection("chats").doc(chatId).get();
+      senderName = chatSnap.get(`participantInfo.${senderId}.name`) || senderName;
+    } catch (err) {
+      logger.warn(`onChatMessageCreate: couldn't read sender name for chat ${chatId}`, err);
+    }
+
+    const body = message.type === "text" ? truncate(message.text) : "Sent you a message";
+
+    await sendPushToUser(recipientId, {
+      title: senderName,
+      body,
+      data: { type: "chat", chatId, senderId },
+    });
+  }
+);
+
+// ----------------------------------------------------------------------
+// Bonus: onFriendRequestCreate — notifies the recipient of a new friend
+// request. Triggers on users/{uid}/friend_requests/{requestId} — written
+// under the RECIPIENT's own uid by the sender (see
+// FriendService.sendFriendRequest), so `uid` here IS the recipient.
+// ----------------------------------------------------------------------
+exports.onFriendRequestCreate = onDocumentCreated(
+  "users/{uid}/friend_requests/{requestId}",
+  async (event) => {
+    const { uid } = event.params;
+    const request = event.data.data();
+    if (!request?.fromUserId) return;
+
+    const senderSnap = await db.collection("users").doc(request.fromUserId).get();
+    const sender = senderSnap.exists ? senderSnap.data() : {};
+    const senderName = sender?.name || "Someone";
+
+    await writeNotification(uid, {
+      type: "friendRequest",
+      actorId: request.fromUserId,
+      actorName: senderName,
+      actorAvatar: sender?.avatarUrl || "",
+      postId: "",
+    });
+    await sendPushToUser(uid, {
+      title: senderName,
+      body: "sent you a friend request",
+      data: { type: "friendRequest", actorId: request.fromUserId },
+    });
+  }
+);
+
+// ----------------------------------------------------------------------
+// Bonus: onFriendshipAccepted — notifies the original requester once the
+// other side accepts. Triggers on friendships/{docId} update; fires only
+// on the pending -> friends transition (acceptRequest() is the only
+// FriendService method that makes that specific change).
+// ----------------------------------------------------------------------
+exports.onFriendshipAccepted = onDocumentUpdated("friendships/{docId}", async (event) => {
+  const before = event.data.before.data();
+  const after = event.data.after.data();
+  if (!before || !after) return;
+  if (before.status === "friends" || after.status !== "friends") return;
+
+  const requesterId = after.requesterId;
+  const userIds = Array.isArray(after.userIds) ? after.userIds : [];
+  const accepterId = userIds.find((id) => id && id !== requesterId);
+  if (!requesterId || !accepterId) return;
+
+  const accepterSnap = await db.collection("users").doc(accepterId).get();
+  const accepter = accepterSnap.exists ? accepterSnap.data() : {};
+  const accepterName = accepter?.name || "Someone";
+
+  await writeNotification(requesterId, {
+    type: "friendAccept",
+    actorId: accepterId,
+    actorName: accepterName,
+    actorAvatar: accepter?.avatarUrl || "",
+    postId: "",
+  });
+  await sendPushToUser(requesterId, {
+    title: accepterName,
+    body: "accepted your friend request",
+    data: { type: "friendAccept", actorId: accepterId },
+  });
+});
+
+// ----------------------------------------------------------------------
+// Bonus: onVoiceRoomInviteCreate — a host invites one friend to their live
+// room (lib/services/notification_service.dart's inviteToVoiceRoom). The
+// client can only ever write the lightweight `voiceRoomInvites` trigger
+// doc, never the notification itself — same pattern as every other type.
+// ----------------------------------------------------------------------
+exports.onVoiceRoomInviteCreate = onDocumentCreated(
+  "voiceRoomInvites/{inviteId}",
+  async (event) => {
+    const invite = event.data.data();
+    if (!invite?.recipientId || !invite?.roomId) return;
+
+    // Settings > Notifications > Voice Room invites — mirrors the check in
+    // lib/services/notification_service.dart's inviteToVoiceRoom (the
+    // client-side path that actually runs today). Defaults to true when the
+    // field is missing, same as AppUser.fromJson. Skips both the in-app
+    // notification item and the push, so a muted recipient sees neither.
+    const recipientSnap = await db.collection("users").doc(invite.recipientId).get();
+    if (recipientSnap.data()?.voiceRoomNotificationsEnabled === false) return;
+
+    await writeNotification(invite.recipientId, {
+      type: "voiceroom",
+      actorId: invite.hostId || "",
+      actorName: invite.hostName || "Someone",
+      actorAvatar: invite.hostAvatar || "",
+      postId: invite.roomId,
+    });
+    await sendPushToUser(invite.recipientId, {
+      title: invite.hostName || "Someone",
+      body: "invited you to a Voice Room",
+      data: { type: "voiceroom", roomId: invite.roomId },
+    });
+  }
+);

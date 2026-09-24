@@ -1,38 +1,128 @@
-/// Builds and parses the payload behind the "Add Friend via QR Code"
-/// feature (my_qr_code_screen.dart / scan_qr_screen.dart).
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import '../config/api_config.dart';
+import '../models/user.dart';
+
+/// The result of resolving a scanned/tapped FaceTalk deep link — see
+/// [FriendLinkService.resolveCode].
+class ResolvedDeepLink {
+  final String uid;
+  final String? name;
+  final String? handle;
+  final String? avatarUrl;
+
+  const ResolvedDeepLink({
+    required this.uid,
+    this.name,
+    this.handle,
+    this.avatarUrl,
+  });
+}
+
+/// Builds and resolves the short links behind the "Add Friend via QR Code"
+/// feature (my_qr_code_screen.dart / scan_qr_screen.dart) and the tap-to-
+/// open-app flow (deep_link_service.dart).
 ///
-/// NOTE ON DEEP LINKS: this deliberately does NOT use firebase_dynamic_links.
-/// Google shut that service down in August 2025 — it can no longer create or
-/// resolve links at all, so wiring it up would ship a feature that looks
-/// real but silently does nothing. A real tap-to-open-app link (Android App
-/// Links / iOS Universal Links) needs a domain this project controls plus
-/// hosting `.well-known/assetlinks.json` / `apple-app-site-association`
-/// there, neither of which exists yet. Until that infrastructure exists,
-/// `facetalk.app` below is a placeholder — the link is real text you can
-/// copy/share, but won't open the app if tapped outside it. The in-app flow
-/// (share the QR code, or scan it with scan_qr_screen.dart) works today
-/// without any of that. Swap the URL building below for real uriPrefix-based
-/// link generation the day App/Universal Links are set up; every call site
-/// already goes through this one class.
+/// hello-backend (Laravel) mints and resolves the short code — see
+/// DeepLinkController there. This class deliberately does NOT use
+/// firebase_dynamic_links: Google shut that service down in August 2025, so
+/// it can no longer create or resolve links at all. The backend-minted
+/// `https://hellotalk.jaan.lk/u/{code}` link below is a real tap-to-open
+/// link once Android App Links / iOS Universal Links are verified for that
+/// domain (see AndroidManifest.xml's intent-filter and
+/// ios/Runner/Runner.entitlements) — every call site already goes through
+/// this one class, so nothing else needs to change when that happens.
 class FriendLinkService {
   FriendLinkService._();
   static final instance = FriendLinkService._();
 
-  /// Generates this user's shareable "add me" link/QR payload.
-  Future<String> generateFriendLink(String userId) async {
-    return 'https://facetalk.app/add-friend?friendId=$userId&action=add_friend';
+  /// Generates (or reuses) this user's shareable "add me" link/QR payload.
+  /// Idempotent per user — calling this again returns the same permanent
+  /// link, just with a refreshed name/handle/avatar snapshot server-side,
+  /// so an already-shared/printed QR code never breaks.
+  Future<String> generateFriendLink(AppUser user) async {
+    if (user.id.isEmpty) return '';
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/api/deep-links'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'type': 'add_friend',
+          'uid': user.id,
+          'name': user.name,
+          'handle': user.handle,
+          'avatar_url': user.avatarUrl,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final code = data['deepLink']?['code'] as String?;
+        if (code != null && code.isNotEmpty) {
+          return '${ApiConfig.baseUrl}/u/$code';
+        }
+      }
+    } catch (_) {
+      // Offline/backend down — fall through to the local fallback below.
+    }
+
+    // The backend is what makes this a real tap-to-open link (and gives it
+    // a short code) — but if it's unreachable, still hand back *something*
+    // scannable/shareable rather than an empty QR code. scan_qr_screen.dart
+    // understands this shape too (see [resolveCode]).
+    return '${ApiConfig.baseUrl}/add-friend?friendId=${user.id}';
   }
 
-  /// Extracts the friendId from a scanned QR payload. Only understands this
-  /// app's own link format (see [generateFriendLink]) — an arbitrary QR code
-  /// (a URL, a wifi config, a product barcode, ...) is correctly treated as
-  /// "not a FaceTalk code" instead of being guessed at and passed through as
+  /// Resolves a scanned/tapped QR/link back to the user it points at.
+  /// Understands two shapes:
+  ///  - `.../u/{code}` — the real short link, resolved via the backend.
+  ///  - `.../add-friend?friendId=...` — the offline fallback above, which
+  ///    already carries the uid and needs no network round trip.
+  /// Anything else (an arbitrary URL, a wifi config, a product barcode, ...)
+  /// correctly resolves to null instead of being guessed at and treated as
   /// if it were a real user id.
-  String? extractFriendId(String rawValue) {
+  Future<ResolvedDeepLink?> resolveCode(String rawValue) async {
     final uri = Uri.tryParse(rawValue.trim());
     if (uri == null) return null;
+
     final friendId = uri.queryParameters['friendId'];
-    if (friendId == null || friendId.isEmpty) return null;
-    return friendId;
+    if (friendId != null && friendId.isNotEmpty) {
+      return ResolvedDeepLink(uid: friendId);
+    }
+
+    final segments = uri.pathSegments;
+    final uIndex = segments.indexOf('u');
+    if (uIndex == -1 || uIndex + 1 >= segments.length) return null;
+    final code = segments[uIndex + 1];
+    if (code.isEmpty) return null;
+
+    return resolveDeepLinkCode(code);
+  }
+
+  /// Resolves an already-extracted short code (no URL parsing) — used by
+  /// deep_link_service.dart for App/Universal Link taps and Play Install
+  /// Referrer, which both hand over the bare code directly.
+  Future<ResolvedDeepLink?> resolveDeepLinkCode(String code) async {
+    try {
+      final response = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/api/deep-links/$code'),
+      );
+      if (response.statusCode != 200) return null;
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final deepLink = data['deepLink'] as Map<String, dynamic>?;
+      final uid = deepLink?['uid'] as String?;
+      if (uid == null || uid.isEmpty) return null;
+
+      final payload = deepLink?['payload'] as Map<String, dynamic>? ?? {};
+      return ResolvedDeepLink(
+        uid: uid,
+        name: payload['name'] as String?,
+        handle: payload['handle'] as String?,
+        avatarUrl: payload['avatarUrl'] as String?,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 }

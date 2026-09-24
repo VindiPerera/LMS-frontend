@@ -2,6 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../models/notification_model.dart';
+import 'auth_service.dart';
+import 'notification_api_service.dart';
 
 /// Firestore access for `notifications/{uid}/items`. Distinct from
 /// push_notification_service.dart, which owns FCM registration and showing
@@ -55,5 +57,64 @@ class NotificationService {
       batch.update(doc.reference, {'isRead': true});
     }
     await batch.commit();
+  }
+
+  /// Invites [recipientId] to the signed-in user's live (public) voice room.
+  ///
+  /// Still writes a `voiceRoomInvites` doc (harmless, and picks up
+  /// automatically if Cloud Functions ever get deployed later — see that
+  /// collection's firestore.rules comment), but the actual push now goes
+  /// straight through NotificationApiService/hello-backend, since nothing
+  /// is watching that collection to turn it into a push right now.
+  ///
+  /// Every room is public, so [recipientId] can already read/join it
+  /// without anything else changing here — this is purely a "hey, come join
+  /// me" nudge, not an access grant.
+  ///
+  /// The invite itself always goes through (the host still successfully
+  /// invites their friend); only the push is skipped when the recipient has
+  /// turned off Voice Room notifications in Settings, per
+  /// [voiceRoomNotificationsEnabledFor].
+  static Future<void> inviteToVoiceRoom({
+    required String recipientId,
+    required String roomId,
+  }) async {
+    final hostId = _currentUid;
+    final host = AuthService.instance.currentUser;
+    if (hostId == null || host == null || recipientId.isEmpty || roomId.isEmpty) return;
+
+    await FirebaseFirestore.instance.collection('voiceRoomInvites').add({
+      'hostId': hostId,
+      'hostName': host.name,
+      'hostAvatar': host.avatarUrl,
+      'recipientId': recipientId,
+      'roomId': roomId,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+
+    if (!await voiceRoomNotificationsEnabledFor(recipientId)) return;
+
+    // ignore: discarded_futures
+    NotificationApiService.sendPush(
+      recipientUid: recipientId,
+      title: host.name,
+      body: 'invited you to a Voice Room',
+      data: {'type': 'voiceroom', 'roomId': roomId, 'actorId': hostId},
+    );
+  }
+
+  /// Whether [uid] wants to receive Voice Room push notifications — the
+  /// Settings > Notifications toggle (see AuthService.setVoiceRoomNotificationsEnabled).
+  /// Defaults to true (opted in) both when the field is missing (existing
+  /// users who never touched the setting) and if the read itself fails, so a
+  /// transient Firestore error can never silently swallow a real invite.
+  static Future<bool> voiceRoomNotificationsEnabledFor(String uid) async {
+    if (uid.isEmpty) return true;
+    try {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      return doc.data()?['voiceRoomNotificationsEnabled'] != false;
+    } catch (_) {
+      return true;
+    }
   }
 }

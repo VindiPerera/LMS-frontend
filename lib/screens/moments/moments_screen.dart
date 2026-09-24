@@ -214,7 +214,6 @@ class _MomentsScreenState extends State<MomentsScreen> {
       return _PostPromptBanner(
         onPostTap: _openCreateMoment,
         onPhotoTap: () => _openCreateMoment(initialPicker: 'image'),
-        onVideoTap: () => _openCreateMoment(initialPicker: 'video'),
         onTopicTap: (topic) => _openCreateMoment(initialText: '$topic '),
       );
     }
@@ -222,7 +221,6 @@ class _MomentsScreenState extends State<MomentsScreen> {
     return _RegularPostMomentCard(
       onTap: _openCreateMoment,
       onPhotoTap: () => _openCreateMoment(initialPicker: 'image'),
-      onVideoTap: () => _openCreateMoment(initialPicker: 'video'),
       onTextTap: () => _openCreateMoment(),
     );
   }
@@ -243,24 +241,35 @@ class _MomentsScreenState extends State<MomentsScreen> {
               color: AppColors.surfaceLight,
               borderRadius: BorderRadius.circular(18),
             ),
-            child: const TextField(
-              decoration: InputDecoration(
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                contentPadding: EdgeInsets.only(top: 8),
-                hintText: 'Search moments',
-                hintStyle: TextStyle(
-                  color: AppColors.textTertiary,
-                  fontSize: 13.5,
-                ),
-                prefixIcon: Icon(
+            // A TextField's prefixIcon fights a fixed-height parent for
+            // vertical space (that's what pushed the hint text off-center
+            // before) — a plain Row + isDense TextField, same as
+            // chat_list_screen.dart's search bar, centers reliably instead.
+            child: Row(
+              children: [
+                const Icon(
                   Icons.search_rounded,
                   size: 18,
                   color: AppColors.textTertiary,
                 ),
-                prefixIconConstraints: BoxConstraints(minWidth: 20, minHeight: 20),
-              ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    textAlignVertical: TextAlignVertical.center,
+                    decoration: const InputDecoration(
+                      border: InputBorder.none,
+                      isDense: true,
+                      contentPadding: EdgeInsets.zero,
+                      hintText: 'Search moments',
+                      hintStyle: TextStyle(
+                        color: AppColors.textTertiary,
+                        fontSize: 13.5,
+                      ),
+                    ),
+                    style: const TextStyle(fontSize: 13.5),
+                  ),
+                ),
+              ],
             ),
           ),
           actions: [
@@ -428,13 +437,11 @@ class _MomentsScreenState extends State<MomentsScreen> {
 class _RegularPostMomentCard extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onPhotoTap;
-  final VoidCallback onVideoTap;
   final VoidCallback onTextTap;
 
   const _RegularPostMomentCard({
     required this.onTap,
     required this.onPhotoTap,
-    required this.onVideoTap,
     required this.onTextTap,
   });
 
@@ -501,12 +508,6 @@ class _RegularPostMomentCard extends StatelessWidget {
                 onTap: onPhotoTap,
               ),
               _actionItem(
-                icon: Icons.videocam_outlined,
-                label: 'Video',
-                color: const Color(0xFFE91E63),
-                onTap: onVideoTap,
-              ),
-              _actionItem(
                 icon: Icons.edit_note_rounded,
                 label: 'Write',
                 color: AppColors.primaryPurple,
@@ -552,13 +553,11 @@ class _RegularPostMomentCard extends StatelessWidget {
 class _PostPromptBanner extends StatelessWidget {
   final VoidCallback onPostTap;
   final VoidCallback onPhotoTap;
-  final VoidCallback onVideoTap;
   final ValueChanged<String> onTopicTap;
 
   const _PostPromptBanner({
     required this.onPostTap,
     required this.onPhotoTap,
-    required this.onVideoTap,
     required this.onTopicTap,
   });
 
@@ -653,13 +652,6 @@ class _PostPromptBanner extends StatelessWidget {
                 label: 'Photo',
                 color: const Color(0xFF00C48C),
                 onTap: onPhotoTap,
-              ),
-              const SizedBox(width: 10),
-              _shortcutButton(
-                icon: Icons.videocam_outlined,
-                label: 'Video',
-                color: const Color(0xFFE91E63),
-                onTap: onVideoTap,
               ),
               const SizedBox(width: 10),
               _shortcutButton(

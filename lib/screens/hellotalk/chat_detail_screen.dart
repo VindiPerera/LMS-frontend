@@ -2,10 +2,16 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../../models/chat_message.dart';
 import '../../models/user.dart';
+import '../../models/voiceroom.dart';
 import '../../services/chat_service.dart';
+import '../../services/partner_service.dart';
+import '../../services/push_notification_service.dart';
+import '../../services/voice_room_service.dart';
 import '../../theme/app_colors.dart';
 import '../../utils/chat_time.dart';
 import '../../widgets/app_avatar.dart';
+import '../../widgets/voice_room_invite_card.dart';
+import '../voiceroom/open_voice_room.dart';
 
 class ChatDetailScreen extends StatefulWidget {
   final AppUser user;
@@ -21,6 +27,19 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   late final String _chatId = ChatService.chatIdFor(widget.user.id);
   late final Stream<List<ChatMessage>> _messagesStream =
       ChatService.streamMessages(_chatId);
+  // The OTHER person in this thread's live room, if they have one right
+  // now — same "is this person live" check the profile screens use.
+  late final Stream<VoiceRoom?> _theirVoiceRoomStream =
+      VoiceRoomService.streamActiveRoomForUser(widget.user.id);
+  // Live online/offline for the header — widget.user.isOnline alone would
+  // just be whatever was true the moment this screen opened, never
+  // updating while the chat stays open. Skipped for the FaceTalk system
+  // account: it isn't a real user doc, so there's nothing to listen to.
+  late final Stream<bool> _theirOnlineStream = _isSystemChat
+      ? const Stream.empty()
+      : PartnerService.streamIsOnline(widget.user.id);
+
+  bool get _isSystemChat => ChatService.isSystemChat(widget.user.id);
 
   @override
   void initState() {
@@ -28,10 +47,17 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     // Fire-and-forget: clears my unread count for this thread now that
     // it's open. Silently no-ops if the thread doesn't exist yet.
     ChatService.markRead(_chatId);
+    // While this thread is open, a "new message" push for it would just be
+    // a redundant banner on top of the message already appearing live in
+    // the list below — see push_notification_service.dart.
+    PushNotificationService.instance.setActiveChat(_chatId);
   }
 
   @override
   void dispose() {
+    if (PushNotificationService.instance.activeChatId == _chatId) {
+      PushNotificationService.instance.setActiveChat(null);
+    }
     _controller.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -82,43 +108,84 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 0,
-        title: Row(
-          children: [
-            AppAvatar.forUser(widget.user, size: 36, showOnlineDot: true),
-            const SizedBox(width: 10),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+        title: StreamBuilder<bool>(
+          stream: _theirOnlineStream,
+          initialData: widget.user.isOnline,
+          builder: (context, snapshot) {
+            final isOnline = snapshot.data ?? false;
+            return Row(
               children: [
-                Text(
-                  widget.user.name,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                  ),
+                // Built directly (not via AppAvatar.forUser) so the dot
+                // uses the live `isOnline` above instead of the static
+                // widget.user.isOnline snapshot forUser would read.
+                AppAvatar(
+                  seed: widget.user.name,
+                  imageUrl: widget.user.avatarUrl,
+                  size: 36,
+                  showFlag: false,
+                  showOnlineDot: !_isSystemChat,
+                  isOnline: isOnline,
                 ),
-                Text(
-                  widget.user.isOnline ? 'Active now' : 'Offline',
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    color: widget.user.isOnline
-                        ? AppColors.online
-                        : AppColors.textTertiary,
-                  ),
+                const SizedBox(width: 10),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          widget.user.name,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        if (_isSystemChat) ...[
+                          const SizedBox(width: 4),
+                          const Icon(
+                            Icons.verified_rounded,
+                            size: 15,
+                            color: AppColors.primaryPurple,
+                          ),
+                        ],
+                      ],
+                    ),
+                    Text(
+                      _isSystemChat
+                          ? 'Official account'
+                          : (isOnline ? 'Active now' : 'Offline'),
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: _isSystemChat
+                            ? AppColors.textTertiary
+                            : (isOnline ? AppColors.online : AppColors.textTertiary),
+                      ),
+                    ),
+                  ],
                 ),
               ],
-            ),
-          ],
+            );
+          },
         ),
-        actions: [
-          IconButton(icon: const Icon(Icons.call_outlined), onPressed: () {}),
-          IconButton(
-            icon: const Icon(Icons.more_vert_rounded),
-            onPressed: () {},
-          ),
-        ],
+        actions: _isSystemChat
+            ? const []
+            : [
+                IconButton(icon: const Icon(Icons.call_outlined), onPressed: () {}),
+                IconButton(
+                  icon: const Icon(Icons.more_vert_rounded),
+                  onPressed: () {},
+                ),
+              ],
       ),
       body: Column(
         children: [
+          StreamBuilder<VoiceRoom?>(
+            stream: _theirVoiceRoomStream,
+            builder: (context, snapshot) {
+              final room = snapshot.data;
+              if (room == null) return const SizedBox.shrink();
+              return _PartnerVoiceRoomBanner(hostName: widget.user.name, room: room);
+            },
+          ),
           Expanded(
             child: StreamBuilder<List<ChatMessage>>(
               stream: _messagesStream,
@@ -194,8 +261,108 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               },
             ),
           ),
-          _Composer(controller: _controller, onSend: _send),
+          _isSystemChat
+              ? const _ReadOnlyNotice()
+              : _Composer(controller: _controller, onSend: _send),
         ],
+      ),
+    );
+  }
+}
+
+/// Banner shown atop a chat thread when the OTHER person is currently
+/// hosting a live Voice Room — same "is this person live right now" check
+/// (and matching gradient/"LIVE" styling) as chat_list_screen.dart's
+/// "you're hosting" banner, just pointed at [widget.user] instead of the
+/// signed-in user.
+class _PartnerVoiceRoomBanner extends StatelessWidget {
+  final String hostName;
+  final VoiceRoom room;
+  const _PartnerVoiceRoomBanner({required this.hostName, required this.room});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () => openVoiceRoom(context, room),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF8E2DE2), Color(0xFF4A00E0)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF8E2DE2).withValues(alpha: 0.3),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              const CircleAvatar(
+                backgroundColor: Colors.white24,
+                child: Icon(Icons.mic_rounded, color: Colors.white),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.redAccent,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Text(
+                            'LIVE NOW',
+                            style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w900),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            '$hostName is hosting',
+                            style: const TextStyle(color: Colors.white70, fontSize: 11),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      room.title,
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton(
+                onPressed: () => openVoiceRoom(context, room),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: AppColors.primaryPurple,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: const Text('Join', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -244,6 +411,23 @@ class _MessageBubble extends StatelessWidget {
     final timeLabel = message.createdAt != null
         ? formatChatTime(message.createdAt!)
         : '';
+
+    if (message.type == MessageType.voiceRoomInvite) {
+      // No bubble chrome around this one — VoiceRoomInviteCard already has
+      // its own gradient "card" look (matching the in-room share banner),
+      // so wrapping it in the usual purple/gray bubble would just double up
+      // the background. Capped to a comfortable card width rather than
+      // stretching edge-to-edge like a text bubble would.
+      return ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 260),
+        child: VoiceRoomInviteCard(
+          roomId: message.roomId,
+          title: message.roomTitle,
+          hostName: message.roomHostName,
+          hostAvatar: message.roomHostAvatar,
+        ),
+      );
+    }
 
     if (message.type == MessageType.voice) {
       return Container(
@@ -338,6 +522,39 @@ class _VoiceWave extends StatelessWidget {
             ),
           )
           .toList(),
+    );
+  }
+}
+
+/// Shown instead of [_Composer] for the FaceTalk system/broadcast thread —
+/// replies aren't offered at all, rather than a text field that would just
+/// fail (see firestore.rules' `isReadOnly` guard on chats/{chatId}/messages).
+class _ReadOnlyNotice extends StatelessWidget {
+  const _ReadOnlyNotice();
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: const BoxDecoration(
+          color: AppColors.surface,
+          border: Border(top: BorderSide(color: AppColors.divider, width: 0.6)),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.lock_outline_rounded, size: 15, color: AppColors.textTertiary),
+            const SizedBox(width: 6),
+            Text(
+              'Official announcements — you can\'t reply here',
+              style: const TextStyle(fontSize: 12.5, color: AppColors.textTertiary),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

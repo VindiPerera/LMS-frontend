@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import '../../models/user.dart';
+import '../../services/chat_service.dart';
 import '../../services/partner_service.dart';
 import '../../services/teacher_service.dart';
 import '../../theme/app_colors.dart';
 
 import '../../widgets/app_avatar.dart';
-import '../hellotalk/add_contact_screen.dart';
 import '../hellotalk/chat_detail_screen.dart';
 import 'partner_profile_screen.dart';
 
@@ -22,6 +22,10 @@ class _ConnectScreenState extends State<ConnectScreen>
   final _filters = const ['Recommended', 'Nearby', 'New Users', 'Same City'];
   int _filterIndex = 0;
 
+  bool _searching = false;
+  final _searchController = TextEditingController();
+  String _searchQuery = '';
+
   List<AppUser>? _partners;
   String? _error;
 
@@ -32,13 +36,28 @@ class _ConnectScreenState extends State<ConnectScreen>
     _loadPartners();
   }
 
+  void _toggleSearch() {
+    setState(() {
+      _searching = !_searching;
+      if (!_searching) {
+        _searchController.clear();
+        _searchQuery = '';
+      }
+    });
+  }
+
   Future<void> _loadPartners() async {
     setState(() => _error = null);
     try {
       final partners = await PartnerService.fetchPartners();
       if (!mounted) return;
       setState(() => _partners = partners);
-    } catch (_) {
+    } catch (e) {
+      // Requires a composite index on (isOnline desc, createdAt desc) — see
+      // firestore.indexes.json. Without it Firestore rejects this query
+      // outright, and this falls back to "no partners" rather than
+      // surfacing the real cause, hence the debugPrint.
+      debugPrint('ConnectScreen._loadPartners failed (showing no partners): $e');
       if (!mounted) return;
       setState(() => _partners = []);
     }
@@ -47,6 +66,7 @@ class _ConnectScreenState extends State<ConnectScreen>
   @override
   void dispose() {
     _tabController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -54,30 +74,34 @@ class _ConnectScreenState extends State<ConnectScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'Add Friends',
-              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 19),
-            ),
-            const SizedBox(width: 6),
-            IconButton(
-              icon: const Icon(Icons.add_rounded, size: 20),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(),
-              onPressed: () => AddContactScreen.show(context),
-            ),
-          ],
-        ),
+        // The add-friend entry point now lives only on the Message tab
+        // (chat_list_screen.dart's "Add People" button) — no need for a
+        // second one here too.
+        title: _searching
+            ? TextField(
+                controller: _searchController,
+                autofocus: true,
+                onChanged: (val) =>
+                    setState(() => _searchQuery = val.trim().toLowerCase()),
+                decoration: const InputDecoration(
+                  hintText: 'Search by name or @handle',
+                  hintStyle: TextStyle(
+                    color: AppColors.textTertiary,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w400,
+                  ),
+                  border: InputBorder.none,
+                ),
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              )
+            : const Text(
+                'Connect',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 19),
+              ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.tune_rounded),
-            onPressed: () => AddContactScreen.show(context),
-          ),
-          IconButton(
-            icon: const Icon(Icons.search_rounded),
-            onPressed: () => AddContactScreen.show(context),
+            icon: Icon(_searching ? Icons.close_rounded : Icons.search_rounded),
+            onPressed: _toggleSearch,
           ),
         ],
         bottom: TabBar(
@@ -108,9 +132,10 @@ class _ConnectScreenState extends State<ConnectScreen>
             partners: _partners,
             error: _error,
             onRetry: _loadPartners,
+            searchQuery: _searchQuery,
           ),
           const _EmptyTab(icon: Icons.groups_rounded, label: 'No groups yet'),
-          const _TeachersTab(),
+          _TeachersTab(searchQuery: _searchQuery),
         ],
       ),
     );
@@ -125,6 +150,7 @@ class _PartnersTab extends StatelessWidget {
   final List<AppUser>? partners;
   final String? error;
   final VoidCallback onRetry;
+  final String searchQuery;
 
   const _PartnersTab({
     required this.filters,
@@ -133,6 +159,7 @@ class _PartnersTab extends StatelessWidget {
     required this.partners,
     required this.error,
     required this.onRetry,
+    this.searchQuery = '',
   });
 
   @override
@@ -200,8 +227,8 @@ class _PartnersTab extends StatelessWidget {
       );
     }
 
-    final users = partners;
-    if (users == null) {
+    final allUsers = partners;
+    if (allUsers == null) {
       return const Center(
         child: CircularProgressIndicator(
           strokeWidth: 2.4,
@@ -210,11 +237,20 @@ class _PartnersTab extends StatelessWidget {
       );
     }
 
+    final users = searchQuery.isEmpty
+        ? allUsers
+        : allUsers.where((u) {
+            return u.name.toLowerCase().contains(searchQuery) ||
+                u.handle.toLowerCase().contains(searchQuery);
+          }).toList();
+
     if (users.isEmpty) {
-      return const Center(
+      return Center(
         child: Text(
-          'No partners yet — check back soon!',
-          style: TextStyle(color: AppColors.textTertiary),
+          searchQuery.isNotEmpty
+              ? 'No partners matching "$searchQuery"'
+              : 'No partners yet — check back soon!',
+          style: const TextStyle(color: AppColors.textTertiary),
         ),
       );
     }
@@ -232,14 +268,74 @@ class _PartnersTab extends StatelessWidget {
   }
 }
 
-class _PartnerListTile extends StatelessWidget {
+class _PartnerListTile extends StatefulWidget {
   final AppUser user;
   const _PartnerListTile({required this.user});
+
+  @override
+  State<_PartnerListTile> createState() => _PartnerListTileState();
+}
+
+class _PartnerListTileState extends State<_PartnerListTile> {
+  AppUser get user => widget.user;
+
+  // null = still checking whether a thread already exists; true/false once
+  // known. Starts null (rather than defaulting to "no thread") so the row
+  // doesn't flash a Wave button that immediately flips to Chat once the
+  // check resolves for someone already said hi to.
+  bool? _hasChat;
+  bool _sending = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkExistingChat();
+  }
+
+  Future<void> _checkExistingChat() async {
+    final hasChat = await ChatService.hasChatWith(user.id);
+    if (!mounted) return;
+    setState(() => _hasChat = hasChat);
+  }
 
   void _openProfile(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => PartnerProfileScreen(initial: user)),
     );
+  }
+
+  void _openChat(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => ChatDetailScreen(user: user)),
+    );
+  }
+
+  Future<void> _sendWave() async {
+    if (_sending) return;
+    setState(() => _sending = true);
+    try {
+      await ChatService.sendWave(other: user);
+      if (!mounted) return;
+      setState(() {
+        _hasChat = true;
+        _sending = false;
+      });
+      // Take them straight into the thread they just started — the button
+      // alone flipping to "Chat" isn't enough feedback that the wave went
+      // through, and this is exactly where they'd want to be next anyway.
+      _openChat(context);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _sending = false);
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: const Text("Wave didn't send. Please try again."),
+            backgroundColor: AppColors.badgeRed,
+          ),
+        );
+    }
   }
 
   @override
@@ -359,38 +455,16 @@ class _PartnerListTile extends StatelessWidget {
                       ),
                     ),
                   ],
-                  if (user.tags.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      children: user.tags.map((t) => _tagChip(t)).toList(),
-                    ),
-                  ],
                 ],
               ),
             ),
             const SizedBox(width: 8),
-            GestureDetector(
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => ChatDetailScreen(user: user)),
-              ),
-              child: Container(
-                width: 44,
-                height: 44,
-                padding: const EdgeInsets.all(7),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF3EFFF),
-                  shape: BoxShape.circle,
-                  border: Border.all(color: AppColors.primaryPurple.withValues(alpha: 0.18), width: 1),
-                ),
-                child: Image.asset(
-                  'assets/images/say_hi_hand.png',
-                  fit: BoxFit.contain,
-                ),
-              ),
+            _WaveOrChatButton(
+              hasChat: _hasChat,
+              sending: _sending,
+              onWave: _sendWave,
+              onChat: () => _openChat(context),
             ),
-
           ],
         ),
       ),
@@ -414,25 +488,55 @@ class _PartnerListTile extends StatelessWidget {
       ),
     );
   }
+}
 
-  Widget _tagChip(String text) {
-    final isHighlight =
-        text.contains('both like') || text == 'New' || text == 'Free to Chat';
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-      decoration: BoxDecoration(
-        color: isHighlight ? const Color(0xFFFFE9D9) : AppColors.surfaceLight,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: 11.5,
-          color: isHighlight
-              ? const Color(0xFFD9722E)
-              : AppColors.textSecondary,
-          fontWeight: FontWeight.w600,
+/// The trailing circular button on a Connect card: a waving hand while no
+/// thread exists with this person yet, or a chat bubble once one does
+/// (either because a wave was already sent, or because they've messaged
+/// before through some other entry point — chat_list_screen.dart's "Add
+/// People", a teacher's "Say Hi", etc.). `hasChat == null` means the
+/// existence check (`ChatService.hasChatWith`) hasn't resolved yet, so a
+/// neutral loading spinner shows instead of guessing either icon.
+class _WaveOrChatButton extends StatelessWidget {
+  final bool? hasChat;
+  final bool sending;
+  final VoidCallback onWave;
+  final VoidCallback onChat;
+
+  const _WaveOrChatButton({
+    required this.hasChat,
+    required this.sending,
+    required this.onWave,
+    required this.onChat,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final loading = hasChat == null || sending;
+    return GestureDetector(
+      onTap: loading
+          ? null
+          : (hasChat! ? onChat : onWave),
+      child: Container(
+        width: 44,
+        height: 44,
+        padding: const EdgeInsets.all(7),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF3EFFF),
+          shape: BoxShape.circle,
+          border: Border.all(color: AppColors.primaryPurple.withValues(alpha: 0.18), width: 1),
         ),
+        child: loading
+            ? const Padding(
+                padding: EdgeInsets.all(9),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: AppColors.primaryPurple,
+                ),
+              )
+            : (hasChat!
+                ? const Icon(Icons.chat_bubble_rounded, color: AppColors.primaryPurple, size: 20)
+                : Image.asset('assets/images/say_hi_hand.png', fit: BoxFit.contain)),
       ),
     );
   }
@@ -459,7 +563,8 @@ class _EmptyTab extends StatelessWidget {
 }
 
 class _TeachersTab extends StatefulWidget {
-  const _TeachersTab();
+  final String searchQuery;
+  const _TeachersTab({this.searchQuery = ''});
 
   @override
   State<_TeachersTab> createState() => _TeachersTabState();
@@ -495,12 +600,22 @@ class _TeachersTabState extends State<_TeachersTab> {
       );
     }
 
-    final teachers = _teachers ?? const [];
+    final allTeachers = _teachers ?? const [];
+    final query = widget.searchQuery;
+    final teachers = query.isEmpty
+        ? allTeachers
+        : allTeachers.where((t) {
+            return t.name.toLowerCase().contains(query) ||
+                t.handle.toLowerCase().contains(query);
+          }).toList();
+
     if (teachers.isEmpty) {
-      return const Center(
+      return Center(
         child: Text(
-          'No teachers available right now.',
-          style: TextStyle(color: AppColors.textTertiary),
+          query.isNotEmpty
+              ? 'No teachers matching "$query"'
+              : 'No teachers available right now.',
+          style: const TextStyle(color: AppColors.textTertiary),
         ),
       );
     }

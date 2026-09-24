@@ -2,12 +2,14 @@ import 'dart:typed_data';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../data/countries.dart';
 import '../../services/auth_service.dart';
 import '../../services/storage_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
 import '../../widgets/auth_widgets.dart';
-import '../main_shell.dart';
+import '../../widgets/country_picker_sheet.dart';
+import 'select_interests_screen.dart';
 import 'signup_screen.dart';
 
 class CreateProfileScreen extends StatefulWidget {
@@ -19,15 +21,93 @@ class CreateProfileScreen extends StatefulWidget {
   State<CreateProfileScreen> createState() => _CreateProfileScreenState();
 }
 
+/// Male/Female picker for the Create Profile screen — feeds `AppUser.gender`
+/// (previously never set from this screen, so it silently stayed at the
+/// model's 'other' default for every account).
+class _GenderSelector extends StatelessWidget {
+  final String value;
+  final ValueChanged<String> onChanged;
+
+  const _GenderSelector({required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Gender',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: AppColors.textPrimary,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(child: _option('male', 'Male', Icons.male_rounded)),
+            const SizedBox(width: 12),
+            Expanded(child: _option('female', 'Female', Icons.female_rounded)),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _option(String optionValue, String label, IconData icon) {
+    final selected = value == optionValue;
+    return GestureDetector(
+      onTap: () => onChanged(optionValue),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 13),
+        decoration: BoxDecoration(
+          color: selected ? AppColors.primaryPurple : AppColors.surfaceLight,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: selected ? AppColors.primaryPurple : AppColors.divider,
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              size: 18,
+              color: selected ? Colors.white : AppColors.textTertiary,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: selected ? Colors.white : AppColors.textPrimary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _CreateProfileScreenState extends State<CreateProfileScreen> {
   final _nameController = TextEditingController();
   final _bioController = TextEditingController();
   final _detailController = TextEditingController();
   String _nativeLang = 'English';
   String _learningLang = 'Spanish';
+  String _gender = 'male';
+  Country? _selectedCountry;
   bool _loading = false;
   bool _uploadingPhoto = false;
   String? _avatarUrl;
+
+  Future<void> _pickCountry() async {
+    final picked = await showCountryPickerSheet(context);
+    if (picked != null && mounted) setState(() => _selectedCountry = picked);
+  }
 
   static const _languages = [
     'English',
@@ -93,6 +173,8 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
         if (_isTeacher) 'detail': _detailController.text.trim(),
         'nativeLang': _nativeLang,
         'learningLang': _learningLang,
+        'gender': _gender,
+        if (_selectedCountry != null) 'countryFlag': _selectedCountry!.flagEmoji,
         if (_avatarUrl != null) 'avatarUrl': _avatarUrl,
       });
     } on FirebaseException catch (e) {
@@ -107,7 +189,7 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
 
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const MainShell()),
+      MaterialPageRoute(builder: (_) => const SelectInterestsScreen()),
       (route) => false,
     );
   }
@@ -213,6 +295,11 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
                 icon: Icons.edit_note_rounded,
                 controller: _bioController,
               ),
+              const SizedBox(height: 16),
+              _GenderSelector(
+                value: _gender,
+                onChanged: (v) => setState(() => _gender = v),
+              ),
               // Teachers still list their subject; students no longer have
               // an "Interests / Grade" field here.
               if (_isTeacher) ...[
@@ -245,6 +332,12 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
                     ),
                   ),
                 ],
+              ),
+              const SizedBox(height: 16),
+              CountryField(
+                label: 'Country',
+                value: _selectedCountry,
+                onTap: _pickCountry,
               ),
               const SizedBox(height: 28),
               AuthPrimaryButton(
