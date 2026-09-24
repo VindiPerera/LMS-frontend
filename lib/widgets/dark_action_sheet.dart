@@ -63,6 +63,16 @@ class _DarkActionSheet extends StatelessWidget {
               clipBehavior: Clip.antiAlias,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
+                // Without this, each row below (a Column under the default
+                // crossAxisAlignment.center) only sizes itself to its own
+                // content width and gets centered inside the card — so its
+                // InkWell's hit-test region ends up exactly as wide as its
+                // label text, even though the card and its dividers visibly
+                // span the full width. Stretch forces every row (and each
+                // Divider) to actually take the card's full width, making
+                // the whole row tappable edge-to-edge, matching what it
+                // already looks like.
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   for (var i = 0; i < items.length; i++) ...[
                     if (i > 0) const Divider(height: 1, color: Colors.white12),
@@ -99,36 +109,44 @@ class _DarkActionRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final textColor = !item.enabled ? Colors.white24 : (item.color ?? Colors.white);
-    return InkWell(
-      // Closes the sheet itself before running the action, so every caller
-      // gets that "tap an option, sheet closes, action happens" feel for
-      // free instead of having to remember to pop a sheet-scoped context
-      // in every single item's onTap.
-      onTap: item.enabled
-          ? () {
-              Navigator.of(context).pop();
-              item.onTap();
-            }
-          : null,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              item.label,
-              textAlign: TextAlign.center,
-              style: TextStyle(color: textColor, fontSize: 15, fontWeight: FontWeight.w500),
-            ),
-            if (!item.enabled && item.disabledHint != null) ...[
-              const SizedBox(height: 3),
+    // width: double.infinity forces InkWell's own hit-test region to span
+    // the row's full width, self-contained regardless of what the parent
+    // Column's crossAxisAlignment happens to be — without it, InkWell
+    // shrink-wraps to its (centered-text) child, so only the label itself
+    // was ever actually tappable.
+    return SizedBox(
+      width: double.infinity,
+      child: InkWell(
+        // Closes the sheet itself before running the action, so every
+        // caller gets that "tap an option, sheet closes, action happens"
+        // feel for free instead of having to remember to pop a
+        // sheet-scoped context in every single item's onTap.
+        onTap: item.enabled
+            ? () {
+                Navigator.of(context).pop();
+                item.onTap();
+              }
+            : null,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
               Text(
-                item.disabledHint!,
+                item.label,
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white38, fontSize: 11),
+                style: TextStyle(color: textColor, fontSize: 15, fontWeight: FontWeight.w500),
               ),
+              if (!item.enabled && item.disabledHint != null) ...[
+                const SizedBox(height: 3),
+                Text(
+                  item.disabledHint!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white38, fontSize: 11),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );

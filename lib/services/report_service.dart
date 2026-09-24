@@ -25,7 +25,7 @@ class ReportService {
     final report = ReportModel(
       reporterId: uid,
       postId: postId,
-      reason: reason,
+      reason: reason.storageValue,
       details: details,
     );
 
@@ -39,14 +39,17 @@ class ReportService {
   }
 
   /// Reports a person directly rather than a specific post — the voice
-  /// room's "Report" action (room_profile_sheet.dart), available to a
-  /// room's host/moderator against any other participant. No counter to
-  /// bump here (unlike [reportPost]'s moments/{postId}.reportCount) —
-  /// there's no per-user document in this app to keep one on.
+  /// room's "Report" action (room_profile_sheet.dart), available to any
+  /// participant against any other participant (see _buildMoreMenu's own
+  /// doc comment — this is deliberately NOT limited to a host/moderator,
+  /// unlike Mute/Kick Out). No counter to bump here (unlike [reportPost]'s
+  /// moments/{postId}.reportCount) — there's no per-user document in this
+  /// app to keep one on; the admin panel computes a live count instead
+  /// (FirestoreReportService::countForUser, hello-backend).
   static Future<void> reportUser({
     required String reportedUserId,
     String? roomId,
-    required ReportReason reason,
+    required UserReportReason reason,
     String? details,
   }) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -58,7 +61,7 @@ class ReportService {
       reporterId: uid,
       reportedUserId: reportedUserId,
       roomId: roomId,
-      reason: reason,
+      reason: reason.storageValue,
       details: details,
     );
 

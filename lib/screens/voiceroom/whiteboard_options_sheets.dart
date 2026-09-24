@@ -55,7 +55,9 @@ Future<void> showTextComposerSheet(
     context: context,
     backgroundColor: _bubble,
     isScrollControlled: true,
-    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
     builder: (_) => _TextComposerSheet(
       existing: existing,
       onSave: onSave,
@@ -86,11 +88,22 @@ class _TextComposerSheet extends StatefulWidget {
 }
 
 class _TextComposerSheetState extends State<_TextComposerSheet> {
-  late final _controller = TextEditingController(text: widget.existing?.text ?? '');
-  late double _fontSize = widget.existing?.fontSize ?? 16;
+  late final _controller = TextEditingController(
+    text: widget.existing?.text ?? '',
+  );
+  // Defaults to L (22 — see _presetSizes/_presetSizeLabels below) for a
+  // brand-new item, so it reads clearly on a board that now also starts
+  // full-size by default (see WhiteboardService.defaultWidth's doc
+  // comment) — but leaves an item someone opens to edit at whatever size
+  // they last saved it.
+  late double _fontSize = widget.existing?.fontSize ?? 22;
   late String _colorHex = widget.existing?.colorHex ?? 'FFFFFFFF';
   late bool _bold = widget.existing?.bold ?? false;
-  late String _textAlign = widget.existing?.textAlign ?? 'left';
+  // Defaults to center for a brand-new item — matches its board box now
+  // also starting centered/full-size (see WhiteboardService.defaultWidth's
+  // doc comment) — but leaves an item someone opens to edit exactly as
+  // they last saved it.
+  late String _textAlign = widget.existing?.textAlign ?? 'center';
 
   bool get _isEditing => widget.existing != null;
 
@@ -109,17 +122,23 @@ class _TextComposerSheetState extends State<_TextComposerSheet> {
   }
 
   TextAlign get _flutterTextAlign => switch (_textAlign) {
-        'center' => TextAlign.center,
-        'right' => TextAlign.right,
-        _ => TextAlign.left,
-      };
+    'center' => TextAlign.center,
+    'right' => TextAlign.right,
+    _ => TextAlign.left,
+  };
 
   void _save() {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
     Navigator.of(context).pop();
     widget.onSave(
-      TextDraft(text: text, fontSize: _fontSize, colorHex: _colorHex, bold: _bold, textAlign: _textAlign),
+      TextDraft(
+        text: text,
+        fontSize: _fontSize,
+        colorHex: _colorHex,
+        bold: _bold,
+        textAlign: _textAlign,
+      ),
     );
   }
 
@@ -134,7 +153,12 @@ class _TextComposerSheetState extends State<_TextComposerSheet> {
     return SafeArea(
       top: false,
       child: Padding(
-        padding: EdgeInsets.fromLTRB(16, 16, 16, MediaQuery.of(context).viewInsets.bottom + 16),
+        padding: EdgeInsets.fromLTRB(
+          16,
+          16,
+          16,
+          MediaQuery.of(context).viewInsets.bottom + 16,
+        ),
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -142,13 +166,20 @@ class _TextComposerSheetState extends State<_TextComposerSheet> {
             children: [
               Text(
                 _isEditing ? 'Edit text' : 'Add text to the board',
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 16,
+                ),
               ),
               const SizedBox(height: 12),
               // The field itself previews every style choice below live —
               // what you see here is what lands on the board.
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.black.withValues(alpha: 0.35),
                   borderRadius: BorderRadius.circular(12),
@@ -214,7 +245,10 @@ class _TextComposerSheetState extends State<_TextComposerSheet> {
                         decoration: BoxDecoration(
                           color: swatch,
                           shape: BoxShape.circle,
-                          border: Border.all(color: selected ? _accent : Colors.white24, width: selected ? 2.5 : 1),
+                          border: Border.all(
+                            color: selected ? _accent : Colors.white24,
+                            width: selected ? 2.5 : 1,
+                          ),
                         ),
                       ),
                     );
@@ -275,9 +309,14 @@ class _TextComposerSheetState extends State<_TextComposerSheet> {
                     backgroundColor: _accent,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(24),
+                    ),
                   ),
-                  child: Text(_isEditing ? 'Save' : 'Add to board', style: const TextStyle(fontWeight: FontWeight.w700)),
+                  child: Text(
+                    _isEditing ? 'Save' : 'Add to board',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
                 ),
               ),
             ],
@@ -288,9 +327,13 @@ class _TextComposerSheetState extends State<_TextComposerSheet> {
   }
 
   Widget _label(String text) => Text(
-        text,
-        style: const TextStyle(color: Colors.white54, fontSize: 11.5, fontWeight: FontWeight.w700),
-      );
+    text,
+    style: const TextStyle(
+      color: Colors.white54,
+      fontSize: 11.5,
+      fontWeight: FontWeight.w700,
+    ),
+  );
 
   /// A plain custom pill instead of Flutter's ChoiceChip — the app's
   /// ambient (light) Material theme was overriding ChoiceChip's label
@@ -298,7 +341,12 @@ class _TextComposerSheetState extends State<_TextComposerSheet> {
   /// rendering as blank white boxes with invisible text. This sidesteps
   /// Material chip theming entirely, the same way _alignButton already
   /// does for the alignment icons below.
-  Widget _pillButton({required String label, required bool selected, required VoidCallback onTap, bool bold = false}) {
+  Widget _pillButton({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+    bool bold = false,
+  }) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -308,7 +356,10 @@ class _TextComposerSheetState extends State<_TextComposerSheet> {
         decoration: BoxDecoration(
           color: selected ? _accent : Colors.white.withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: selected ? _accent : Colors.white30, width: 1),
+          border: Border.all(
+            color: selected ? _accent : Colors.white30,
+            width: 1,
+          ),
         ),
         child: Text(
           label,
@@ -334,7 +385,10 @@ class _TextComposerSheetState extends State<_TextComposerSheet> {
           decoration: BoxDecoration(
             color: selected ? _accent : Colors.white.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: selected ? _accent : Colors.white30, width: 1),
+            border: Border.all(
+              color: selected ? _accent : Colors.white30,
+              width: 1,
+            ),
           ),
           child: Icon(icon, size: 18, color: Colors.white),
         ),
@@ -356,7 +410,9 @@ void showImageOptionsSheet(
     context: context,
     backgroundColor: _bubble,
     isScrollControlled: true,
-    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
     builder: (sheetContext) => SafeArea(
       top: false,
       child: Padding(
@@ -367,7 +423,11 @@ void showImageOptionsSheet(
           children: [
             const Text(
               'Image options',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16),
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+                fontSize: 16,
+              ),
             ),
             const SizedBox(height: 8),
             _OptionButton(
@@ -431,7 +491,14 @@ class _OptionButton extends StatelessWidget {
       dense: dense,
       contentPadding: EdgeInsets.zero,
       leading: Icon(icon, color: color, size: 20),
-      title: Text(label, style: TextStyle(color: color, fontSize: 14, fontWeight: FontWeight.w600)),
+      title: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
       onTap: onTap,
     );
   }

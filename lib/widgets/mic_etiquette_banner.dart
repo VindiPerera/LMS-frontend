@@ -34,9 +34,17 @@ class MicEtiquetteBanner extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            "Please mute your microphone when you're not speaking. "
-            "It keeps rooms clear for everyone.",
-            style: TextStyle(fontSize: 12, color: AppColors.textSecondary, height: 1.35),
+            "Please mute your mic when you're not speaking",
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textSecondary,
+              height: 1.3,
+            ),
+          ),
+          Text(
+            "it keeps rooms clear for everyone",
+            style: TextStyle(fontSize: 12.5, color: AppColors.textSecondary, height: 1.3),
           ),
           const SizedBox(height: 8),
           Row(
@@ -44,18 +52,18 @@ class MicEtiquetteBanner extends StatelessWidget {
             children: [
               const Text(
                 'Mute your mic',
-                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5, color: AppColors.badgeRed),
+                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: AppColors.badgeRed),
               ),
               const SizedBox(width: 8),
               Container(
-                width: 26,
-                height: 26,
+                width: 28,
+                height: 28,
                 alignment: Alignment.center,
                 decoration: const BoxDecoration(
                   color: AppColors.badgeRed,
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.mic_off_rounded, size: 14, color: Colors.white),
+                child: const Icon(Icons.mic_off_rounded, size: 15, color: Colors.white),
               ),
             ],
           ),

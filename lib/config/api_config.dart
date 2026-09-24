@@ -5,11 +5,39 @@ import 'package:flutter/foundation.dart' show kIsWeb, kReleaseMode;
 class ApiConfig {
   static String? _customBaseUrl;
 
-  /// The live production server — swap this if the real domain ends up
-  /// different from what was planned when this was written. Only used for
-  /// `--release` builds (see [baseUrl]); local dev (`flutter run`) never
-  /// hits this even by accident.
-  static const String _prodBaseUrl = 'https://hellotalk.jaan.lk';
+  /// The live production server — set this once the backend is actually
+  /// deployed somewhere. Deliberately unset (`null`) right now: nothing has
+  /// been deployed to production yet, and this used to hard-code
+  /// `https://hellotalk.jaan.lk`, which turned out to just be an unrelated
+  /// Laravel app ("addict") sharing that domain's server — a release build
+  /// was silently talking to someone else's app instead of failing
+  /// obviously. Leaving this null means a release build with no override
+  /// (see [_dartDefineHost]/[setBaseUrl]) now fails loudly and immediately
+  /// with a clear message (see [_requireProdBaseUrl]) instead of that.
+  ///
+  /// Set this to the real domain once hello-backend is actually deployed,
+  /// e.g. `static const String? _prodBaseUrl = 'https://your-domain.com';`.
+  static const String? _prodBaseUrl = null;
+
+  /// [baseUrl] and [candidateUploadUrls] both need this exact same
+  /// "unset production URL" guard in their `kReleaseMode` branch — shared
+  /// here so the message only has to be written once. Throws rather than
+  /// returning some fallback, since silently falling back to anything (an
+  /// empty string, localhost, the old wrong domain) would just trade one
+  /// confusing failure for another.
+  static String _requireProdBaseUrl() {
+    final prod = _prodBaseUrl;
+    if (prod == null || prod.isEmpty) {
+      throw StateError(
+        'No production backend is configured yet (ApiConfig._prodBaseUrl is '
+        'unset). Either deploy hello-backend somewhere and set '
+        '_prodBaseUrl to that domain, or — to test a release build before '
+        "that exists — rebuild with --dart-define=API_HOST=<your PC's LAN "
+        'IP> so it talks to a locally-running backend instead.',
+      );
+    }
+    return prod;
+  }
 
   /// Default port for hello-backend. Local dev only — production runs on
   /// standard HTTPS (443, implicit — see [_prodBaseUrl]).
@@ -55,7 +83,7 @@ class ApiConfig {
     }
 
     if (kReleaseMode) {
-      return _prodBaseUrl;
+      return _requireProdBaseUrl();
     }
 
     if (kIsWeb) {
@@ -111,7 +139,7 @@ class ApiConfig {
     }
 
     if (kReleaseMode) {
-      return ['$_prodBaseUrl/api/media/upload'];
+      return ['${_requireProdBaseUrl()}/api/media/upload'];
     }
 
     if (kIsWeb) {

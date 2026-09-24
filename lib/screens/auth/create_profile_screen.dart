@@ -2,11 +2,13 @@ import 'dart:typed_data';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../data/countries.dart';
 import '../../services/auth_service.dart';
 import '../../services/storage_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
 import '../../widgets/auth_widgets.dart';
+import '../../widgets/country_picker_sheet.dart';
 import 'select_interests_screen.dart';
 import 'signup_screen.dart';
 
@@ -97,9 +99,15 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
   String _nativeLang = 'English';
   String _learningLang = 'Spanish';
   String _gender = 'male';
+  Country? _selectedCountry;
   bool _loading = false;
   bool _uploadingPhoto = false;
   String? _avatarUrl;
+
+  Future<void> _pickCountry() async {
+    final picked = await showCountryPickerSheet(context);
+    if (picked != null && mounted) setState(() => _selectedCountry = picked);
+  }
 
   static const _languages = [
     'English',
@@ -166,6 +174,7 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
         'nativeLang': _nativeLang,
         'learningLang': _learningLang,
         'gender': _gender,
+        if (_selectedCountry != null) 'countryFlag': _selectedCountry!.flagEmoji,
         if (_avatarUrl != null) 'avatarUrl': _avatarUrl,
       });
     } on FirebaseException catch (e) {
@@ -323,6 +332,12 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
                     ),
                   ),
                 ],
+              ),
+              const SizedBox(height: 16),
+              CountryField(
+                label: 'Country',
+                value: _selectedCountry,
+                onTap: _pickCountry,
               ),
               const SizedBox(height: 28),
               AuthPrimaryButton(

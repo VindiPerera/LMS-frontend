@@ -210,26 +210,8 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
                             Positioned(
                               bottom: 2,
                               left: 2,
-                              child: Container(
-                                width: 26,
-                                height: 26,
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(color: Colors.white, width: 1.5),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withValues(alpha: 0.18),
-                                      blurRadius: 4,
-                                    ),
-                                  ],
-                                ),
-                                child: Center(
-                                  child: Text(
-                                    user.countryFlag.isNotEmpty ? user.countryFlag : location.flag,
-                                    style: const TextStyle(fontSize: 14),
-                                  ),
-                                ),
+                              child: CountryFlagBadge(
+                                flag: user.countryFlag.isNotEmpty ? user.countryFlag : location.flag,
                               ),
                             ),
                           ],

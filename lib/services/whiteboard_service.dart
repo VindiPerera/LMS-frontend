@@ -19,10 +19,16 @@ class WhiteboardService {
 
   static String? get _uid => FirebaseAuth.instance.currentUser?.uid;
 
-  /// A freshly-added item's default box, in canvas fractions (0..1) —
-  /// small enough that several fit on a phone-sized board without a resize.
-  static const double defaultWidth = 0.32;
-  static const double defaultHeight = 0.22;
+  /// A freshly-added item's default box, in canvas fractions (0..1) — near
+  /// the board's full available area (minus a small edge margin, so the
+  /// selection/resize handles anchored just outside the item's corners —
+  /// see WhiteboardCanvas — stay clear of the board's own rounded-rect
+  /// clip), like starting a fresh "slide". Applies to both text and images
+  /// alike; the user can still resize it smaller afterwards via the
+  /// canvas's own resize handle if they want more than one item visible on
+  /// the board at once.
+  static const double defaultWidth = 0.94;
+  static const double defaultHeight = 0.94;
   static const double _minPlacement = 0.04;
   static const double _placementStep = 0.055;
 
@@ -102,13 +108,13 @@ class WhiteboardService {
     final user = AuthService.instance.currentUser;
     if (uid == null || user == null || roomId.isEmpty || imageUrl.isEmpty) return;
 
-    // Keep the box's on-screen aspect ratio matching the source image —
-    // see WhiteboardGeometry's doc comment for why this width-fraction/
-    // height-fraction pair reproduces the same visual shape on any device
-    // (the canvas itself is always rendered at that same fixed ratio, just
-    // at different absolute sizes).
-    final height = (defaultWidth * WhiteboardGeometry.aspectRatio / aspectRatio).clamp(0.08, 0.9);
-    final placement = _nextPlacement(existingItems, width: defaultWidth, height: height);
+    // Starts full-size (see defaultWidth/defaultHeight's doc comment) —
+    // WhiteboardCanvas renders every image with BoxFit.cover, so this just
+    // fills/crops to the board's shape rather than letterboxing to the
+    // source image's own proportions. [aspectRatio] is still stored so a
+    // later manual resize (WhiteboardCanvas's resize handle) keeps the
+    // image in proportion instead of letting it stretch freely.
+    final placement = _nextPlacement(existingItems, width: defaultWidth, height: defaultHeight);
 
     await _items(roomId).add({
       'type': 'image',
@@ -119,7 +125,7 @@ class WhiteboardService {
       'x': placement.x,
       'y': placement.y,
       'width': defaultWidth,
-      'height': height,
+      'height': defaultHeight,
       'rotation': 0,
       'zIndex': _nextZIndex(existingItems),
       'aspectRatio': aspectRatio,
@@ -133,7 +139,7 @@ class WhiteboardService {
     double fontSize = 16,
     String colorHex = 'FFFFFFFF',
     bool bold = false,
-    String textAlign = 'left',
+    String textAlign = 'center',
   }) async {
     final uid = _uid;
     final user = AuthService.instance.currentUser;

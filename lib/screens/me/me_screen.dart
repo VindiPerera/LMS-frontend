@@ -81,6 +81,8 @@ class _MeScreenState extends State<MeScreen> {
             _VipPromoBanner(),
             const SizedBox(height: 18),
             _ProfileHeader(user: user, onEdit: _editProfile),
+            const SizedBox(height: 14),
+            _VipMembershipBanner(),
             if (user.tags.isNotEmpty) ...[
               const SizedBox(height: 14),
               _InterestsSection(tags: user.tags),
@@ -127,6 +129,31 @@ class _MeScreenState extends State<MeScreen> {
   }
 }
 
+/// Opens the VIP benefits comparison sheet (_VipBenefitsCard) — shared by
+/// every "see VIP benefits" entry point on this screen (_VipPromoBanner's
+/// "View Now" and _VipMembershipBanner's "VIP Benefits" button) so they
+/// stay in sync instead of each carrying their own copy of this same
+/// modal-sheet boilerplate.
+void _showVipBenefitsSheet(BuildContext context) {
+  showModalBottomSheet(
+    context: context,
+    backgroundColor: Colors.transparent,
+    isScrollControlled: true,
+    builder: (context) => Padding(
+      padding: const EdgeInsets.all(16.0),
+      // The benefits list is taller than some screens, so this
+      // caps the sheet below full height and lets it scroll
+      // instead of overflowing off the bottom.
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.85,
+        ),
+        child: SingleChildScrollView(child: _VipBenefitsCard()),
+      ),
+    ),
+  );
+}
+
 class _VipPromoBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -149,25 +176,7 @@ class _VipPromoBanner extends StatelessWidget {
             ),
           ),
           GestureDetector(
-            onTap: () {
-              showModalBottomSheet(
-                context: context,
-                backgroundColor: Colors.transparent,
-                isScrollControlled: true,
-                builder: (context) => Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  // The benefits list is taller than some screens, so this
-                  // caps the sheet below full height and lets it scroll
-                  // instead of overflowing off the bottom.
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxHeight: MediaQuery.of(context).size.height * 0.85,
-                    ),
-                    child: SingleChildScrollView(child: _VipBenefitsCard()),
-                  ),
-                ),
-              );
-            },
+            onTap: () => _showVipBenefitsSheet(context),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
               decoration: BoxDecoration(
@@ -182,6 +191,152 @@ class _VipPromoBanner extends StatelessWidget {
                   fontSize: 12.5,
                 ),
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The "FaceTalk VIP Membership" card shown directly under the user's own
+/// profile picture/name/Edit row (_ProfileHeader) — a short, glanceable
+/// highlight reel of a few VIP perks with its own "VIP Benefits" button,
+/// distinct from _VipPromoBanner above (a plain text-link-style nudge sitting
+/// above the profile picture, left as-is). Both open the exact same
+/// _VipBenefitsCard sheet (_showVipBenefitsSheet) — this card is just a
+/// second, more visually prominent entry point to it, matching the
+/// dark purple/blue gradient "membership card" look of similar VIP promos
+/// elsewhere in the app (see _MyVoiceRoomBanner's own gradient below) rather
+/// than introducing a brand new color language.
+class _VipMembershipBanner extends StatelessWidget {
+  static const _gold = Color(0xFFFFC857);
+  static const _goldText = Color(0xFF3A1F00);
+
+  static const _benefits = [
+    'Unlimited Talk Time for 01 Month',
+    'White Board JPG uploading',
+    'White Board Text typing',
+    'Subtitles on and read',
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF2B1B6B), Color(0xFF4A00E0), Color(0xFF00B4DB)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: RichText(
+                  text: const TextSpan(
+                    children: [
+                      TextSpan(
+                        text: 'FaceTalk ',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 17),
+                      ),
+                      TextSpan(
+                        text: 'VIP',
+                        style: TextStyle(
+                          color: _gold,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 17,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                      TextSpan(
+                        text: ' Membership',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 17),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Benefits',
+                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13.5),
+                    ),
+                    const SizedBox(height: 8),
+                    for (final benefit in _benefits) _BenefitLine(text: benefit),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(color: _gold, borderRadius: BorderRadius.circular(8)),
+                child: const Text(
+                  'VIP+',
+                  style: TextStyle(color: _goldText, fontWeight: FontWeight.w900, fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          // width: double.infinity + a plain Container (no fixed height)
+          // under the GestureDetector keeps the whole pill tappable
+          // edge-to-edge and lets it size itself naturally at any screen
+          // width, rather than a narrow/fixed-size hit target.
+          GestureDetector(
+            onTap: () => _showVipBenefitsSheet(context),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(colors: [_gold, Color(0xFFFFA53D)]),
+                borderRadius: BorderRadius.circular(24),
+              ),
+              alignment: Alignment.center,
+              child: const Text(
+                'VIP Benefits  ›',
+                style: TextStyle(color: _goldText, fontWeight: FontWeight.w800, fontSize: 14),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BenefitLine extends StatelessWidget {
+  final String text;
+  const _BenefitLine({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.check_circle_rounded, color: Colors.white, size: 15),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.3),
             ),
           ),
         ],
@@ -244,6 +399,15 @@ class _ProfileHeader extends StatelessWidget {
                 ),
               ),
             ),
+            // Set during signup (CreateProfileScreen's country picker) —
+            // empty for any account that signed up before that existed, so
+            // this only shows once there's actually a flag to show.
+            if (user.countryFlag.isNotEmpty)
+              Positioned(
+                bottom: 2,
+                left: -4,
+                child: CountryFlagBadge(flag: user.countryFlag),
+              ),
           ],
         ),
         const SizedBox(width: 14),

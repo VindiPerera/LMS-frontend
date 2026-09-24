@@ -226,13 +226,23 @@ service cloud.firestore {
 
     // ------------------------------------------------------------------
     // reports/{reportId} — any signed-in user may file one about someone
-    // else's post; only admins (users/{uid}.role == 'admin') may read them.
+    // else's post (postId set) or directly about another person
+    // (reportedUserId set, e.g. a voice room's "Report" action) — each
+    // branch validates reason against its own taxonomy (ReportReason vs
+    // UserReportReason, see report_model.dart). Only admins
+    // (users/{uid}.role == 'admin') may read them; writes other than
+    // create are otherwise client-blocked — the admin panel's
+    // service-account credential updates status server-side, bypassing
+    // these rules entirely, same precedent as users/{uid} field updates.
     // ------------------------------------------------------------------
     match /reports/{reportId} {
       allow read: if isAdmin();
       allow create: if isSignedIn() &&
         request.resource.data.reporterId == request.auth.uid &&
-        request.resource.data.reason in ['spam', 'inappropriate', 'harassment', 'other'];
+        ((request.resource.data.get('postId', null) != null &&
+          request.resource.data.reason in ['spam', 'inappropriate', 'harassment', 'other']) ||
+         (request.resource.data.get('reportedUserId', null) != null &&
+          request.resource.data.reason in ['languagesMismatch', 'fraud', 'sexualContent', 'abusiveLanguage', 'religiousPoliticalContent', 'other']));
       allow update, delete: if false;
     }
 
@@ -411,14 +421,21 @@ service cloud.firestore {
       // a user may only claim 'host' if they really are this room's host
       // (per voiceRooms/{roomId}.hostId), otherwise they join as
       // 'listener' — never 'moderator' or 'speaker' straight out of the
-      // gate. On update, a self-write may leave `role` untouched (mic
-      // mute/etc.) or move it between 'listener'/'speaker'
-      // (requestToSpeak), but never self-promote to 'moderator' or 'host';
-      // the room's host may change any other participant's doc freely
+      // gate (RoomParticipantService.join no longer auto-restores a
+      // rejoining moderator's seat either — see its own doc comment). On
+      // update, a self-write may leave `role` untouched (mic mute/etc.),
+      // move it between 'listener'/'speaker' (requestToSpeak), or
+      // self-promote to 'moderator' specifically when they're already this
+      // room's designated moderatorUid (RoomParticipantService.raiseHand/
+      // acceptStageInvite reclaiming a seat after a rejoin) or have a
+      // pending moderator invite — but never self-promote to 'host'. The
+      // room's host may change any other participant's doc freely
       // (removeFromStage, promoteToModerator, inviteToStage); a live
       // moderator may move someone else between 'listener' (removeFromStage)
-      // and 'speaker' (inviteToStage) — never promote anyone to moderator
-      // themselves.
+      // and 'speaker' (inviteToStage), and may also restore 'moderator'
+      // specifically for the one person already recorded as moderatorUid
+      // (RoomParticipantService.acceptRaisedHand/acceptStageInvite) — never
+      // promote a new, different person to moderator themselves.
       // ------------------------------------------------------------------
       match /participants/{uid} {
         allow read: if isSignedIn() && canAccessRoom(roomId);
@@ -465,6 +482,34 @@ service cloud.firestore {
         // that same Accept flow persist moderatorUid too (without it,
         // Accept would flip the role but the promotion wouldn't survive a
         // later leave-and-rejoin).
+        // The third branch's extra `role == 'moderator'` arm is what lets a
+        // moderator-acceptor (not just the host) restore ANOTHER
+        // participant's full moderator role via RoomParticipantService.
+        // acceptRaisedHand/acceptStageInvite's _seatRoleFor — see
+        // room_participant_service.dart's join() doc comment for why a
+        // rejoined moderator's seat isn't auto-restored and instead comes
+        // back through this same accept flow. Narrowly scoped: `uid` (the
+        // target) must already BE this room's own moderatorUid, so this
+        // only ever restores the one person already entitled to the role —
+        // it can never promote a new, arbitrary person, which stays
+        // host-only via the existing promoteToModerator/sendModeratorInvite
+        // self-accept flow (first arm of this same allow, and the
+        // voiceRooms/{roomId} update rule's matching moderatorUid arm).
+        // `!(resource.data.role in ['host', 'moderator'])` on the
+        // moderator-actor branch below is what stops a moderator writing
+        // ANY change (removeFromStage, demoteModeratorToSpeaker, muting)
+        // onto the host's or another moderator's own doc — mirrors the
+        // delete rule's own `!(resource.data.role in ['host',
+        // 'moderator'])` guard just below, which already had this
+        // protection; the update rule was missing its counterpart, letting
+        // a moderator move the host back to the audience via
+        // RoomParticipantService.removeFromStage (room_profile_sheet.dart's
+        // "Remove" pill used to offer this to a moderator with no such
+        // guard client-side either — see its own updated condition).
+        // Doesn't affect the moderator-restore arm just below: that only
+        // ever fires while the target's CURRENT role is 'listener' (a
+        // designated moderator who rejoined but hasn't been reseated yet —
+        // see join()'s doc comment), which already isn't 'host'/'moderator'.
         allow update: if isSignedIn() &&
           ((request.auth.uid == uid &&
               (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']) ||
@@ -474,7 +519,10 @@ service cloud.firestore {
                     resource.data.get('moderatorInvitePending', false) == true)))) ||
             get(/databases/$(database)/documents/voiceRooms/$(roomId)).data.hostId == request.auth.uid ||
             (get(/databases/$(database)/documents/voiceRooms/$(roomId)/participants/$(request.auth.uid)).data.role == 'moderator' &&
-              request.resource.data.role in ['listener', 'speaker']));
+              !(resource.data.role in ['host', 'moderator']) &&
+              (request.resource.data.role in ['listener', 'speaker'] ||
+                (request.resource.data.role == 'moderator' &&
+                  uid == get(/databases/$(database)/documents/voiceRooms/$(roomId)).data.get('moderatorUid', '')))));
         // Self-delete (leaving normally) always works. Anyone else
         // signed in may also delete a participant doc whose own
         // heartbeat (lastActiveAt — RoomParticipantService.heartbeat)

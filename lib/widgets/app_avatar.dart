@@ -124,3 +124,35 @@ class AppAvatar extends StatelessWidget {
     );
   }
 }
+
+/// A round, white-bordered "sticker" badge showing a country flag —
+/// distinct from [AppAvatar]'s own flat `showFlag`/`flag` (a bare emoji
+/// character, no background) — this is the more prominent pin-style badge
+/// used on a full profile screen's avatar (see connect/
+/// partner_profile_screen.dart and me/me_screen.dart), extracted here so
+/// both share one definition instead of drifting apart.
+class CountryFlagBadge extends StatelessWidget {
+  final String flag;
+  final double size;
+
+  const CountryFlagBadge({super.key, required this.flag, this.size = 26});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: 1.5),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.18), blurRadius: 4),
+        ],
+      ),
+      child: Center(
+        child: Text(flag, style: TextStyle(fontSize: size * 0.54)),
+      ),
+    );
+  }
+}

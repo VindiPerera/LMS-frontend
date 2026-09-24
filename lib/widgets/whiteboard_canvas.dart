@@ -336,35 +336,48 @@ class _WhiteboardCanvasState extends State<WhiteboardCanvas> {
         borderRadius: BorderRadius.circular(radius),
       ),
       // No `alignment` here (deliberately — see below): it looked like the
-      // right way to pin content to the top-left, but Container reacts to
-      // a non-null `alignment` by giving its child LOOSE constraints
-      // (shrink-wrap to content) instead of the box's full size. That
-      // silently broke center/right alignment — the Text was always
-      // already exactly as wide as its own content, so `textAlign` had no
-      // extra room to actually do anything. The SizedBox below now forces
-      // full width explicitly instead, and top-left is just the natural
-      // resting position for non-centered content, so nothing else here
-      // needs to change to keep that look.
+      // right way to center content, but Container reacts to a non-null
+      // `alignment` by giving its child LOOSE constraints (shrink-wrap to
+      // content) instead of the box's full size. That silently broke
+      // center/right `textAlign` — the Text was always already exactly as
+      // wide as its own content, so `textAlign` had no extra room to
+      // actually do anything. The SizedBox below forces full width
+      // explicitly instead, so `textAlign` keeps working regardless of how
+      // this centers vertically.
       //
-      // A resized-smaller box scrolls its overflowing text rather than
-      // clipping or overflow-painting past its own bounds — keeps the
-      // board tidy ("fits properly within the whiteboard") without losing
-      // any of what was typed.
-      child: SingleChildScrollView(
-        physics: const ClampingScrollPhysics(),
-        child: SizedBox(
-          width: double.infinity,
-          child: Text(
-            item.text,
-            textAlign: align,
-            style: TextStyle(
-              fontSize: item.fontSize,
-              fontWeight: item.bold ? FontWeight.w800 : FontWeight.w500,
-              color: color,
-              height: 1.25,
+      // Vertical centering (both axes, by default, for a freshly-added
+      // item — see WhiteboardService.defaultWidth's doc comment) is done
+      // via LayoutBuilder + a ConstrainedBox(minHeight: ...) matching the
+      // box's own available height: short text gets equal space above and
+      // below via Center; once the text is taller than that, minHeight
+      // simply stops constraining anything and the SingleChildScrollView
+      // below takes over, scrolling from the top — same as before, keeping
+      // the board tidy ("fits properly within the whiteboard") for a
+      // resized-smaller box without losing any of what was typed.
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return SingleChildScrollView(
+            physics: const ClampingScrollPhysics(),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Center(
+                child: SizedBox(
+                  width: double.infinity,
+                  child: Text(
+                    item.text,
+                    textAlign: align,
+                    style: TextStyle(
+                      fontSize: item.fontSize,
+                      fontWeight: item.bold ? FontWeight.w800 : FontWeight.w500,
+                      color: color,
+                      height: 1.25,
+                    ),
+                  ),
+                ),
+              ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
   }

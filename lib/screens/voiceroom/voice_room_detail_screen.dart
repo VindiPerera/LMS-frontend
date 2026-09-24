@@ -106,6 +106,16 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
   // this notice is always the right call for that transition — there's no
   // "did I do this to myself?" case left to distinguish.
   String? _lastKnownRole;
+  // Same subscription also watches handRaised: true -> false while role
+  // stays 'listener' — unlike the role case above, that specific
+  // transition genuinely IS ambiguous (lowering it yourself and having the
+  // host/moderator decline it produce the exact same resulting doc), so
+  // _loweringHandSelf marks the one case that's ours, set right before the
+  // self-triggered write in _raiseHand and cleared once it completes —
+  // by construction that write's own resulting snapshot can only ever
+  // arrive during that window, never after.
+  bool _lastKnownHandRaised = false;
+  bool _loweringHandSelf = false;
   StreamSubscription<List<RoomParticipant>>? _roleWatchSub;
 
   // Streams the signed-in user's own moderatorInvitePending flag from their
@@ -232,9 +242,22 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
         });
       }
       _roleWatchSub = _participantsStream.listen((participants) {
-        final newRole = _findMe(participants)?.role;
+        final me = _findMe(participants);
+        final newRole = me?.role;
+        final newHandRaised = me?.handRaised ?? false;
         if (_lastKnownRole == 'listener' && newRole == 'speaker') {
           _showInvitedToStageNotice();
+        } else if (_lastKnownHandRaised &&
+            !newHandRaised &&
+            newRole == 'listener' &&
+            !_loweringHandSelf) {
+          // handRaised flipped true -> false while we're still a plain
+          // listener (so this wasn't RoomParticipantService.acceptRaisedHand
+          // seating us — that changes `role` in the same write, caught by
+          // the branch above) and we didn't just lower it ourselves (see
+          // _loweringHandSelf's doc comment) — the only thing left is
+          // RoomParticipantService.declineRaisedHand.
+          _showHandDeclinedNotice();
         } else if (!_isHost && _lastKnownRole != null && newRole == null) {
           // We were present a moment ago and now aren't — the only way
           // that happens while this screen is open and heartbeating
@@ -257,6 +280,7 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
           _handleKicked();
         }
         _lastKnownRole = newRole;
+        _lastKnownHandRaised = newHandRaised;
       });
     }
     if (widget.justCreated) {
@@ -1122,17 +1146,19 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
     }
   }
 
-  /// Tapping an empty seat or the composer's raise-hand button — both raise
-  /// (or, tapped again while already waiting, lower) the caller's own hand
-  /// rather than instantly claiming a seat. A host/moderator still has to
-  /// actually seat them (see the Raised Hands sheet's Accept), even when a
-  /// seat happens to be open right now — see
-  /// RoomParticipantService.setHandRaised's doc comment for why that's
-  /// deliberate. No _expectingOwnPromotion bookkeeping needed here (unlike
-  /// the old instant-seat version): raising a hand never changes `role`
-  /// itself, so _roleWatchSub's "was I just invited up?" notice fires
-  /// correctly and only once the host actually accepts — exactly the
-  /// moment that notice is for.
+  /// Tapping an empty seat or the composer's raise-hand button. Lowering an
+  /// already-raised hand is a plain toggle (RoomParticipantService.
+  /// setHandRaised) same as always. Raising is now smarter:
+  /// RoomParticipantService.raiseHand instantly reseats the caller (as
+  /// 'moderator') if they're this room's designated moderator rejoining
+  /// with a stage seat already free — see its own doc comment — otherwise
+  /// it falls back to the normal queued setHandRaised(true) exactly like
+  /// before, needing the host/moderator to actually accept via the Raised
+  /// Hands sheet even when a seat happens to be open, which is why the
+  /// non-moderator path still shows no _expectingOwnPromotion-style
+  /// bookkeeping here: raising a hand still never changes `role` by
+  /// itself in that case, so _roleWatchSub's "was I just invited up?"
+  /// notice still fires correctly once the host actually accepts.
   Future<void> _raiseHand(RoomParticipant? me) async {
     if (me != null && me.isSeated) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1142,12 +1168,27 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
     }
     final alreadyRaised = me?.handRaised ?? false;
     try {
-      await RoomParticipantService.setHandRaised(widget.room.id, !alreadyRaised);
+      if (alreadyRaised) {
+        _loweringHandSelf = true;
+        try {
+          await RoomParticipantService.setHandRaised(widget.room.id, false);
+        } finally {
+          _loweringHandSelf = false;
+        }
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Hand lowered.')),
+        );
+        return;
+      }
+      final seatedImmediately = await RoomParticipantService.raiseHand(widget.room.id);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            alreadyRaised ? 'Hand lowered.' : 'Hand raised — waiting for the host to invite you up.',
+            seatedImmediately
+                ? "You're back on stage."
+                : 'Hand raised — waiting for the host to invite you up.',
           ),
         ),
       );
@@ -1191,6 +1232,43 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
               Expanded(
                 child: Text(
                   "You're invited to speak! Say hi to everyone 🎤",
+                  style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+  }
+
+  /// Shown when the host/moderator declines a raised hand
+  /// (RoomParticipantService.declineRaisedHand) — see _roleWatchSub's doc
+  /// comment for how this is told apart from the caller lowering their own
+  /// hand, which shows no notice here (the "Hand lowered." snackbar from
+  /// _raiseHand already covers that). Same floating-snackbar look as
+  /// _showInvitedToStageNotice, just the amber "didn't work out" tone
+  /// instead of purple.
+  void _showHandDeclinedNotice() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: bubble,
+          duration: const Duration(seconds: 4),
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+            side: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
+          ),
+          content: const Row(
+            children: [
+              Icon(Icons.front_hand_rounded, color: Color(0xFFE8A23C), size: 20),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Your request to speak was declined.',
                   style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
                 ),
               ),
@@ -1258,17 +1336,6 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                   padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
                   child: Row(
                     children: [
-                      IconButton(
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                        icon: const Icon(
-                          Icons.arrow_back_rounded,
-                          color: Colors.white70,
-                          size: 20,
-                        ),
-                        onPressed: () => Navigator.of(context).pop(),
-                      ),
-                      const SizedBox(width: 8),
                       // The chips below vary with role (board tools, Invite,
                       // End Room, Leave) and easily outnumber what a narrow
                       // phone width can fit on one line — a plain Row here
@@ -1276,8 +1343,8 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                       // "..." menu off-screen entirely (with the classic
                       // yellow/black overflow stripes in debug builds).
                       // Scrolling this middle section instead of the whole
-                      // toolbar keeps back and "..." always reachable on
-                      // every device, with everything else reachable via an
+                      // toolbar keeps "..." always reachable on every
+                      // device, with everything else reachable via an
                       // always-visible scrollbar rather than requiring users
                       // to discover an invisible swipe area. On desktop/web
                       // this only actually works with AppScrollBehavior (see
@@ -1733,6 +1800,18 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                     ],
                   ),
                 ),
+                // Persistent — not a transient snackbar — for as long as a
+                // hand stays raised and unanswered: the seat grid's own
+                // amber empty-seat highlight and the composer's amber
+                // raise-hand button are both easy to miss/forget the
+                // meaning of, especially on a screen that's otherwise
+                // scrolled away from them. Disappears the moment
+                // handRaised flips back to false, whichever way that
+                // happens — accepted (isSeated becomes true too), declined
+                // (_showHandDeclinedNotice fires alongside), or lowered by
+                // hand.
+                if ((me?.handRaised ?? false) && !(me?.isSeated ?? false))
+                  _HandRaisedWaitingBanner(onLowerHand: () => _raiseHand(me)),
                 _Composer(
                   controller: _controller,
                   me: me,
@@ -2309,6 +2388,60 @@ class _CommentLine extends StatelessWidget {
                     ),
                   ),
                 ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The persistent "still waiting" bar shown above the composer while the
+/// signed-in user has a raised hand pending — see build()'s own comment for
+/// exactly when it shows/hides. Distinct from the amber empty-seat/
+/// raise-hand-button tinting elsewhere on this screen (a subtle hint,
+/// easy to miss) — this is the explicit, can't-miss-it version, plus a
+/// direct way to lower the hand without hunting for the button that
+/// raised it.
+class _HandRaisedWaitingBanner extends StatelessWidget {
+  final VoidCallback onLowerHand;
+  const _HandRaisedWaitingBanner({required this.onLowerHand});
+
+  static const _amber = Color(0xFFE8A23C);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: _amber.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _amber.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.front_hand_rounded, color: _amber, size: 18),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Text(
+              'Please wait for the Host to respond.',
+              style: TextStyle(color: _amber, fontSize: 12.5, fontWeight: FontWeight.w700),
+            ),
+          ),
+          const SizedBox(width: 8),
+          GestureDetector(
+            onTap: onLowerHand,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Text(
+                'Lower hand',
+                style: TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.w700),
               ),
             ),
           ),

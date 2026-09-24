@@ -115,28 +115,6 @@ class RoomParticipantService {
   /// session that's actually still current.
   static String newSessionId() => FirebaseFirestore.instance.collection('_').doc().id;
 
-  /// Registers the signed-in user as present in [roomId] — the host lands
-  /// as an unmuted 'host', everyone else as a muted 'listener' (unless they
-  /// are the room's designated moderator, in which case their role is
-  /// restored to 'moderator'). Called once from
-  /// VoiceRoomDetailScreen.initState; pairs with [leave].
-  ///
-  /// Idempotent and race-safe: reconnecting to a session that hasn't been
-  /// swept as stale yet (e.g. a brief network drop while
-  /// VoiceRoomDetailScreen stayed mounted, or navigating back in before the
-  /// old doc expired) just refreshes the heartbeat and keeps whatever
-  /// role/mute state they had — it does not reset them to a fresh
-  /// listener, does not double-increment participantCount, and (via the
-  /// transaction below) can't lose to a concurrent stale [leave] the way a
-  /// plain read-then-write would.
-  ///
-  /// Moderator restoration: the host-assigned moderator uid is stored on the
-  /// room doc itself (voiceRooms/{roomId}.moderatorUid — see
-  /// VoiceRoomService.setModerator). When the moderator's own participant
-  /// doc no longer exists (they left cleanly and their doc was deleted by
-  /// [leave]), this join() reads that field and recreates them with
-  /// role:'moderator' rather than the default 'listener', making rejoin
-  /// transparent to the rest of the room.
   /// Remaining ban time if the signed-in user is still serving a
   /// [kickParticipant] ban for [roomId], or null if they're clear to join
   /// (never banned, or their ban has already expired). [join] checks this
@@ -163,6 +141,33 @@ class RoomParticipantService {
     }
   }
 
+  /// Registers the signed-in user as present in [roomId] — the host lands
+  /// as an unmuted 'host', everyone else (including this room's own
+  /// designated moderator, if [uid] happens to be them — see
+  /// voiceRooms/{roomId}.moderatorUid, VoiceRoomService.setModerator) as a
+  /// muted 'listener'. Called once from VoiceRoomDetailScreen.initState;
+  /// pairs with [leave].
+  ///
+  /// Deliberately does NOT auto-restore a moderator's seat on rejoin — only
+  /// the host's is ever pinned (see [_hasOpenSeat]'s reserved-seat comment
+  /// and _buildSeats in voice_room_detail_screen.dart, which always sorts
+  /// `role == 'host'` first regardless of join order — nothing here needs
+  /// to special-case the host's own seat either, it falls out of that sort
+  /// automatically). A rejoining moderator instead follows the same
+  /// raise-hand path anyone else does — see [raiseHand], which recognizes
+  /// them via moderatorUid and skips the queue if a seat's already free,
+  /// and [acceptRaisedHand]/[acceptStageInvite], which restore their full
+  /// role rather than seating them as a plain speaker whenever they are
+  /// seated.
+  ///
+  /// Idempotent and race-safe: reconnecting to a session that hasn't been
+  /// swept as stale yet (e.g. a brief network drop while
+  /// VoiceRoomDetailScreen stayed mounted, or navigating back in before the
+  /// old doc expired) just refreshes the heartbeat and keeps whatever
+  /// role/mute state they had — it does not reset them to a fresh
+  /// listener, does not double-increment participantCount, and (via the
+  /// transaction below) can't lose to a concurrent stale [leave] the way a
+  /// plain read-then-write would.
   static Future<void> join({required String roomId, required bool isHost, required String sessionId}) async {
     final uid = _uid;
     final user = AuthService.instance.currentUser;
@@ -177,21 +182,6 @@ class RoomParticipantService {
       throw RoomBanException(remaining);
     }
 
-    // Read the room doc once (outside the transaction — we only need the
-    // moderatorUid field, which only the host can change, so reading it
-    // slightly before the transaction is safe enough; a race here would at
-    // worst cause a rejoining moderator to land as 'listener' for one join
-    // tick, which is no worse than the status-quo before this fix).
-    String? storedModeratorUid;
-    try {
-      final roomSnap = await _room(roomId).get();
-      storedModeratorUid = roomSnap.data()?['moderatorUid']?.toString();
-    } catch (e) {
-      debugPrint('RoomParticipantService.join: could not read moderatorUid (non-fatal): $e');
-    }
-
-    final isModerator = !isHost && uid == storedModeratorUid;
-
     final participantRef = _participants(roomId).doc(uid);
     await FirebaseFirestore.instance.runTransaction((tx) async {
       final existing = await tx.get(participantRef);
@@ -203,17 +193,15 @@ class RoomParticipantService {
         if (user.avatarUrl.isNotEmpty && (existing.data()?['avatarUrl']?.toString().isEmpty ?? true)) {
           updates['avatarUrl'] = user.avatarUrl;
         }
-        if (isModerator && existing.data()?['role'] != 'moderator') {
-          updates['role'] = 'moderator';
-        }
         tx.update(participantRef, updates);
         return;
       }
-      // Determine the correct starting role:
-      //  - room's hostId owner  → 'host'   (unmuted)
-      //  - room's moderatorUid  → 'moderator' (muted, but with mod powers)
-      //  - everyone else        → 'listener' (muted)
-      final role = isHost ? 'host' : (isModerator ? 'moderator' : 'listener');
+      // Starting role: the room's hostId owner lands as 'host' (unmuted);
+      // everyone else — including a designated moderator rejoining after
+      // having left — lands as a plain 'listener' (muted). See this
+      // method's own doc comment for why a moderator's seat isn't restored
+      // here.
+      final role = isHost ? 'host' : 'listener';
       tx.set(participantRef, {
         'uid': uid,
         'sessionId': sessionId,
@@ -347,15 +335,51 @@ class RoomParticipantService {
   }
 
   /// True while there's still an open speaker seat — shared by every path
-  /// that can seat someone ([acceptRaisedHand], [acceptStageInvite]) so
-  /// they all enforce the exact same capacity, and so a host bulk-accepting
-  /// several raised hands in one go (see the Raised Hands sheet) naturally
-  /// stops once seats run out rather than over-seating the room.
+  /// that can seat someone ([acceptRaisedHand], [acceptStageInvite],
+  /// [raiseHand]) so they all enforce the exact same capacity, and so a
+  /// host bulk-accepting several raised hands in one go (see the Raised
+  /// Hands sheet) naturally stops once seats run out rather than
+  /// over-seating the room.
+  ///
+  /// Reserves one seat for the host whenever they aren't currently present
+  /// (no seated participant has role 'host') — their seat is never handed
+  /// to anyone else while they're away, unlike a moderator's (see [join]'s
+  /// doc comment for why the two are treated differently). The host
+  /// themselves is never subject to this cap — [join] seats them
+  /// unconditionally whenever `hostId` matches, so this only ever holds
+  /// their spot open for a genuine return, never blocks it.
   static Future<bool> _hasOpenSeat(String roomId) async {
     final seated = await _participants(
       roomId,
     ).where('role', whereIn: ['host', 'moderator', 'speaker']).get();
-    return seated.docs.length < speakerSeats;
+    final hostPresent = seated.docs.any((d) => d.data()['role'] == 'host');
+    final reservedForHost = hostPresent ? 0 : 1;
+    return seated.docs.length + reservedForHost < speakerSeats;
+  }
+
+  /// The room's currently-designated moderator uid (see
+  /// [VoiceRoomService.setModerator]/`clearModerator`), or null if none is
+  /// set or the read fails. Single room-doc read shared by every call site
+  /// that needs to recognize "this is the same person who was moderator
+  /// before" — [raiseHand] and [_seatRoleFor] below, and the same pattern
+  /// [removeFromStage]/[demoteModeratorToSpeaker] already read inline.
+  static Future<String?> _moderatorUid(String roomId) async {
+    try {
+      final roomSnap = await _room(roomId).get();
+      return roomSnap.data()?['moderatorUid']?.toString();
+    } catch (e) {
+      debugPrint('RoomParticipantService._moderatorUid: read failed (non-fatal): $e');
+      return null;
+    }
+  }
+
+  /// 'moderator' if [uid] is this room's currently-designated moderator,
+  /// otherwise the default 'speaker' — used by [acceptRaisedHand] and
+  /// [acceptStageInvite] so seating a rejoined moderator back onto the
+  /// stage restores their actual role instead of demoting them to a plain
+  /// speaker just because their seat wasn't auto-restored on [join].
+  static Future<String> _seatRoleFor(String roomId, String uid) async {
+    return (await _moderatorUid(roomId)) == uid ? 'moderator' : 'speaker';
   }
 
   /// Self-write: raises or lowers the signed-in listener's own hand — "I'd
@@ -377,17 +401,53 @@ class RoomParticipantService {
     });
   }
 
-  /// Host/moderator-only: accepts [uid]'s raised hand — seats them as a
-  /// speaker (same capacity guard as [acceptStageInvite]) and clears the
-  /// hand-raise flag in the same write. Throws a plain-text message the UI
-  /// can show directly once every seat is taken, same as [acceptStageInvite].
+  /// Self-write: the "come back up" request for a listener who is this
+  /// room's designated moderator (moderatorUid — see [join]'s doc comment
+  /// for why their seat isn't auto-restored on rejoin). If a stage seat is
+  /// already open right now, seats them immediately as 'moderator' —
+  /// resuming a role they already held, not a brand-new speaker request,
+  /// so unlike [setHandRaised] this one skips the host/moderator-must-act
+  /// queue. If no seat is open (or the caller isn't the designated
+  /// moderator), it falls straight back to the normal [setHandRaised](true)
+  /// queue — see [acceptRaisedHand] for how that queued request later
+  /// restores their moderator role too, once someone accepts it.
+  ///
+  /// Returns true if seated immediately, false if it just queued a normal
+  /// raised hand — voice_room_detail_screen.dart's `_raiseHand` uses this
+  /// to show the right confirmation message.
+  static Future<bool> raiseHand(String roomId) async {
+    final uid = _uid;
+    if (uid == null || roomId.isEmpty) return false;
+
+    final moderatorUid = await _moderatorUid(roomId);
+    if (uid == moderatorUid && await _hasOpenSeat(roomId)) {
+      await _participants(roomId).doc(uid).update({
+        'role': 'moderator',
+        'isMuted': true,
+        'handRaised': false,
+      });
+      return true;
+    }
+
+    await setHandRaised(roomId, true);
+    return false;
+  }
+
+  /// Host/moderator-only: accepts [uid]'s raised hand — seats them (same
+  /// capacity guard as [acceptStageInvite]) and clears the hand-raise flag
+  /// in the same write. Restores full 'moderator' role rather than a plain
+  /// 'speaker' if [uid] is this room's designated moderator (see
+  /// [_seatRoleFor]) — same reasoning as [raiseHand]'s instant-reseat path,
+  /// just via the normal accept flow instead of skipping it. Throws a
+  /// plain-text message the UI can show directly once every seat is taken,
+  /// same as [acceptStageInvite].
   static Future<void> acceptRaisedHand({required String roomId, required String uid}) async {
     if (roomId.isEmpty || uid.isEmpty) return;
     if (!await _hasOpenSeat(roomId)) {
       throw Exception('No stage seats are available right now.');
     }
     await _participants(roomId).doc(uid).update({
-      'role': 'speaker',
+      'role': await _seatRoleFor(roomId, uid),
       'isMuted': true,
       'handRaised': false,
     });
@@ -500,12 +560,16 @@ class RoomParticipantService {
   }
 
   /// Self-write: accepts a pending stage invite — seats the caller (same
-  /// capacity guard as [acceptRaisedHand]) and clears the flag in the same
-  /// write. Self-promoting to 'speaker' has always
-  /// been unconditionally allowed by firestore.rules (see [setHandRaised]'s
-  /// doc comment — the same rule branch requestToSpeak used to rely on), so
-  /// this needs no special rules carve-out the way accepting a *moderator*
-  /// invite did.
+  /// capacity guard as [acceptRaisedHand], and the same [_seatRoleFor]
+  /// moderator-role restoration) and clears the flag in the same write.
+  /// Self-promoting to 'speaker' has always been unconditionally allowed by
+  /// firestore.rules (see [setHandRaised]'s doc comment — the same rule
+  /// branch requestToSpeak used to rely on); self-promoting to 'moderator'
+  /// is also already covered — same self-write branch [raiseHand] relies
+  /// on — since this only ever fires for the caller's own uid, which is
+  /// exactly what that branch requires. No rules carve-out needed here the
+  /// way accepting a *moderator invite* (a different flow — see
+  /// [promoteToModerator]) did.
   static Future<void> acceptStageInvite(String roomId) async {
     final uid = _uid;
     if (uid == null || roomId.isEmpty) return;
@@ -513,7 +577,7 @@ class RoomParticipantService {
       throw Exception('No stage seats are available right now.');
     }
     await _participants(roomId).doc(uid).update({
-      'role': 'speaker',
+      'role': await _seatRoleFor(roomId, uid),
       'isMuted': true,
       'stageInvitePending': false,
     });
