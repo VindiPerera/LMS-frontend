@@ -9,6 +9,7 @@ import '../../models/room_participant.dart';
 import '../../models/voiceroom.dart';
 import '../../models/whiteboard_item.dart';
 import '../../services/room_participant_service.dart';
+import '../../services/voice_room_audio_service.dart';
 import '../../services/storage_service.dart';
 import '../../services/voice_room_service.dart';
 import '../../services/voice_room_session_controller.dart';
@@ -149,6 +150,10 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
   Timer? _heartbeatTimer;
   StreamSubscription<List<RoomParticipant>>? _sweepSub;
 
+  // Surfaces live-audio problems (mic permission denied, audio server
+  // unreachable...) as snackbars — see VoiceRoomAudioService.errors.
+  StreamSubscription<String>? _audioErrorSub;
+
   // One fresh token per mount, threaded through join/heartbeat/leave — see
   // RoomParticipantService.newSessionId's doc comment for why this exists
   // (it's what stops a stale leave() from a just-closed previous mount of
@@ -163,7 +168,13 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
         roomId: widget.room.id,
         isHost: _isHost,
         sessionId: _sessionId,
-      ).catchError((e) {
+      ).then((_) {
+        // Live audio only starts once the Firestore join has landed (the
+        // server refuses an audio token to anyone without a participant
+        // doc), and only if this screen is still up. Never throws — see
+        // VoiceRoomAudioService.join.
+        if (mounted) VoiceRoomAudioService.instance.join(widget.room.id);
+      }).catchError((e) {
         debugPrint('Failed to join room ${widget.room.id}: $e');
         // A kickParticipant ban still within its 24h window — see
         // RoomParticipantService.join's pre-check and firestore.rules'
@@ -200,6 +211,12 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
           Navigator.of(context).pop();
           messenger.showSnackBar(SnackBar(content: Text(message)));
         }
+      });
+      _audioErrorSub = VoiceRoomAudioService.instance.errors.listen((message) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(content: Text(message)));
       });
       _heartbeatTimer = Timer.periodic(RoomParticipantService.heartbeatInterval, (_) {
         RoomParticipantService.heartbeat(widget.room.id, _sessionId);
@@ -337,7 +354,11 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
       // minimized — VoiceRoomSessionController now owns this session's
       // presence instead of it ending here.
       RoomParticipantService.leave(widget.room.id, _sessionId);
+      // Same condition as the leave above: when minimized, the audio
+      // service keeps running under the mini window instead.
+      VoiceRoomAudioService.instance.leave();
     }
+    _audioErrorSub?.cancel();
     super.dispose();
   }
 
