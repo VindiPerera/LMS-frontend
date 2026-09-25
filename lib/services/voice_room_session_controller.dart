@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../models/voiceroom.dart';
 import 'room_participant_service.dart';
+import 'voice_room_audio_service.dart';
 import 'voice_room_service.dart';
 
 /// Tracks the signed-in user's minimized voice room, if any — the single
@@ -49,6 +50,7 @@ class VoiceRoomSessionController extends ChangeNotifier {
       if (liveRoom == null || !liveRoom.isActive) {
         // The room itself is gone/ended — nothing left to leave() for.
         clear(leaveRoom: false);
+        VoiceRoomAudioService.instance.leave();
       }
     });
     notifyListeners();
@@ -67,6 +69,9 @@ class VoiceRoomSessionController extends ChangeNotifier {
     notifyListeners();
     if (leaveRoom && room != null && sessionId != null) {
       RoomParticipantService.leave(room.id, sessionId);
+      // Explicit close of the mini window ends the audio too. (Reopening —
+      // leaveRoom: false — keeps it running; the fresh screen re-attaches.)
+      VoiceRoomAudioService.instance.leave();
     }
   }
 
