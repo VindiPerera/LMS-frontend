@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/user.dart';
+import '../utils/presence.dart';
 import '../utils/stream_fallback.dart';
 
 /// Fetches language-exchange partners for the Connect tab from the
@@ -47,7 +48,32 @@ class PartnerService {
     return _users
         .doc(uid)
         .snapshots()
-        .map((doc) => doc.data()?['isOnline'] == true)
+        .map((doc) {
+          final lastSeenAt = doc.data()?['lastSeenAt'];
+          return isActuallyOnline(
+            doc.data()?['isOnline'] == true,
+            lastSeenAt is Timestamp ? lastSeenAt : null,
+          );
+        })
         .withFallback(() => false);
+  }
+
+  /// Live `users/{uid}.activeRoomId` — non-empty exactly while [uid] has a
+  /// live participant doc in that voice room (see
+  /// RoomParticipantService.join/leave). Drives the "in a voice room" badge
+  /// in chat_list_screen.dart and the "Go Look" banner in
+  /// chat_detail_screen.dart. Null (not '') once they're not in one, so a
+  /// caller can tell "definitely not in a room" apart from "still loading"
+  /// via a plain `snapshot.hasData` check if it needs to.
+  static Stream<String?> streamActiveRoomId(String uid) {
+    if (uid.isEmpty) return Stream.value(null);
+    return _users
+        .doc(uid)
+        .snapshots()
+        .map((doc) {
+          final id = doc.data()?['activeRoomId']?.toString() ?? '';
+          return id.isEmpty ? null : id;
+        })
+        .withFallback(() => null);
   }
 }

@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../models/whiteboard_item.dart';
 import '../services/whiteboard_service.dart';
@@ -64,17 +65,37 @@ class _WhiteboardCanvasState extends State<WhiteboardCanvas> {
   // committing a no-op move.
   Offset _dragAccum = Offset.zero;
 
+  // The item's box exactly as it was the moment the current body gesture
+  // (_onBodyScaleStart) began — the fixed baseline a pinch's *cumulative*
+  // `details.scale` is applied against. Unlike a plain drag delta, scale
+  // isn't incremental frame-to-frame, so resizing from the live, already-
+  // resized box on every update (the way a delta-based drag correctly does)
+  // would compound and blow the box up or shrink it far faster than the
+  // fingers actually moved. Null outside of an active body gesture.
+  WhiteboardItem? _scaleStartItem;
+
   static const double _minBoxFraction = 0.08;
   static const double _tapSlop = 4;
 
+  // Every handle (delete/options/resize) is drawn centered on its own
+  // anchor point (an item corner) at [_handleVisualSize] across, but sits
+  // inside a [_handleTouchSize] hit-test region — a full Material/HIG-sized
+  // touch target (44dp) — so it stays easy to grab on any screen density
+  // without the visible circle itself looking oversized. See _HandleButton.
+  static const double _handleVisualSize = 26;
+  static const double _handleTouchSize = 44;
+
   // Keeps every item's edge a little short of the canvas' own edge, in
-  // pixels — the quick-delete/options/resize handles anchor just outside
-  // an item's corners (see _buildItem), and the canvas is clipped to its
-  // rounded-rect bounds by its parent (see voice_room_detail_screen.dart);
-  // without this margin, an item dragged flush against the edge would push
-  // its own handles half outside that clip, making them partly invisible
-  // and partly untappable.
-  static const double _edgeMarginPx = 14;
+  // pixels — the quick-delete/options/resize handles anchor just outside an
+  // item's corners (see _buildItem), and the canvas is clipped to its
+  // rounded-rect bounds by its parent (see voice_room_detail_screen.dart) —
+  // a hard clip in Flutter cuts off hit-testing along with painting, not
+  // just what's drawn. This margin has to clear each handle's full
+  // [_handleTouchSize] footprint (not just its visible circle), or a handle
+  // dragged toward the edge would have its touch target itself clipped —
+  // silently shrinking how much of it actually responds to touch — well
+  // before any clipping became visible.
+  static const double _edgeMarginPx = _handleTouchSize / 2 + 4;
 
   WhiteboardItem _effective(WhiteboardItem item) => _liveOverrides[item.id] ?? item;
 
@@ -88,33 +109,96 @@ class _WhiteboardCanvasState extends State<WhiteboardCanvas> {
     }
   }
 
-  void _onBodyPanStart(WhiteboardItem item) {
+  // A dedicated tap handler, separate from the drag/pinch recognizer below
+  // — a Pan/Scale recognizer only ever calls its onStart once the pointer
+  // has moved past its own internal slop threshold, so a genuinely
+  // still tap-and-release (no perceptible movement at all) could otherwise
+  // land on an item and select nothing. Flutter's gesture arena runs a Tap
+  // and a Scale recognizer on the same GestureDetector safely side by
+  // side — whichever the touch actually turns out to be (a still tap vs.
+  // real movement) wins on its own, so this never double-fires alongside
+  // _onBodyScaleStart below for one continuous touch.
+  void _onBodyTap(WhiteboardItem item) {
+    if (_selectedId == item.id) return;
+    HapticFeedback.selectionClick();
+    setState(() => _selectedId = item.id);
+  }
+
+  // The body drag uses Scale (not Pan) so a single finger keeps moving the
+  // item exactly as a plain drag always has (details.scale stays 1.0 for a
+  // single pointer, so the resize branch below is simply never entered),
+  // while a second finger touching down mid-gesture is recognized as a
+  // pinch instead of being misread as a sudden, erratic jump in a
+  // single-pointer Pan recognizer's own delta — Flutter's own recommended
+  // pattern for a widget that needs to support drag AND pinch together.
+  // This is also the resize handle's own corner-drag path (below) getting
+  // priority in its small hit region, and body pinch/drag priority
+  // everywhere else — see _buildItem's Stack ordering.
+  void _onBodyScaleStart(WhiteboardItem item) {
     _dragAccum = Offset.zero;
+    final current = _effective(item);
+    _scaleStartItem = current;
+    if (_selectedId != item.id) HapticFeedback.selectionClick();
     setState(() {
       _selectedId = item.id;
-      _liveOverrides[item.id] = item;
+      _liveOverrides[item.id] = current;
     });
   }
 
-  void _onBodyPanUpdate(WhiteboardItem item, DragUpdateDetails details, double canvasW, double canvasH) {
-    _dragAccum += details.delta;
+  void _onBodyScaleUpdate(WhiteboardItem item, ScaleUpdateDetails details, double canvasW, double canvasH) {
+    _dragAccum += details.focalPointDelta;
     final current = _effective(item);
+    final start = _scaleStartItem ?? current;
     final marginX = _edgeMarginPx / canvasW;
     final marginY = _edgeMarginPx / canvasH;
+
+    var newWidth = current.width;
+    var newHeight = current.height;
+    double? newFontSize;
+    // pointerCount > 1 is what actually distinguishes a genuine pinch from
+    // an ordinary one-finger drag — details.scale alone can't (Flutter
+    // reports it as exactly 1.0 for a single pointer throughout, but
+    // checking pointerCount too keeps this correct if that ever changes).
+    if (details.pointerCount > 1) {
+      final resized = _resizeWithinBounds(
+        item: item,
+        base: start,
+        targetWidth: start.width * details.scale,
+        targetHeight: start.height * details.scale,
+        canvasW: canvasW,
+        canvasH: canvasH,
+        marginX: marginX,
+        marginY: marginY,
+      );
+      newWidth = resized.width;
+      newHeight = resized.height;
+      newFontSize = resized.fontSize;
+    }
+
+    // Position tracks the pinch/drag focal point either way — for a single
+    // finger this is just that finger's own movement (identical to the old
+    // Pan-based drag); for a pinch it lets the box recenter under wherever
+    // the two fingers' midpoint drifts to, matching how pinch-zoom behaves
+    // in other apps rather than resizing only around a fixed corner.
     // math.max guards against an oversized item (wider/taller than the
     // canvas minus both margins) making the clamp's own bounds invalid —
     // falls back to pinning against the near edge only, rather than
     // reserving a margin on both sides for something that can't fit.
-    final double newX = (current.x + details.delta.dx / canvasW)
-        .clamp(marginX, math.max(marginX, 1.0 - current.width - marginX));
-    final double newY = (current.y + details.delta.dy / canvasH)
-        .clamp(marginY, math.max(marginY, 1.0 - current.height - marginY));
-    setState(() => _liveOverrides[item.id] = current.copyWith(x: newX, y: newY));
+    final double newX = (current.x + details.focalPointDelta.dx / canvasW)
+        .clamp(marginX, math.max(marginX, 1.0 - newWidth - marginX));
+    final double newY = (current.y + details.focalPointDelta.dy / canvasH)
+        .clamp(marginY, math.max(marginY, 1.0 - newHeight - marginY));
+
+    setState(() {
+      _liveOverrides[item.id] =
+          current.copyWith(x: newX, y: newY, width: newWidth, height: newHeight, fontSize: newFontSize);
+    });
   }
 
-  void _onBodyPanEnd(WhiteboardItem item) {
+  void _onBodyScaleEnd(WhiteboardItem item) {
     final moved = _dragAccum.distance > _tapSlop;
     final finalItem = _effective(item);
+    _scaleStartItem = null;
     setState(() {
       _liveOverrides.remove(item.id);
       _selectedId = item.id;
@@ -123,59 +207,27 @@ class _WhiteboardCanvasState extends State<WhiteboardCanvas> {
   }
 
   void _onResizePanStart(WhiteboardItem item) {
+    HapticFeedback.selectionClick();
     setState(() => _liveOverrides[item.id] = item);
   }
 
   void _onResizePanUpdate(WhiteboardItem item, DragUpdateDetails details, double canvasW, double canvasH) {
     final current = _effective(item);
-    // Same edge margin as moving (see _edgeMarginPx's doc comment) — this
-    // handle is anchored just outside the item's own bottom-right corner,
-    // so the box it's resizing needs to stop just short of the canvas
-    // edge too, or the handle itself ends up partly clipped.
     final marginX = _edgeMarginPx / canvasW;
     final marginY = _edgeMarginPx / canvasH;
-    final maxWidth = math.max(_minBoxFraction, 1.0 - current.x - marginX);
-    final maxHeightBound = math.max(_minBoxFraction, 1.0 - current.y - marginY);
-
-    var newWidth = (current.width + details.delta.dx / canvasW).clamp(_minBoxFraction, maxWidth);
-    double newHeight;
-
-    final ratio = item.aspectRatio;
-    if (item.isImage && ratio != null && ratio > 0) {
-      // Locked to the source image's own proportions — dragging only ever
-      // changes width; height (and, if that would run off the bottom edge,
-      // width again) follows to keep the box's true visual aspect ratio,
-      // not just its stored width/height fractions (see
-      // WhiteboardGeometry's doc comment for why those two only match when
-      // every canvas this renders in shares the same aspect ratio).
-      newHeight = newWidth * WhiteboardGeometry.aspectRatio / ratio;
-      if (newHeight > maxHeightBound) {
-        newHeight = maxHeightBound;
-        newWidth = (newHeight * ratio / WhiteboardGeometry.aspectRatio).clamp(_minBoxFraction, maxWidth);
-      }
-      if (newHeight < _minBoxFraction) newHeight = _minBoxFraction;
-    } else {
-      newHeight = (current.height + details.delta.dy / canvasH).clamp(_minBoxFraction, maxHeightBound);
-    }
-
-    // For text, resizing the box IS resizing the text — the font grows or
-    // shrinks with the box (by the box's own area change, so it tracks
-    // however the user actually drags: wider, taller, or both) rather than
-    // leaving a fixed-size line of text stranded in a corner of a bigger
-    // box. Area-based (not just width or just height) so a diagonal drag
-    // feels proportionate either way.
-    double? newFontSize;
-    if (item.isText) {
-      final oldAreaPx = current.width * canvasW * current.height * canvasH;
-      final newAreaPx = newWidth * canvasW * newHeight * canvasH;
-      if (oldAreaPx > 0) {
-        final scale = math.sqrt(newAreaPx / oldAreaPx);
-        newFontSize = (current.fontSize * scale).clamp(10.0, 96.0);
-      }
-    }
-
+    final resized = _resizeWithinBounds(
+      item: item,
+      base: current,
+      targetWidth: current.width + details.delta.dx / canvasW,
+      targetHeight: current.height + details.delta.dy / canvasH,
+      canvasW: canvasW,
+      canvasH: canvasH,
+      marginX: marginX,
+      marginY: marginY,
+    );
     setState(() {
-      _liveOverrides[item.id] = current.copyWith(width: newWidth, height: newHeight, fontSize: newFontSize);
+      _liveOverrides[item.id] =
+          current.copyWith(width: resized.width, height: resized.height, fontSize: resized.fontSize);
     });
   }
 
@@ -183,6 +235,68 @@ class _WhiteboardCanvasState extends State<WhiteboardCanvas> {
     final finalItem = _effective(item);
     setState(() => _liveOverrides.remove(item.id));
     widget.onTransformEnd(finalItem);
+  }
+
+  // Shared by the corner resize handle's single-finger drag (delta-based,
+  // [base] is the live/current box) and the body's two-finger pinch
+  // (scale-based, [base] is the box captured when the pinch started) — one
+  // place for the boundary clamp, aspect-ratio lock and text-area-based
+  // font scaling, so the two gestures can never quietly drift into
+  // resizing differently from one another.
+  ({double width, double height, double? fontSize}) _resizeWithinBounds({
+    required WhiteboardItem item,
+    required WhiteboardItem base,
+    required double targetWidth,
+    required double targetHeight,
+    required double canvasW,
+    required double canvasH,
+    required double marginX,
+    required double marginY,
+  }) {
+    // Same edge margin as moving (see _edgeMarginPx's doc comment) — the
+    // box being resized needs to stop just short of the canvas edge, or its
+    // own resize handle ends up partly clipped.
+    final maxWidth = math.max(_minBoxFraction, 1.0 - base.x - marginX);
+    final maxHeightBound = math.max(_minBoxFraction, 1.0 - base.y - marginY);
+
+    var newWidth = targetWidth.clamp(_minBoxFraction, maxWidth);
+    double newHeight;
+
+    final ratio = item.aspectRatio;
+    if (item.isImage && ratio != null && ratio > 0) {
+      // Locked to the source image's own proportions — width drives the
+      // box; height (and, if that would run off the bottom edge, width
+      // again) follows to keep the box's true visual aspect ratio, not
+      // just its stored width/height fractions (see WhiteboardGeometry's
+      // doc comment for why those two only match when every canvas this
+      // renders in shares the same aspect ratio).
+      newHeight = newWidth * WhiteboardGeometry.aspectRatio / ratio;
+      if (newHeight > maxHeightBound) {
+        newHeight = maxHeightBound;
+        newWidth = (newHeight * ratio / WhiteboardGeometry.aspectRatio).clamp(_minBoxFraction, maxWidth);
+      }
+      if (newHeight < _minBoxFraction) newHeight = _minBoxFraction;
+    } else {
+      newHeight = targetHeight.clamp(_minBoxFraction, maxHeightBound);
+    }
+
+    // For text, resizing the box IS resizing the text — the font grows or
+    // shrinks with the box (by the box's own area change relative to
+    // [base], so it tracks however the user actually gestures: wider,
+    // taller, or both) rather than leaving a fixed-size line of text
+    // stranded in a corner of a bigger box. Area-based so a diagonal drag
+    // or an off-axis pinch both feel proportionate.
+    double? newFontSize;
+    if (item.isText) {
+      final oldAreaPx = base.width * canvasW * base.height * canvasH;
+      final newAreaPx = newWidth * canvasW * newHeight * canvasH;
+      if (oldAreaPx > 0) {
+        final scale = math.sqrt(newAreaPx / oldAreaPx);
+        newFontSize = (base.fontSize * scale).clamp(10.0, 96.0);
+      }
+    }
+
+    return (width: newWidth, height: newHeight, fontSize: newFontSize);
   }
 
   @override
@@ -200,7 +314,7 @@ class _WhiteboardCanvasState extends State<WhiteboardCanvas> {
             child: Padding(
               padding: EdgeInsets.symmetric(horizontal: 24),
               child: Text(
-                'Tap "Add images" or "Type text" to start the board',
+                'Tap "Add images" or "Type topic" to start the board',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: Colors.white38, fontSize: 12.5),
               ),
@@ -249,9 +363,10 @@ class _WhiteboardCanvasState extends State<WhiteboardCanvas> {
       child: widget.canEdit
           ? GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onPanStart: (_) => _onBodyPanStart(raw),
-              onPanUpdate: (d) => _onBodyPanUpdate(raw, d, canvasW, canvasH),
-              onPanEnd: (_) => _onBodyPanEnd(raw),
+              onTap: () => _onBodyTap(raw),
+              onScaleStart: (_) => _onBodyScaleStart(raw),
+              onScaleUpdate: (d) => _onBodyScaleUpdate(raw, d, canvasW, canvasH),
+              onScaleEnd: (_) => _onBodyScaleEnd(raw),
               child: Container(
                 decoration: selected
                     ? BoxDecoration(
@@ -268,30 +383,69 @@ class _WhiteboardCanvasState extends State<WhiteboardCanvas> {
 
     if (!selected) return [body];
 
+    // Each handle below is anchored at an item corner (delete/options at the
+    // top corners, resize at the bottom-right) but occupies a full
+    // _handleTouchSize square centered on that point — only the inner
+    // _handleVisualSize circle is actually drawn, via _HandleButton's own
+    // Center, so the tap/drag target is far more forgiving than what's
+    // visible without the handles looking oversized. See _edgeMarginPx's
+    // doc comment for why the item itself never drags close enough to the
+    // canvas edge to clip any of this.
+    const half = _handleTouchSize / 2;
+
     return [
       body,
       Positioned(
         key: ValueKey('wb_del_${raw.id}'),
-        left: left - 10,
-        top: top - 10,
-        child: _HandleButton(icon: Icons.close_rounded, onTap: () => widget.onQuickDelete(raw)),
+        left: left - half,
+        top: top - half,
+        width: _handleTouchSize,
+        height: _handleTouchSize,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => widget.onQuickDelete(raw),
+          child: const Center(
+            child: _HandleButton(icon: Icons.close_rounded, size: _handleVisualSize),
+          ),
+        ),
       ),
       Positioned(
         key: ValueKey('wb_opt_${raw.id}'),
-        left: left + width - 10,
-        top: top - 10,
-        child: _HandleButton(icon: Icons.tune_rounded, onTap: () => widget.onOpenOptions(raw)),
+        left: left + width - half,
+        top: top - half,
+        width: _handleTouchSize,
+        height: _handleTouchSize,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => widget.onOpenOptions(raw),
+          // A text item's "options" IS its editor (wording/style/z-order/
+          // delete — see voice_room_detail_screen.dart's
+          // _openWhiteboardItemOptions), so this reads as "Edit" for text;
+          // an image's sheet is genuinely a different set of actions
+          // (rotate/z-order/delete, no wording to edit), so it keeps the
+          // generic tune icon.
+          child: Center(
+            child: _HandleButton(
+              icon: item.isText ? Icons.edit_rounded : Icons.tune_rounded,
+              size: _handleVisualSize,
+            ),
+          ),
+        ),
       ),
       Positioned(
         key: ValueKey('wb_resize_${raw.id}'),
-        left: left + width - 11,
-        top: top + height - 11,
+        left: left + width - half,
+        top: top + height - half,
+        width: _handleTouchSize,
+        height: _handleTouchSize,
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onPanStart: (_) => _onResizePanStart(raw),
           onPanUpdate: (d) => _onResizePanUpdate(raw, d, canvasW, canvasH),
           onPanEnd: (_) => _onResizePanEnd(raw),
-          child: const _HandleButton(icon: Icons.open_in_full_rounded, filled: true),
+          child: const Center(
+            child: _HandleButton(icon: Icons.open_in_full_rounded, size: _handleVisualSize, filled: true),
+          ),
         ),
       ),
     ];
@@ -330,7 +484,8 @@ class _WhiteboardCanvasState extends State<WhiteboardCanvas> {
     return Container(
       width: double.infinity,
       height: double.infinity,
-      padding: const EdgeInsets.all(8),
+      // Equal on every side so text never hugs (or touches) the box edge.
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: 0.35),
         borderRadius: BorderRadius.circular(radius),
@@ -383,26 +538,33 @@ class _WhiteboardCanvasState extends State<WhiteboardCanvas> {
   }
 }
 
+/// Purely the visible circle — tap/drag handling belongs to whatever
+/// GestureDetector wraps this (see _buildItem), which is sized to the
+/// larger, touch-friendly hit target this sits centered inside of.
 class _HandleButton extends StatelessWidget {
   final IconData icon;
-  final VoidCallback? onTap;
+  final double size;
   final bool filled;
-  const _HandleButton({required this.icon, this.onTap, this.filled = false});
+  const _HandleButton({required this.icon, required this.size, this.filled = false});
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 22,
-        height: 22,
-        decoration: BoxDecoration(
-          color: filled ? const Color(0xFF7B68F4) : Colors.black87,
-          shape: BoxShape.circle,
-          border: Border.all(color: Colors.white, width: 1.2),
-        ),
-        child: Icon(icon, size: 12, color: Colors.white),
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: filled ? const Color(0xFF7B68F4) : Colors.black87,
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: 1.5),
+        // A soft shadow keeps every handle readable regardless of what's
+        // directly under it — a light-colored image, pale text, or the
+        // board's own dark background — rather than relying on the border
+        // alone for contrast.
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.35), blurRadius: 4, offset: const Offset(0, 1)),
+        ],
       ),
+      child: Icon(icon, size: size * 0.55, color: Colors.white),
     );
   }
 }

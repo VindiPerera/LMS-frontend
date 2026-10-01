@@ -1,6 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:flutter/services.dart';
 import 'package:flutter_linkify/flutter_linkify.dart';
 // UserTagLinkifier/UserTagElement (the @mention linkifier) live in the
@@ -90,6 +91,16 @@ class MomentCard extends StatefulWidget {
 class _MomentCardState extends State<MomentCard> {
   late Moment _moment = widget.moment;
   bool _expanded = false;
+  // Whether the post text needs more than 3 lines — read directly off the
+  // real rendered paragraph after each frame (see _scheduleOverflowCheck),
+  // not guessed ahead of time with a separate TextPainter. A parallel
+  // measurement has to reproduce the real widget's font resolution, strut,
+  // and text-scale exactly or it silently drifts from what's actually on
+  // screen — which is what caused "See more" to sometimes not appear at
+  // all, or expanding to show less text than before. Asking the already-
+  // rendered text directly can't drift, by construction.
+  bool _textOverflows = false;
+  final _textKey = GlobalKey();
   final _heartKey = GlobalKey();
 
   String? get _uid => FirebaseAuth.instance.currentUser?.uid;
@@ -99,16 +110,54 @@ class _MomentCardState extends State<MomentCard> {
   void didUpdateWidget(covariant MomentCard oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.moment.id != widget.moment.id ||
+        oldWidget.moment.text != widget.moment.text ||
+        oldWidget.moment.imageUrls != widget.moment.imageUrls ||
+        oldWidget.moment.videoUrl != widget.moment.videoUrl ||
         oldWidget.moment.updatedAt != widget.moment.updatedAt ||
         oldWidget.moment.likeCount != widget.moment.likeCount ||
         oldWidget.moment.commentCount != widget.moment.commentCount ||
         oldWidget.moment.reshareCount != widget.moment.reshareCount ||
         oldWidget.moment.likes.length != widget.moment.likes.length ||
         oldWidget.moment.reactions != widget.moment.reactions) {
+      // `text`/`imageUrls` weren't in this allowlist before — editing a
+      // post (see _handleMenuSelect's 'edit' case) could leave this card
+      // showing its pre-edit content until something else on the list
+      // happened to also change one of the other tracked fields. A live
+      // stream update also hands this a brand-new `reactions`/`imageUrls`
+      // Map/List instance on essentially every emission even when nothing
+      // in it actually changed (Dart's default `!=` on a Map/List is
+      // identity, not by-value) — over-triggering the resync below is
+      // harmless (it just re-assigns the same values), so this stays a
+      // plain `!=` rather than a deep-equality check.
       setState(() {
         _moment = widget.moment;
       });
     }
+  }
+
+  // Re-measures the real rendered paragraph after the frame that just
+  // built it lands, and only updates state — triggering one corrective
+  // rebuild — if that changes whether "See more" should show. Scheduling
+  // this on every _buildText() call is cheap (one RenderObject property
+  // read) and keeps this correct across anything that can change how many
+  // lines the text needs: an edit, a device rotation, or a system
+  // font-size change.
+  void _scheduleOverflowCheck() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final renderObject = _textKey.currentContext?.findRenderObject();
+      if (renderObject is! RenderParagraph) return;
+      // While expanded, maxLines is null, so a fully-expanded paragraph can
+      // never itself report an overflow — that's expected, not a sign the
+      // text shrank back under 3 lines, so this leaves the already-latched
+      // `_textOverflows` (and therefore the See more/less link) alone until
+      // the text is next measured collapsed again.
+      if (_expanded) return;
+      final overflows = renderObject.didExceedMaxLines;
+      if (overflows != _textOverflows) {
+        setState(() => _textOverflows = overflows);
+      }
+    });
   }
 
   void _toggleLike() {
@@ -427,43 +476,52 @@ class _MomentCardState extends State<MomentCard> {
   }
 
   Widget _buildText() {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        const style = TextStyle(fontSize: 14, height: 1.35, color: AppColors.textPrimary);
-        final painter = TextPainter(
-          text: TextSpan(text: _moment.text, style: style),
-          maxLines: 3,
-          textDirection: TextDirection.ltr,
-        )..layout(maxWidth: constraints.maxWidth);
-        final overflows = painter.didExceedMaxLines;
+    // See _scheduleOverflowCheck's doc comment for why this, not a separate
+    // TextPainter guess, is what decides whether "See more" shows.
+    _scheduleOverflowCheck();
+    const style = TextStyle(fontSize: 14, height: 1.35, color: AppColors.textPrimary);
 
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Linkify(
-              text: _moment.text,
-              maxLines: _expanded || !overflows ? null : 3,
-              overflow: TextOverflow.ellipsis,
-              linkifiers: const [UrlLinkifier(), UserTagLinkifier(), _HashtagLinkifier()],
-              onOpen: _handleLinkOpen,
-              options: const LinkifyOptions(humanize: false),
-              style: style,
-              linkStyle: style.copyWith(color: AppColors.primaryPurple, fontWeight: FontWeight.w600),
-            ),
-            if (overflows)
-              GestureDetector(
-                onTap: () => setState(() => _expanded = !_expanded),
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 2),
-                  child: Text(
-                    _expanded ? 'See less' : 'See more',
-                    style: const TextStyle(color: AppColors.textTertiary, fontSize: 12.5, fontWeight: FontWeight.w700),
-                  ),
-                ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Linkify(
+          key: _textKey,
+          text: _moment.text,
+          maxLines: _expanded ? null : 3,
+          // `TextOverflow.ellipsis` implicitly behaves as single-line
+          // truncation whenever `maxLines` is null, regardless of how long
+          // the text actually is — confirmed directly against the Flutter
+          // SDK this project builds against (a plain `Text` with
+          // `maxLines: null, overflow: ellipsis` measures as exactly one
+          // line tall no matter how much text it holds; every other
+          // `TextOverflow` value measures its real, full height). That's
+          // exactly backwards from what "expanded" needs, and is what made
+          // tapping "See more" show LESS text than the 3-line collapsed
+          // view, not more. `clip` while expanded has nothing to actually
+          // clip (there's no `maxLines` cap left to hit) — it only matters
+          // in the collapsed case, where it's still `ellipsis`.
+          overflow: _expanded ? TextOverflow.clip : TextOverflow.ellipsis,
+          linkifiers: const [UrlLinkifier(), UserTagLinkifier(), _HashtagLinkifier()],
+          onOpen: _handleLinkOpen,
+          options: const LinkifyOptions(humanize: false),
+          style: style,
+          linkStyle: style.copyWith(color: AppColors.primaryPurple, fontWeight: FontWeight.w600),
+        ),
+        if (_textOverflows)
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => setState(() => _expanded = !_expanded),
+            child: Padding(
+              // A bit more than just the text's own tight bounds, so this
+              // stays comfortably tappable on any screen density.
+              padding: const EdgeInsets.only(top: 4, bottom: 4),
+              child: Text(
+                _expanded ? 'See less' : 'See more',
+                style: const TextStyle(color: AppColors.textTertiary, fontSize: 12.5, fontWeight: FontWeight.w700),
               ),
-          ],
-        );
-      },
+            ),
+          ),
+      ],
     );
   }
 

@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/room_participant.dart';
+import '../models/voiceroom.dart';
 import 'auth_service.dart';
 import 'voice_room_service.dart';
 
@@ -95,6 +98,9 @@ class RoomParticipantService {
   static DocumentReference<Map<String, dynamic>> _room(String roomId) =>
       FirebaseFirestore.instance.collection('voiceRooms').doc(roomId);
 
+  static DocumentReference<Map<String, dynamic>> _user(String uid) =>
+      FirebaseFirestore.instance.collection('users').doc(uid);
+
   static String? get _uid => FirebaseAuth.instance.currentUser?.uid;
 
   /// A fresh, random token VoiceRoomDetailScreen generates once per mount
@@ -185,6 +191,12 @@ class RoomParticipantService {
     final participantRef = _participants(roomId).doc(uid);
     await FirebaseFirestore.instance.runTransaction((tx) async {
       final existing = await tx.get(participantRef);
+      // Self-write (this transaction only ever runs for the signed-in
+      // user's own uid) — a plain merge-set, not update(), so this can't
+      // fail the whole transaction on the off chance the user doc were
+      // ever missing. See AppUser.activeRoomId's doc comment for what this
+      // feeds; cleared again by [leave].
+      tx.set(_user(uid), {'activeRoomId': roomId}, SetOptions(merge: true));
       if (existing.exists) {
         final updates = <String, dynamic>{
           'sessionId': sessionId,
@@ -222,6 +234,108 @@ class RoomParticipantService {
     });
   }
 
+  /// Live "which voice room is [userId] in right now?" — the active room
+  /// (as host, moderator, speaker or listener alike) where that user has a
+  /// participant doc with a recent heartbeat, or null when they're in none.
+  /// Drives the "Go Look" card on a profile (partner_profile_screen.dart).
+  ///
+  /// Built only from reads the existing firestore.rules already allow — the
+  /// live active-room list plus each room's own `participants/{userId}` doc —
+  /// rather than a collection-group query on `participants`, which would need
+  /// new rules + an index deployed and would bypass each room's audience
+  /// check. Updates instantly when the user joins/leaves (their participant
+  /// doc appears/disappears) or the room ends (its `isActive` flips).
+  ///
+  /// A doc whose last heartbeat is older than [staleAfter] is a leftover from
+  /// a client that died without leaving (nobody has swept it yet), so it
+  /// doesn't count; a timer re-checks that as time passes since a dead
+  /// client's doc never triggers a snapshot of its own.
+  static Stream<VoiceRoom?> streamRoomUserIsIn(String userId) {
+    if (userId.isEmpty) return Stream.value(null);
+
+    late final StreamController<VoiceRoom?> controller;
+    StreamSubscription<List<VoiceRoom>>? roomsSub;
+    Timer? recheckTimer;
+    final rooms = <String, VoiceRoom>{};
+    final docSubs = <String, StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>>{};
+    // roomId -> the user's last heartbeat there (null = doc absent).
+    final lastActive = <String, DateTime?>{};
+    final present = <String>{};
+    VoiceRoom? lastEmitted;
+    var hasEmitted = false;
+
+    void recompute() {
+      if (controller.isClosed) return;
+      final now = DateTime.now();
+      VoiceRoom? best;
+      DateTime? bestAt;
+      for (final id in present) {
+        final room = rooms[id];
+        if (room == null) continue;
+        // A pending serverTimestamp (null) is a brand-new join — fresh.
+        final at = lastActive[id];
+        if (at != null && now.difference(at) >= staleAfter) continue;
+        final rank = at ?? now;
+        if (best == null || rank.isAfter(bestAt!)) {
+          best = room;
+          bestAt = rank;
+        }
+      }
+      if (hasEmitted && best?.id == lastEmitted?.id) return;
+      hasEmitted = true;
+      lastEmitted = best;
+      controller.add(best);
+    }
+
+    controller = StreamController<VoiceRoom?>(
+      onListen: () {
+        recheckTimer = Timer.periodic(heartbeatInterval, (_) => recompute());
+        roomsSub = VoiceRoomService.streamActiveRooms(limit: 50).listen((list) {
+          final ids = list.map((r) => r.id).toSet();
+          rooms
+            ..clear()
+            ..addEntries(list.map((r) => MapEntry(r.id, r)));
+          for (final gone in docSubs.keys.where((id) => !ids.contains(id)).toList()) {
+            docSubs.remove(gone)?.cancel();
+            lastActive.remove(gone);
+            present.remove(gone);
+          }
+          for (final id in ids) {
+            if (docSubs.containsKey(id)) continue;
+            docSubs[id] = _participants(id).doc(userId).snapshots().listen((doc) {
+              if (doc.exists) {
+                present.add(id);
+                lastActive[id] = (doc.data()?['lastActiveAt'] as Timestamp?)?.toDate();
+              } else {
+                present.remove(id);
+                lastActive.remove(id);
+              }
+              recompute();
+            }, onError: (Object e) {
+              debugPrint('RoomParticipantService.streamRoomUserIsIn($id) failed (ignored): $e');
+            });
+          }
+          recompute();
+        }, onError: (Object e) {
+          debugPrint('RoomParticipantService.streamRoomUserIsIn failed: $e');
+          if (!hasEmitted) {
+            hasEmitted = true;
+            controller.add(null);
+          }
+        });
+      },
+      onCancel: () async {
+        recheckTimer?.cancel();
+        await roomsSub?.cancel();
+        for (final sub in docSubs.values) {
+          await sub.cancel();
+        }
+        docSubs.clear();
+      },
+    );
+    return controller.stream;
+  }
+
   /// Refreshes the signed-in user's presence timestamp — called on
   /// [heartbeatInterval] by VoiceRoomDetailScreen while it's open. No-ops
   /// if [sessionId] no longer matches (a newer join has since claimed this
@@ -251,6 +365,16 @@ class RoomParticipantService {
   /// (firestore.rules enforces the same check independently), so multiple
   /// clients racing to sweep the same stale entry is harmless — only the
   /// first actually removes anything.
+  ///
+  /// Deliberately does NOT clear the stale user's own `activeRoomId` (see
+  /// AppUser's doc comment) — that field only self-updates (see [leave]),
+  /// since firestore.rules only lets a user write their OWN `users/{uid}`
+  /// doc, and this sweep runs on behalf of whichever OTHER client noticed
+  /// first, not the stale user's own session. In the rare case someone's
+  /// app dies without ever calling [leave] again, their "in a voice room"
+  /// indicator can stay on until they next open the app and take some
+  /// action — a real but narrow gap, same order of staleness the room's own
+  /// `participantCount` already tolerates until swept.
   static Future<void> sweepStaleParticipants(String roomId, List<RoomParticipant> participants) async {
     final now = DateTime.now();
     for (final p in participants) {
@@ -283,22 +407,39 @@ class RoomParticipantService {
   /// closing the tab, or the host ending the room (all tear down
   /// VoiceRoomDetailScreen's State, which calls this from dispose).
   ///
-  /// Only deletes if [sessionId] still matches the doc's current
-  /// `sessionId` (set by [join]/[heartbeat]) — if a newer mount already
-  /// reclaimed this doc (rejoining faster than this fire-and-forget call
-  /// arrives), that's not this session's doc to remove anymore, and doing
-  /// so anyway would silently drop the newer session back to "not
+  /// Only deletes the participant doc if [sessionId] still matches its
+  /// current `sessionId` (set by [join]/[heartbeat]) — if a newer mount
+  /// already reclaimed this doc (rejoining faster than this fire-and-forget
+  /// call arrives), that's not this session's doc to remove anymore, and
+  /// doing so anyway would silently drop the newer session back to "not
   /// present". Transactional so it can't race a concurrent [join] either.
+  ///
+  /// `users/{uid}.activeRoomId` (see AppUser's doc comment) is cleared
+  /// separately from that same-session check, and unconditionally covers
+  /// the case where the participant doc is already gone entirely — most
+  /// notably having just been kicked (kickParticipant deletes it outright),
+  /// which would otherwise leave this user's own "in a voice room" badge
+  /// stuck on even after VoiceRoomDetailScreen's dispose() calls this. Only
+  /// ever a self-write (this always runs for the signed-in user's own uid),
+  /// so — unlike clearing it for someone ELSE, which [sweepStaleParticipants]
+  /// deliberately does NOT attempt (see its own doc comment) — this never
+  /// needs a firestore.rules exception.
   static Future<void> leave(String roomId, String sessionId) async {
     final uid = _uid;
     if (uid == null || roomId.isEmpty) return;
     final participantRef = _participants(roomId).doc(uid);
+    final userRef = _user(uid);
     try {
       await FirebaseFirestore.instance.runTransaction((tx) async {
         final snap = await tx.get(participantRef);
-        if (!snap.exists || snap.data()?['sessionId'] != sessionId) return;
-        tx.delete(participantRef);
-        tx.update(_room(roomId), {'participantCount': FieldValue.increment(-1)});
+        final userSnap = await tx.get(userRef);
+        if (snap.exists && snap.data()?['sessionId'] == sessionId) {
+          tx.delete(participantRef);
+          tx.update(_room(roomId), {'participantCount': FieldValue.increment(-1)});
+        }
+        if (userSnap.data()?['activeRoomId'] == roomId) {
+          tx.set(userRef, {'activeRoomId': FieldValue.delete()}, SetOptions(merge: true));
+        }
       });
     } catch (e) {
       // Best-effort: the room doc may already be gone (host just ended it)

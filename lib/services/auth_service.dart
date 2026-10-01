@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -22,6 +24,14 @@ class AuthService {
   static final AuthService instance = AuthService._();
 
   static final _users = FirebaseFirestore.instance.collection('users');
+
+  // How often setOnlineStatus(true) re-fires on its own while the app stays
+  // foregrounded, refreshing `lastSeenAt` so presence.dart's staleness
+  // check never trips for a user who's actually still here. Comfortably
+  // under presenceStaleAfter so a couple of missed beats (brief network
+  // blip, app backgrounded briefly on some platforms) don't flip the dot.
+  static const _heartbeatInterval = Duration(seconds: 30);
+  Timer? _heartbeatTimer;
 
   AppUser? _currentUser;
   AppUser? get currentUser => _currentUser;
@@ -256,12 +266,16 @@ class AuthService {
   /// WidgetsBindingObserver, which calls this on every app foreground/
   /// background transition, plus [_afterSignIn]/[logout] for sign-in/out.
   ///
-  /// Known gap: Firestore has no built-in "disconnect" detection (unlike
-  /// Realtime Database's onDisconnect()), so an abrupt kill/crash — as
-  /// opposed to a normal background/logout — leaves `isOnline: true`
-  /// stuck until the next lifecycle event flips it back. `lastSeenAt` is
-  /// written alongside it so a "stale after N minutes" check could paper
-  /// over that later if it matters; nothing currently reads it.
+  /// Firestore has no built-in "disconnect" detection (unlike Realtime
+  /// Database's onDisconnect()), so an abrupt kill/crash — as opposed to a
+  /// normal background/logout — would otherwise leave `isOnline: true`
+  /// stuck forever. Two things close that gap: `online: true` (re)starts a
+  /// heartbeat that keeps refreshing `lastSeenAt` every [_heartbeatInterval]
+  /// while the app is actually foregrounded, and every reader of `isOnline`
+  /// goes through presence.dart's isActuallyOnline, which treats the flag
+  /// as stale — i.e. offline — once `lastSeenAt` is older than
+  /// presenceStaleAfter. So a crash still self-corrects within that window
+  /// even though nothing ever goes back and flips the stored field itself.
   Future<void> setOnlineStatus(bool online) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
@@ -274,6 +288,14 @@ class AuthService {
       // Offline, or the profile doc doesn't exist yet — non-critical, the
       // next successful call catches up.
     }
+
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = online
+        ? Timer.periodic(_heartbeatInterval, (_) {
+            // ignore: discarded_futures
+            setOnlineStatus(true);
+          })
+        : null;
   }
 
   /// Build a unique @handle from a display name, e.g. "Vinuk Lakvindu" ->

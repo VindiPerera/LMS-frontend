@@ -12,6 +12,7 @@ import '../../services/voice_room_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
 import '../../widgets/payment_method_sheet.dart';
+import '../../widgets/vip_badge.dart';
 import '../auth/splash_screen.dart';
 import '../friends/my_qr_code_screen.dart';
 import '../moments/user_moments_screen.dart';
@@ -130,11 +131,13 @@ class _MeScreenState extends State<MeScreen> {
 }
 
 /// Opens the VIP benefits comparison sheet (_VipBenefitsCard) — shared by
-/// every "see VIP benefits" entry point on this screen (_VipPromoBanner's
-/// "View Now" and _VipMembershipBanner's "VIP Benefits" button) so they
-/// stay in sync instead of each carrying their own copy of this same
-/// modal-sheet boilerplate.
-void _showVipBenefitsSheet(BuildContext context) {
+/// every "see VIP benefits" entry point in the app (this screen's own
+/// _VipPromoBanner "View Now" and _VipMembershipBanner "VIP Benefits"
+/// button, plus the Voice tab's "VIP" pill — see voiceroom_screen.dart) so
+/// they all stay in sync instead of each carrying their own copy of this
+/// same modal-sheet boilerplate. Public (unlike everything else in this
+/// file) specifically so screens outside me_screen.dart can open it too.
+void showVipBenefitsSheet(BuildContext context) {
   showModalBottomSheet(
     context: context,
     backgroundColor: Colors.transparent,
@@ -176,7 +179,7 @@ class _VipPromoBanner extends StatelessWidget {
             ),
           ),
           GestureDetector(
-            onTap: () => _showVipBenefitsSheet(context),
+            onTap: () => showVipBenefitsSheet(context),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
               decoration: BoxDecoration(
@@ -204,7 +207,7 @@ class _VipPromoBanner extends StatelessWidget {
 /// highlight reel of a few VIP perks with its own "VIP Benefits" button,
 /// distinct from _VipPromoBanner above (a plain text-link-style nudge sitting
 /// above the profile picture, left as-is). Both open the exact same
-/// _VipBenefitsCard sheet (_showVipBenefitsSheet) — this card is just a
+/// _VipBenefitsCard sheet (showVipBenefitsSheet) — this card is just a
 /// second, more visually prominent entry point to it, matching the
 /// dark purple/blue gradient "membership card" look of similar VIP promos
 /// elsewhere in the app (see _MyVoiceRoomBanner's own gradient below) rather
@@ -287,7 +290,7 @@ class _VipMembershipBanner extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(color: _gold, borderRadius: BorderRadius.circular(8)),
                 child: const Text(
-                  'VIP+',
+                  'VIP',
                   style: TextStyle(color: _goldText, fontWeight: FontWeight.w900, fontSize: 12),
                 ),
               ),
@@ -299,7 +302,7 @@ class _VipMembershipBanner extends StatelessWidget {
           // edge-to-edge and lets it size itself naturally at any screen
           // width, rather than a narrow/fixed-size hit target.
           GestureDetector(
-            onTap: () => _showVipBenefitsSheet(context),
+            onTap: () => showVipBenefitsSheet(context),
             child: Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 12),
@@ -429,29 +432,7 @@ class _ProfileHeader extends StatelessWidget {
                   ),
                   if (user.isVip) ...[
                     const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 3,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.surfaceLight,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: const [
-                          Text(
-                            'VIP',
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.vipGold,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                    const VipBadge(),
                   ],
                 ],
               ),

@@ -9,12 +9,13 @@ import '../../services/follow_service.dart';
 import '../../services/moment_service.dart';
 import '../../services/partner_service.dart';
 import '../../services/profile_like_service.dart';
+import '../../services/room_participant_service.dart';
 import '../../services/teacher_service.dart';
-import '../../services/voice_room_service.dart';
 import '../../theme/app_colors.dart';
 import '../../utils/location_helper.dart';
 import '../../widgets/app_avatar.dart';
 import '../../widgets/moment_card.dart';
+import '../../widgets/vip_badge.dart';
 import '../../widgets/profile_map_header.dart';
 import '../hellotalk/chat_detail_screen.dart';
 import '../me/follow_list_screen.dart';
@@ -48,6 +49,10 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
   bool _isFollowing = false;
   StreamSubscription<bool>? _followSub;
   int _selectedTab = 0; // 0: About Me, 1: Moments, 2: Achievements
+  // Created once (not in build) so the live room listeners aren't torn down
+  // and re-attached on every rebuild.
+  late final Stream<VoiceRoom?> _userRoomStream =
+      RoomParticipantService.streamRoomUserIsIn(widget.initial.id);
 
   @override
   void initState() {
@@ -268,6 +273,8 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
                             Flexible(
                               child: Text(
                                 user.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
                                   fontSize: 22,
                                   fontWeight: FontWeight.w800,
@@ -279,6 +286,10 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
                             const SizedBox(width: 8),
                             // Gender / Age Pill
                             _buildGenderAgeBadge(user),
+                            if (user.isVip) ...[
+                              const SizedBox(width: 6),
+                              const VipBadge(),
+                            ],
                             const Spacer(),
                             // Active status dot & label
                             Row(
@@ -344,17 +355,17 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
 
                         const SizedBox(height: 16),
 
-                        // 6. Created VoiceRoom Card (Firestore live stream)
+                        // 6. "Go Look" voice room card — shown only while this
+                        // user is actually inside a live voice room (as host or
+                        // participant), live-updating as they join/leave.
                         StreamBuilder<VoiceRoom?>(
-                          stream: VoiceRoomService.streamActiveRoomForUser(
-                            user.id.isNotEmpty ? user.id : '',
-                          ),
+                          stream: _userRoomStream,
                           builder: (context, snap) {
                             final room = snap.data;
                             if (room == null) return const SizedBox.shrink();
                             return Column(
                               children: [
-                                _buildVoiceRoomCard(room),
+                                _buildVoiceRoomCard(room, user),
                                 const SizedBox(height: 16),
                               ],
                             );
@@ -587,7 +598,7 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
     return InkWell(onTap: onTap, borderRadius: BorderRadius.circular(6), child: content);
   }
 
-  Widget _buildVoiceRoomCard(VoiceRoom room) {
+  Widget _buildVoiceRoomCard(VoiceRoom room, AppUser user) {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -600,19 +611,11 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
           Stack(
             clipBehavior: Clip.none,
             children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: const BoxDecoration(
-                  color: Color(0xFFE8DEF8),
-                  shape: BoxShape.circle,
-                ),
-                child: Center(
-                  child: Text(
-                    room.hostAvatar.isNotEmpty ? room.hostAvatar : '🎙',
-                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                  ),
-                ),
+              // The profiled user's own avatar (not the room host's).
+              AppAvatar(
+                seed: user.name,
+                size: 48,
+                imageUrl: user.avatarUrl,
               ),
               Positioned(
                 bottom: -2,
@@ -626,7 +629,7 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
                   ),
                   child: Center(
                     child: Text(
-                      room.hostFlag.isNotEmpty ? room.hostFlag : '🇨🇦',
+                      user.countryFlag.isNotEmpty ? user.countryFlag : room.hostFlag,
                       style: const TextStyle(fontSize: 10),
                     ),
                   ),

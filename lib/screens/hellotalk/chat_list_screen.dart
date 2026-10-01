@@ -1,7 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import '../../data/mock_data.dart' as mock;
 import '../../models/chat_message.dart';
-import '../../models/user.dart';
 import '../../models/voiceroom.dart';
 import '../../services/chat_service.dart';
 import '../../services/partner_service.dart';
@@ -9,6 +9,7 @@ import '../../services/voice_room_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
 import 'add_contact_screen.dart';
+import '../connect/partner_profile_screen.dart';
 import 'chat_detail_screen.dart';
 import '../voiceroom/open_voice_room.dart';
 
@@ -25,41 +26,67 @@ class _ChatListScreenState extends State<ChatListScreen> {
   late final Stream<VoiceRoom?> _myVoiceRoomStream = VoiceRoomService.streamMyActiveRoom();
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
-  List<AppUser> _onlinePartners = [];
+
+  // Live online status per chat partner, keyed by uid — used only to sort
+  // the list (online first). chat.user.isOnline itself is a stale,
+  // always-false denormalized snapshot (see _ChatListTile's own doc
+  // comment on its avatar's identical live-vs-snapshot distinction), so
+  // sorting needs its own up-to-date source, same as each row's indicator
+  // already has independently for display.
+  final Map<String, bool> _onlineByUid = {};
+  final Map<String, StreamSubscription<bool>> _onlineSubs = {};
+  StreamSubscription<List<ChatPreview>>? _chatsSub;
 
   @override
   void initState() {
     super.initState();
-    _loadOnlinePartners();
+    _chatsSub = _chatsStream.listen(_syncOnlineSubscriptions);
   }
 
   @override
   void dispose() {
     _searchController.dispose();
+    _chatsSub?.cancel();
+    for (final sub in _onlineSubs.values) {
+      sub.cancel();
+    }
     super.dispose();
   }
 
-  /// "Active Partners" is meant to show who's genuinely online right now —
-  /// filtering by isOnline here is what actually makes that true, instead
-  /// of just showing any 10 partners with a decorative always-green dot.
-  /// fetchPartners already orders online-first, so a higher limit costs
-  /// little even though most of it gets filtered back out.
-  Future<void> _loadOnlinePartners() async {
-    try {
-      final partners = await PartnerService.fetchPartners(limit: 30);
-      final online = partners.where((p) => p.isOnline).take(10).toList();
-      if (!mounted) return;
-      setState(() {
-        _onlinePartners = online.isNotEmpty
-            ? online
-            : mock.mockUsers.where((u) => u.isOnline).toList();
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _onlinePartners = mock.mockUsers.where((u) => u.isOnline).toList();
+  /// Keeps exactly one live online-status listener per uid currently in the
+  /// chat list — added the first time a partner's chat appears, removed
+  /// once it no longer does — so sorting always reflects current status
+  /// without polling or re-subscribing on every rebuild.
+  void _syncOnlineSubscriptions(List<ChatPreview> chats) {
+    final ids = chats.map((c) => c.user.id).where((id) => id.isNotEmpty).toSet();
+    for (final gone in _onlineSubs.keys.where((id) => !ids.contains(id)).toList()) {
+      _onlineSubs.remove(gone)?.cancel();
+      _onlineByUid.remove(gone);
+    }
+    for (final id in ids) {
+      if (_onlineSubs.containsKey(id)) continue;
+      _onlineSubs[id] = PartnerService.streamIsOnline(id).listen((isOnline) {
+        if (!mounted) return;
+        if (_onlineByUid[id] == isOnline) return;
+        setState(() => _onlineByUid[id] = isOnline);
       });
     }
+  }
+
+  /// Online partners first, offline last. A plain partition (not
+  /// List.sort, which Dart doesn't guarantee is stable) — each group is
+  /// built by walking [chats] once in its existing order and appending, so
+  /// within each group chats keep whatever order they already had (newest
+  /// message first, per ChatService.streamChatPreviews), matching "offline
+  /// users appear... in the existing order" exactly.
+  List<ChatPreview> _sortedChats(List<ChatPreview> chats) {
+    final online = <ChatPreview>[];
+    final offline = <ChatPreview>[];
+    for (final chat in chats) {
+      final isOnline = _onlineByUid[chat.user.id] ?? false;
+      (isOnline ? online : offline).add(chat);
+    }
+    return [...online, ...offline];
   }
 
   @override
@@ -115,13 +142,13 @@ class _ChatListScreenState extends State<ChatListScreen> {
         stream: _chatsStream,
         builder: (context, snapshot) {
           final chats = snapshot.data ?? [];
-          final filteredChats = chats.where((chat) {
+          final filteredChats = _sortedChats(chats.where((chat) {
             if (_searchQuery.isEmpty) return true;
             final q = _searchQuery.toLowerCase();
             return chat.user.name.toLowerCase().contains(q) ||
                 chat.user.handle.toLowerCase().contains(q) ||
                 chat.lastMessage.toLowerCase().contains(q);
-          }).toList();
+          }).toList());
 
           return CustomScrollView(
             slivers: [
@@ -183,99 +210,6 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   ),
                 ),
               ),
-
-              // Active Online Partners Header Bar
-              if (_searchQuery.isEmpty && _onlinePartners.isNotEmpty)
-                SliverToBoxAdapter(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                        child: Text(
-                          'Active Partners',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.textSecondary,
-                            letterSpacing: 0.2,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      SizedBox(
-                        height: 88,
-                        child: ListView.separated(
-                          scrollDirection: Axis.horizontal,
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          itemCount: _onlinePartners.length,
-                          separatorBuilder: (context, i) =>
-                              const SizedBox(width: 14),
-                          itemBuilder: (context, i) {
-                            final user = _onlinePartners[i];
-                            return GestureDetector(
-                              onTap: () {
-                                Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) =>
-                                        ChatDetailScreen(user: user),
-                                  ),
-                                );
-                              },
-                              child: Column(
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.all(2),
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      border: Border.all(
-                                        color: AppColors.primaryPurple,
-                                        width: 2,
-                                      ),
-                                    ),
-                                    // showOnlineDot ties this to the real
-                                    // users/{uid}.isOnline value (kept live
-                                    // by AuthService.setOnlineStatus/
-                                    // main_shell.dart's app-lifecycle
-                                    // observer) instead of a hardcoded dot
-                                    // that showed every row as "online"
-                                    // regardless of actual status.
-                                    child: AppAvatar.forUser(
-                                      user,
-                                      size: 46,
-                                      showFlag: false,
-                                      showOnlineDot: true,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 6),
-                                  SizedBox(
-                                    width: 58,
-                                    child: Text(
-                                      user.name.split(' ')[0],
-                                      textAlign: TextAlign.center,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                        color: AppColors.textPrimary,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                      const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 16),
-                        child: Divider(height: 1, color: AppColors.divider),
-                      ),
-                      const SizedBox(height: 8),
-                    ],
-                  ),
-                ),
 
               // Chat List Section
               if (snapshot.connectionState == ConnectionState.waiting &&
@@ -366,7 +300,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   delegate: SliverChildBuilderDelegate(
                     (context, index) {
                       final chat = filteredChats[index];
-                      return _ChatListTile(chat: chat);
+                      // While searching, a tapped result opens that user's profile
+                      // (with its live "Go Look" voice-room card); the normal,
+                      // un-searched list still opens the chat as before.
+                      return _ChatListTile(chat: chat, openProfile: _searchQuery.isNotEmpty);
                     },
                     childCount: filteredChats.length,
                   ),
@@ -381,13 +318,18 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
 class _ChatListTile extends StatelessWidget {
   final ChatPreview chat;
-  const _ChatListTile({required this.chat});
+  final bool openProfile;
+  const _ChatListTile({required this.chat, this.openProfile = false});
 
   @override
   Widget build(BuildContext context) {
     return InkWell(
       onTap: () => Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => ChatDetailScreen(user: chat.user)),
+        MaterialPageRoute(
+          builder: (_) => openProfile
+              ? PartnerProfileScreen(initial: chat.user)
+              : ChatDetailScreen(user: chat.user),
+        ),
       ),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -398,24 +340,30 @@ class _ChatListTile extends StatelessWidget {
         ),
         child: Row(
           children: [
-            // User Avatar with online indicator and country flag. The
-            // isOnline on chat.user itself is a denormalized snapshot from
-            // whenever a message was last sent (see ChatService._infoFor,
-            // which doesn't even carry isOnline — it's always the AppUser
-            // default of false) — genuinely live status needs its own
-            // listener, same as chat_detail_screen.dart's header.
+            // User Avatar with online/voice-room indicator and country flag.
+            // The isOnline on chat.user itself is a denormalized snapshot
+            // from whenever a message was last sent (see ChatService
+            // ._infoFor, which doesn't even carry isOnline — it's always
+            // the AppUser default of false) — genuinely live status needs
+            // its own listener, same as chat_detail_screen.dart's header.
             StreamBuilder<bool>(
               stream: PartnerService.streamIsOnline(chat.user.id),
               initialData: chat.user.isOnline,
-              builder: (context, snapshot) {
-                return AppAvatar(
-                  seed: chat.user.name,
-                  size: 54,
-                  showOnlineDot: true,
-                  isOnline: snapshot.data ?? false,
-                  showFlag: true,
-                  flag: chat.user.countryFlag,
-                  imageUrl: chat.user.avatarUrl,
+              builder: (context, onlineSnapshot) {
+                return StreamBuilder<String?>(
+                  stream: PartnerService.streamActiveRoomId(chat.user.id),
+                  builder: (context, roomSnapshot) {
+                    return AppAvatar(
+                      seed: chat.user.name,
+                      size: 54,
+                      showOnlineDot: true,
+                      isOnline: onlineSnapshot.data ?? false,
+                      inVoiceRoom: roomSnapshot.data != null,
+                      showFlag: true,
+                      flag: chat.user.countryFlag,
+                      imageUrl: chat.user.avatarUrl,
+                    );
+                  },
                 );
               },
             ),
