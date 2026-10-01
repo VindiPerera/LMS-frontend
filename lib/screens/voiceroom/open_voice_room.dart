@@ -29,6 +29,11 @@ Future<void> openVoiceRoom(
   BuildContext context,
   VoiceRoom room, {
   bool justCreated = false,
+  // Swaps the calling screen out for the room instead of stacking on top of
+  // it — used by the voice room sidebar's "Recommended" list, so hopping
+  // room to room doesn't pile up screens (and the old one's dispose() leaves
+  // that room as usual).
+  bool replace = false,
 }) async {
   // A room with no real Firestore id (one of mock_data.dart's decorative
   // entries) was never joinable to begin with — nothing to check.
@@ -42,11 +47,14 @@ Future<void> openVoiceRoom(
   }
 
   if (!context.mounted) return;
-  Navigator.of(context).push(
-    MaterialPageRoute(
-      builder: (_) => VoiceRoomDetailScreen(room: room, justCreated: justCreated),
-    ),
+  final route = MaterialPageRoute<void>(
+    builder: (_) => VoiceRoomDetailScreen(room: room, justCreated: justCreated),
   );
+  if (replace) {
+    Navigator.of(context).pushReplacement(route);
+  } else {
+    Navigator.of(context).push(route);
+  }
 }
 
 Future<void> _showBannedDialog(BuildContext context, Duration remaining) {

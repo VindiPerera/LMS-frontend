@@ -17,9 +17,11 @@ import '../../widgets/app_avatar.dart';
 import '../../widgets/dark_action_sheet.dart';
 import '../../widgets/whiteboard_canvas.dart';
 import 'expanded_whiteboard_screen.dart';
+import 'open_voice_room.dart';
 import 'raised_hands_sheet.dart';
 import 'room_profile_sheet.dart';
 import 'share_room_sheet.dart';
+import 'voice_room_sidebar.dart';
 import 'whiteboard_options_sheets.dart';
 
 class VoiceRoomDetailScreen extends StatefulWidget {
@@ -856,6 +858,33 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
     // still see Close. A plain moderator has no such stream-independent
     // signal, so that case still depends on `me`.
     final canClose = _isHost || (me?.canModerate ?? false);
+
+    // Someone else's room, and we're a plain audience member: show the
+    // sidebar (Share / Minimize / Close + other live rooms) instead of the
+    // host/moderator action sheet below. Each action reuses the exact same
+    // share sheet, minimize handoff and leave-by-pop the sheet uses.
+    if (!canClose) {
+      showVoiceRoomSidebar(
+        context,
+        currentRoomId: widget.room.id,
+        canShare: _canShare(),
+        onShare: () => showShareRoomSheet(context, room: widget.room),
+        onMinimize: () {
+          VoiceRoomSessionController.instance.minimize(
+            room: widget.room,
+            sessionId: _sessionId,
+          );
+          _minimizedHandoff = true;
+          if (mounted) Navigator.of(context).pop();
+        },
+        onClose: () {
+          if (mounted) Navigator.of(context).pop();
+        },
+        onOpenRoom: (room) => openVoiceRoom(context, room, replace: true),
+      );
+      return;
+    }
+
     showDarkActionSheet(
       context,
       items: [
@@ -954,27 +983,49 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
     }
   }
 
-  /// Host/moderator-only "Type text" — opens the same composer used to
-  /// edit an existing text item (see _openWhiteboardItemOptions), just
-  /// with no starting content/style.
+  /// Host/moderator-only "Type topic" — opens the same composer used to
+  /// edit an existing text item (see _openWhiteboardItemOptions), just with
+  /// no starting content/style. The board only ever holds a single topic at
+  /// a time: if one is already on the board, saving here replaces its text/
+  /// style in place (same item, same position/size) instead of adding a
+  /// second text item alongside it. Images are untouched either way — this
+  /// only ever looks at/affects the board's text item(s).
   Future<void> _openTextComposerForNew() {
+    // The board's existing topic, if any — currently the only way a text
+    // item ever gets created is through this same method, so any text item
+    // already on the board (there should be at most one) is it.
+    final existingTextItems = _whiteboardItems.where((i) => i.isText);
+    final existingTopic = existingTextItems.isEmpty ? null : existingTextItems.first;
+
     return showTextComposerSheet(
       context,
       onSave: (draft) async {
         try {
-          await WhiteboardService.addText(
-            roomId: widget.room.id,
-            text: draft.text,
-            existingItems: _whiteboardItems,
-            fontSize: draft.fontSize,
-            colorHex: draft.colorHex,
-            bold: draft.bold,
-            textAlign: draft.textAlign,
-          );
+          if (existingTopic != null) {
+            await WhiteboardService.saveText(
+              roomId: widget.room.id,
+              itemId: existingTopic.id,
+              text: draft.text,
+              fontSize: draft.fontSize,
+              colorHex: draft.colorHex,
+              bold: draft.bold,
+              textAlign: draft.textAlign,
+            );
+          } else {
+            await WhiteboardService.addText(
+              roomId: widget.room.id,
+              text: draft.text,
+              existingItems: _whiteboardItems,
+              fontSize: draft.fontSize,
+              colorHex: draft.colorHex,
+              bold: draft.bold,
+              textAlign: draft.textAlign,
+            );
+          }
         } catch (e) {
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Could not add text: ${e.toString().replaceFirst('Exception: ', '')}')),
+            SnackBar(content: Text('Could not add topic: ${e.toString().replaceFirst('Exception: ', '')}')),
           );
         }
       },
@@ -1354,7 +1405,7 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                       // than just off-screen on non-touch devices.
                       Expanded(
                         child: SizedBox(
-                          height: 34,
+                          height: 44,
                           child: Scrollbar(
                             controller: _toolbarScrollController,
                             thumbVisibility: true,
@@ -1382,7 +1433,7 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                                           ),
                                     const SizedBox(width: 8),
                                     _actionChip(
-                                      'Type text',
+                                      'Type topic',
                                       Icons.text_fields_rounded,
                                       onTap: _openTextComposerForNew,
                                     ),
@@ -1567,16 +1618,41 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                                       : Stack(
                                           clipBehavior: Clip.none,
                                           children: [
-                                            // Avatar with green border highlight
-                                            // when unmuted/speaking, plain when muted.
+                                            // While unmuted/speaking a red ring is
+                                            // drawn just OUTSIDE the avatar, so the
+                                            // photo keeps its size and nothing
+                                            // around it shifts. It comes first in
+                                            // the Stack (i.e. underneath) so the
+                                            // avatar's country-flag badge, which
+                                            // sits on the avatar's corner, always
+                                            // paints on top of it.
+                                            if (speaker.isSpeaking)
+                                              Positioned(
+                                                left: -4,
+                                                top: -4,
+                                                right: -4,
+                                                bottom: -4,
+                                                child: IgnorePointer(
+                                                  child: Container(
+                                                    decoration: BoxDecoration(
+                                                      shape: BoxShape.circle,
+                                                      border: Border.all(color: const Color(0xFFFF3B47), width: 2.5),
+                                                      boxShadow: [
+                                                        BoxShadow(
+                                                          color: const Color(0xFFFF3B47).withValues(alpha: 0.45),
+                                                          blurRadius: 8,
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
                                             AppAvatar(
                                               seed: speaker.uid.isNotEmpty ? speaker.uid : '${speaker.name}$i',
                                               size: 56,
                                               showFlag: true,
                                               flag: speaker.flag,
                                               imageUrl: speaker.avatarUrl,
-                                              borderWidth: speaker.isSpeaking ? 2.5 : 0,
-                                              borderColor: const Color(0xFF3DDC97),
                                             ),
                                             // Muted badge — a small mic-off
                                             // circle centered over the middle
@@ -1607,9 +1683,8 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                                                   ),
                                                 ),
                                               ),
-                                            // When unmuted/speaking the green
-                                            // border highlight (borderWidth above)
-                                            // is the sole visual indicator —
+                                            // When unmuted/speaking the red ring
+                                            // above is the sole visual indicator —
                                             // no extra badge needed.
                                           ],
                                         ),
@@ -1840,19 +1915,27 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
   Widget _actionChip(String label, IconData icon, {VoidCallback? onTap}) {
     final isDanger = onTap != null && icon == Icons.call_end_rounded;
     final chip = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      // Fixed height (see the toolbar's own SizedBox in build(), which leaves
+      // room for it plus the scrollbar) so the label's descenders — the "g"
+      // in "images" — are never clipped, whatever the device's text scale.
+      height: 32,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
         color: isDanger ? Colors.red.withValues(alpha: 0.18) : Colors.white.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(16),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Icon(icon, size: 14, color: isDanger ? Colors.redAccent : Colors.white54),
-          const SizedBox(width: 5),
+          Icon(icon, size: 15, color: isDanger ? Colors.redAccent : Colors.white54),
+          const SizedBox(width: 6),
           Text(
             label,
-            style: TextStyle(fontSize: 12, color: isDanger ? Colors.redAccent : Colors.white54),
+            maxLines: 1,
+            softWrap: false,
+            textScaler: MediaQuery.textScalerOf(context).clamp(maxScaleFactor: 1.15),
+            style: TextStyle(fontSize: 12, height: 1.2, color: isDanger ? Colors.redAccent : Colors.white54),
           ),
         ],
       ),

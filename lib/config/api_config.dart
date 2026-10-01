@@ -5,19 +5,9 @@ import 'package:flutter/foundation.dart' show kIsWeb, kReleaseMode;
 class ApiConfig {
   static String? _customBaseUrl;
 
-  /// The live production server — set this once the backend is actually
-  /// deployed somewhere. Deliberately unset (`null`) right now: nothing has
-  /// been deployed to production yet, and this used to hard-code
-  /// `https://hellotalk.jaan.lk`, which turned out to just be an unrelated
-  /// Laravel app ("addict") sharing that domain's server — a release build
-  /// was silently talking to someone else's app instead of failing
-  /// obviously. Leaving this null means a release build with no override
-  /// (see [_dartDefineHost]/[setBaseUrl]) now fails loudly and immediately
-  /// with a clear message (see [_requireProdBaseUrl]) instead of that.
-  ///
-  /// Set this to the real domain once hello-backend is actually deployed,
-  /// e.g. `static const String? _prodBaseUrl = 'https://your-domain.com';`.
-  static const String? _prodBaseUrl = null;
+  /// The live production server. hello-backend is deployed here — see
+  /// LMS---Backend's admin panel at https://lmsbackend.jaan.lk/admin/login.
+  static const String? _prodBaseUrl = 'https://lmsbackend.jaan.lk';
 
   /// [baseUrl] and [candidateUploadUrls] both need this exact same
   /// "unset production URL" guard in their `kReleaseMode` branch — shared

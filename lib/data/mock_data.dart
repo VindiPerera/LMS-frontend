@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../models/user.dart';
-import '../models/voiceroom.dart';
 import '../models/live_stream.dart';
 import '../models/learn_item.dart';
 import '../models/room_participant.dart';
@@ -142,62 +141,6 @@ Color avatarColorFor(String seed) {
       seed.codeUnits.fold<int>(0, (a, b) => a + b) % avatarPalette.length;
   return avatarPalette[idx];
 }
-
-final List<VoiceRoom> mockVoiceRooms = [
-  VoiceRoom(
-    title: 'ZETIFY 🎧 | Asian R&B Selection ✨',
-    hostName: 'ZET',
-    hostAvatar: 'Z',
-    hostFlag: '🇮🇩',
-    category: 'EN',
-    tag: 'FIFA World Cup',
-    participantCount: 69,
-    isTop: true,
-    coverGradientSeed: 'a',
-  ),
-  VoiceRoom(
-    title: 'music station 🎧',
-    hostName: 'ZUHRI',
-    hostAvatar: 'Z',
-    hostFlag: '🇮🇩',
-    category: 'EN',
-    tag: 'FIFA World Cup',
-    participantCount: 21,
-    isCreator: true,
-    coverGradientSeed: 'b',
-  ),
-  VoiceRoom(
-    title: 'could you teach me english?',
-    hostName: '开心',
-    hostAvatar: '开',
-    hostFlag: '🇨🇳',
-    category: 'EN',
-    tag: 'FIFA World Cup',
-    participantCount: 7,
-    coverGradientSeed: 'c',
-  ),
-  VoiceRoom(
-    title: 'Enjoy music 🎧',
-    hostName: 'MH',
-    hostAvatar: 'M',
-    hostFlag: '🇰🇷',
-    category: 'EN',
-    tag: 'FIFA World Cup',
-    participantCount: 25,
-    isCreator: true,
-    coverGradientSeed: 'd',
-  ),
-  VoiceRoom(
-    title: 'Tasking Which I dnt like 🧘 / Morning music 🎵🍀💗🌸',
-    hostName: 'Uosini',
-    hostAvatar: 'U',
-    hostFlag: '🇱🇰',
-    category: 'EN',
-    tag: 'Strange Stories',
-    participantCount: 4,
-    coverGradientSeed: 'e',
-  ),
-];
 
 const languageCourses = [
     {

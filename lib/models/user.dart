@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../config/api_config.dart';
+import '../utils/presence.dart';
 
 class AppUser {
   // Firestore document id (== Firebase Auth uid for the signed-in user).
@@ -34,6 +35,15 @@ class AppUser {
   // users without this field yet keep getting Voice Room invite pushes —
   // see AppUser.fromJson, which treats a missing field the same way.
   final bool voiceRoomNotificationsEnabled;
+  // The voice room this user currently has a live participant doc in (any
+  // role — host, moderator, speaker, or listener), or '' if none. Kept in
+  // step by RoomParticipantService.join/leave — see leave's own doc comment
+  // for the one known staleness edge case (a client that disappears without
+  // ever calling leave). Denormalized here, rather than requiring a
+  // separate per-room lookup, specifically so a user LIST (chat_list_screen
+  // .dart's "in a voice room" badge) can show this cheaply for many rows at
+  // once — a single field read per row, not a per-room listener fan-out.
+  final String activeRoomId;
 
   const AppUser({
     this.id = '',
@@ -56,6 +66,7 @@ class AppUser {
     this.detail = '',
     this.profileCompleted = false,
     this.voiceRoomNotificationsEnabled = true,
+    this.activeRoomId = '',
   });
 
   /// Decodes a `users/{uid}` Firestore document into an AppUser. Callers
@@ -71,7 +82,12 @@ class AppUser {
       countryFlag: json['countryFlag']?.toString() ?? '',
       nativeLang: json['nativeLang']?.toString() ?? '',
       learningLang: json['learningLang']?.toString() ?? '',
-      isOnline: json['isOnline'] == true,
+      isOnline: isActuallyOnline(
+        json['isOnline'] == true,
+        json['lastSeenAt'] is Timestamp
+            ? json['lastSeenAt'] as Timestamp
+            : null,
+      ),
       isVip: json['isVip'] == true,
       vipExpiresAt: _asDateTime(json['vipExpiresAt']),
       age: _asInt(json['age']),
@@ -86,6 +102,7 @@ class AppUser {
       detail: json['detail']?.toString() ?? '',
       profileCompleted: json['profileCompleted'] == true,
       voiceRoomNotificationsEnabled: json['voiceRoomNotificationsEnabled'] != false,
+      activeRoomId: json['activeRoomId']?.toString() ?? '',
     );
   }
 

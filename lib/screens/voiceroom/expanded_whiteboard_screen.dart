@@ -9,7 +9,7 @@ import '../../widgets/whiteboard_canvas.dart';
 /// WhiteboardCanvas, same live Firestore stream, just given a lot more
 /// room to work with than the card's small preview allows — most useful
 /// for precisely dragging/resizing items on a phone. Adding brand-new
-/// items still happens from the card's own "Add images"/"Type text"
+/// items still happens from the card's own "Add images"/"Type topic"
 /// toolbar; this screen is for arranging what's already there.
 class ExpandedWhiteboardScreen extends StatelessWidget {
   final String roomId;

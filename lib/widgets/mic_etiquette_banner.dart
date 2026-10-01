@@ -31,19 +31,26 @@ class MicEtiquetteBanner extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Text(
-            "Please mute your mic when you're not speaking",
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textSecondary,
-              height: 1.3,
+          // FittedBox keeps the headline on a single line — it shrinks
+          // slightly on narrow phones instead of wrapping to two lines.
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              "Please mute your mic when you're not speaking",
+              maxLines: 1,
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textSecondary,
+                height: 1.3,
+              ),
             ),
           ),
           Text(
             "it keeps rooms clear for everyone",
+            textAlign: TextAlign.center,
             style: TextStyle(fontSize: 12.5, color: AppColors.textSecondary, height: 1.3),
           ),
           const SizedBox(height: 8),
@@ -56,14 +63,14 @@ class MicEtiquetteBanner extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               Container(
-                width: 28,
-                height: 28,
+                width: 34,
+                height: 34,
                 alignment: Alignment.center,
                 decoration: const BoxDecoration(
                   color: AppColors.badgeRed,
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.mic_off_rounded, size: 15, color: Colors.white),
+                child: const Icon(Icons.mic_off_rounded, size: 19, color: Colors.white),
               ),
             ],
           ),

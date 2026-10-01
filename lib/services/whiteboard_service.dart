@@ -146,7 +146,11 @@ class WhiteboardService {
     final trimmed = text.trim();
     if (uid == null || user == null || roomId.isEmpty || trimmed.isEmpty) return;
 
-    final placement = _nextPlacement(existingItems, width: defaultWidth, height: defaultHeight);
+    // Centered on the board — equal margin on all four sides. (The cascade
+    // _nextPlacement uses for images starts at a fixed 0.04 inset, which
+    // with a 0.94-wide box left more space on the left/top than right/bottom.)
+    const x = (1 - defaultWidth) / 2;
+    const y = (1 - defaultHeight) / 2;
 
     await _items(roomId).add({
       'type': 'text',
@@ -154,8 +158,8 @@ class WhiteboardService {
       'addedBy': uid,
       'addedByName': user.name,
       'createdAt': FieldValue.serverTimestamp(),
-      'x': placement.x,
-      'y': placement.y,
+      'x': x,
+      'y': y,
       'width': defaultWidth,
       'height': defaultHeight,
       'rotation': 0,

@@ -47,6 +47,12 @@ class VoiceRoom {
     this.createdAt,
   });
 
+  /// False for a room nobody is currently in (participantCount is kept in
+  /// step by RoomParticipantService.join/leave/kick/sweep). Room lists hide
+  /// such rooms and — since they're driven by a live Firestore stream — show
+  /// them again as soon as someone joins.
+  bool get hasParticipants => participantCount > 0;
+
   factory VoiceRoom.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? {};
     return VoiceRoom(

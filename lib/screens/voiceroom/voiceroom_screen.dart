@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
-import '../../data/mock_data.dart';
 import '../../models/room_participant.dart';
 import '../../models/voiceroom.dart';
+import '../../services/exchange_rate_service.dart';
 import '../../services/room_participant_service.dart';
 import '../../services/voice_room_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
 import '../../widgets/mic_etiquette_banner.dart';
+import '../me/me_screen.dart' show showVipBenefitsSheet;
 import 'live_tab.dart';
 import 'learn_tab.dart';
 import 'open_voice_room.dart';
@@ -26,7 +27,6 @@ class _VoiceroomScreenState extends State<VoiceroomScreen>
     'All',
     'English',
     'Korean',
-    'Sinhala',
   ];
   int _categoryIndex = 0;
 
@@ -197,30 +197,46 @@ class _VoiceroomScreenState extends State<VoiceroomScreen>
         titleSpacing: 8,
         title: Row(
           children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: AppColors.vipGold.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'VIP',
-                    style: TextStyle(
-                      color: AppColors.vipGold,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 12,
+            // Opens the same VIP benefits/subscribe sheet as the Profile
+            // tab's own "VIP Benefits" entry points (see me_screen.dart's
+            // showVipBenefitsSheet) so every "see VIP" tap in the app lands
+            // on one shared, always-in-sync sheet.
+            GestureDetector(
+              onTap: () {
+                // Best-effort refresh so the sheet's price is current even
+                // if the user never opened the Profile tab this session —
+                // harmless/no-op if a fetch from there is already in flight
+                // or the cached rate is still fresh (see ExchangeRateService
+                // .ensureLoaded's own doc comment).
+                // ignore: discarded_futures
+                ExchangeRateService.instance.ensureLoaded();
+                showVipBenefitsSheet(context);
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.vipGold.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'VIP',
+                      style: TextStyle(
+                        color: AppColors.vipGold,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12,
+                      ),
                     ),
-                  ),
-                  SizedBox(width: 3),
-                  Icon(
-                    Icons.workspace_premium_rounded,
-                    size: 13,
-                    color: AppColors.vipGold,
-                  ),
-                ],
+                    SizedBox(width: 3),
+                    Icon(
+                      Icons.workspace_premium_rounded,
+                      size: 13,
+                      color: AppColors.vipGold,
+                    ),
+                  ],
+                ),
               ),
             ),
             const SizedBox(width: 8),
@@ -334,9 +350,15 @@ class _VoiceroomScreenState extends State<VoiceroomScreen>
                     StreamBuilder<List<VoiceRoom>>(
                       stream: _liveRoomsStream,
                       builder: (context, snapshot) {
-                        final liveRooms = snapshot.data ?? const [];
-                        final rooms = [...liveRooms, ...mockVoiceRooms];
-                        return _VoiceRoomFeed(rooms: _filteredRooms(rooms));
+                        // Only rooms someone is actually in — an empty room
+                        // drops off the list and reappears live (this is a
+                        // Firestore snapshot stream) once anyone rejoins.
+                        final liveRooms =
+                            (snapshot.data ?? const <VoiceRoom>[]).where((r) => r.hasParticipants).toList();
+                        return _VoiceRoomFeed(
+                          rooms: _filteredRooms(liveRooms),
+                          onStartRoom: _openCreateRoomSheet,
+                        );
                       },
                     ),
                     const LiveTab(),
@@ -354,7 +376,8 @@ class _VoiceroomScreenState extends State<VoiceroomScreen>
 
 class _VoiceRoomFeed extends StatelessWidget {
   final List<VoiceRoom> rooms;
-  const _VoiceRoomFeed({required this.rooms});
+  final VoidCallback onStartRoom;
+  const _VoiceRoomFeed({required this.rooms, required this.onStartRoom});
 
   @override
   Widget build(BuildContext context) {
@@ -363,13 +386,82 @@ class _VoiceRoomFeed extends StatelessWidget {
       children: [
         const MicEtiquetteBanner(),
         const SizedBox(height: 14),
-        ...rooms.map(
-          (r) => Padding(
-            padding: const EdgeInsets.only(bottom: 14),
-            child: _VoiceRoomCard(room: r),
+        if (rooms.isEmpty)
+          _EmptyVoiceRoomState(onStartRoom: onStartRoom)
+        else
+          ...rooms.map(
+            (r) => Padding(
+              padding: const EdgeInsets.only(bottom: 14),
+              child: _VoiceRoomCard(room: r),
+            ),
           ),
-        ),
       ],
+    );
+  }
+}
+
+/// Shown in place of the room list once there are no live rooms left to
+/// show — either nobody is hosting right now, or (with a category filter
+/// active) nobody is hosting in that language. Not a loading/error state:
+/// StreamBuilder's own `snapshot.data ?? const []` already covers those by
+/// rendering this exact same empty list, which is an acceptable fallback for
+/// a still-connecting or briefly-erroring stream.
+class _EmptyVoiceRoomState extends StatelessWidget {
+  final VoidCallback onStartRoom;
+  const _EmptyVoiceRoomState({required this.onStartRoom});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 48),
+      child: Column(
+        children: [
+          Container(
+            width: 84,
+            height: 84,
+            decoration: BoxDecoration(
+              color: AppColors.primaryPurple.withValues(alpha: 0.08),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.podcasts_rounded,
+              size: 38,
+              color: AppColors.primaryPurple,
+            ),
+          ),
+          const SizedBox(height: 18),
+          const Text(
+            'No voice rooms right now',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 32),
+            child: Text(
+              'Be the first to start one and other learners will see it live here.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 13.5, color: AppColors.textSecondary, height: 1.4),
+            ),
+          ),
+          const SizedBox(height: 20),
+          ElevatedButton.icon(
+            onPressed: onStartRoom,
+            icon: const Icon(Icons.mic_rounded, size: 18),
+            label: const Text('Start a Room', style: TextStyle(fontWeight: FontWeight.w700)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primaryPurple,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -563,8 +655,9 @@ class _StageParticipants extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Decorative/mock rooms (see mock_data.dart) have no id and therefore no
-    // real Firestore roster to stream.
+    // A room with no real Firestore id has no roster to stream (shouldn't
+    // normally happen now that every room here comes from a live query, but
+    // kept as a defensive guard).
     if (room.id.isEmpty) return const SizedBox.shrink();
 
     return StreamBuilder<List<RoomParticipant>>(
