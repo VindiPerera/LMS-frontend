@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../config/api_config.dart';
 import '../models/voiceroom.dart';
 import '../screens/voiceroom/open_voice_room.dart';
 import '../services/voice_room_service.dart';
@@ -64,7 +65,8 @@ class VoiceRoomInviteCard extends StatelessWidget {
         final isActive = live?.isActive ?? true;
         final displayTitle = (live?.title.isNotEmpty ?? false) ? live!.title : title;
         final displayHost = (live?.hostName.isNotEmpty ?? false) ? live!.hostName : hostName;
-        final displayAvatar = (live?.hostAvatar.isNotEmpty ?? false) ? live!.hostAvatar : hostAvatar;
+        final rawAvatar = (live?.hostAvatar.isNotEmpty ?? false) ? live!.hostAvatar : hostAvatar;
+        final displayAvatar = ApiConfig.resolveUrl(rawAvatar);
         final listenerCount = live?.participantCount;
 
         return Container(

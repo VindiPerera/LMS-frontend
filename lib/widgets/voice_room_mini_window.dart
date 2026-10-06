@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/voiceroom.dart';
 import '../screens/voiceroom/open_voice_room.dart';
 import '../services/navigation_service.dart';
+import '../services/partner_service.dart';
 import '../services/voice_room_session_controller.dart';
 import '../theme/app_colors.dart';
 import 'app_avatar.dart';
@@ -170,12 +171,18 @@ class _MiniWindowCard extends StatelessWidget {
             Stack(
               clipBehavior: Clip.none,
               children: [
-                AppAvatar(
-                  seed: room.hostName,
-                  imageUrl: room.hostAvatar,
-                  size: 40,
-                  borderWidth: 2,
-                  borderColor: AppColors.primaryPurple,
+                StreamBuilder<String?>(
+                  stream: PartnerService.streamAvatarUrl(room.hostId),
+                  initialData: room.hostAvatar.isNotEmpty ? room.hostAvatar : null,
+                  builder: (context, snapshot) {
+                    return AppAvatar(
+                      seed: room.hostName,
+                      imageUrl: snapshot.data ?? room.hostAvatar,
+                      size: 40,
+                      borderWidth: 2,
+                      borderColor: AppColors.primaryPurple,
+                    );
+                  },
                 ),
                 Positioned(
                   right: -2,

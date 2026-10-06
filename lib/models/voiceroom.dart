@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../config/api_config.dart';
 
 class VoiceRoom {
   final String id;
@@ -60,13 +61,13 @@ class VoiceRoom {
       hostId: data['hostId']?.toString() ?? '',
       title: data['title']?.toString() ?? '',
       hostName: data['hostName']?.toString() ?? 'Host',
-      hostAvatar: data['hostAvatar']?.toString() ?? '',
+      hostAvatar: ApiConfig.resolveUrl(data['hostAvatar']?.toString() ?? ''),
       hostFlag: data['hostFlag']?.toString() ?? '🇺🇸',
       category: data['category']?.toString() ?? 'EN',
       tag: data['tag']?.toString() ?? 'General',
       coverGradientSeed: data['coverGradientSeed']?.toString() ?? 'a',
       participantAvatars: (data['participantAvatars'] as List<dynamic>?)
-              ?.map((e) => e.toString())
+              ?.map((e) => ApiConfig.resolveUrl(e.toString()))
               .toList() ??
           [],
       participantCount: (data['participantCount'] as num?)?.toInt() ?? 1,

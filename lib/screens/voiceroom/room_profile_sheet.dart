@@ -1,9 +1,12 @@
 import 'dart:async';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import '../../data/countries.dart';
 import '../../models/report_model.dart';
 import '../../models/room_participant.dart';
 import '../../models/user.dart';
+import '../../services/auth_service.dart';
 import '../../services/follow_service.dart';
 import '../../services/report_service.dart';
 import '../../services/room_participant_service.dart';
@@ -68,6 +71,7 @@ class _RoomProfileSheetState extends State<RoomProfileSheet> {
 
   late Timer _timer;
   late DateTime _now;
+  String? _userFlag;
 
   bool get _isSelf =>
       widget.participant.uid.isNotEmpty &&
@@ -92,6 +96,22 @@ class _RoomProfileSheetState extends State<RoomProfileSheet> {
     _timer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (mounted) setState(() => _now = DateTime.now());
     });
+    _resolveFlagIfNeeded();
+  }
+
+  void _resolveFlagIfNeeded() async {
+    if (widget.participant.flag.isNotEmpty) return;
+    if (widget.participant.uid.isEmpty) return;
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.participant.uid)
+          .get();
+      final flag = doc.data()?['countryFlag']?.toString();
+      if (flag != null && flag.isNotEmpty && mounted) {
+        setState(() => _userFlag = flag);
+      }
+    } catch (_) {}
   }
 
   @override
@@ -462,12 +482,39 @@ class _RoomProfileSheetState extends State<RoomProfileSheet> {
     }
   }
 
+  Country? get _country {
+    String flag = widget.participant.flag;
+    if (flag.isEmpty) {
+      if (_isSelf) {
+        flag = AuthService.instance.currentUser?.countryFlag ?? '';
+      } else if (_userFlag != null) {
+        flag = _userFlag!;
+      }
+    }
+    final resolved = Country.fromFlag(flag);
+    if (resolved != null) return resolved;
+    if (widget.participant.location.isNotEmpty) {
+      return Country.fromFlag(widget.participant.location);
+    }
+    return null;
+  }
+
   String get _timeLabel {
+    final country = _country;
+    if (country != null) {
+      return country.localTimeFormatted(_now);
+    }
     final hour24 = _now.hour;
     final period = hour24 >= 12 ? 'pm' : 'am';
     final hour12 = hour24 % 12 == 0 ? 12 : hour24 % 12;
     final minute = _now.minute.toString().padLeft(2, '0');
     return '$hour12:$minute $period';
+  }
+
+  String _utcOffsetLabel(double offset) {
+    final sign = offset >= 0 ? '+' : '';
+    final formatted = offset % 1 == 0 ? offset.toInt().toString() : offset.toString();
+    return 'UTC $sign$formatted';
   }
 
   @override
@@ -694,25 +741,33 @@ class _RoomProfileSheetState extends State<RoomProfileSheet> {
                   ),
                   const SizedBox(height: 10),
                   Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      // Always Expanded (even with nothing to show) so
-                      // "Visit profile" is pinned to the right consistently
-                      // — previously this Expanded only wrapped a present
-                      // `location`, so a participant with no location (no
-                      // Expanded sibling at all) left the pill sitting at
-                      // the Row's start instead.
-                      Expanded(
-                        child: participant.location.isNotEmpty
-                            ? Text(
-                                participant.location,
-                                style: const TextStyle(
-                                  color: Colors.white54,
-                                  fontSize: 13.5,
-                                ),
-                              )
-                            : const SizedBox.shrink(),
-                      ),
+                      if (_country != null)
+                        Flexible(
+                          child: Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: _countryBadge(_country!),
+                          ),
+                        )
+                      else if (participant.location.isNotEmpty)
+                        Flexible(
+                          child: Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: Text(
+                              participant.location,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white54,
+                                fontSize: 13.5,
+                              ),
+                            ),
+                          ),
+                        )
+                      else
+                        const SizedBox.shrink(),
                       GestureDetector(
                         onTap: participant.uid.isEmpty
                             ? null
@@ -766,7 +821,7 @@ class _RoomProfileSheetState extends State<RoomProfileSheet> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 8),
                   Row(
                     children: [
                       const Icon(
@@ -774,7 +829,7 @@ class _RoomProfileSheetState extends State<RoomProfileSheet> {
                         size: 18,
                         color: _green,
                       ),
-                      const SizedBox(width: 5),
+                      const SizedBox(width: 6),
                       Text(
                         _timeLabel,
                         style: const TextStyle(
@@ -783,6 +838,27 @@ class _RoomProfileSheetState extends State<RoomProfileSheet> {
                           fontWeight: FontWeight.w700,
                         ),
                       ),
+                      if (_country != null) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _green.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            _utcOffsetLabel(_country!.utcOffsetHours),
+                            style: const TextStyle(
+                              color: _green,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                   const SizedBox(height: 18),
@@ -1144,6 +1220,42 @@ class _RoomProfileSheetState extends State<RoomProfileSheet> {
         ],
       ),
       child: _iconCircle(Icons.more_horiz_rounded),
+    );
+  }
+
+  Widget _countryBadge(Country country) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.16),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            country.flagEmoji,
+            style: const TextStyle(fontSize: 13, height: 1.1),
+          ),
+          const SizedBox(width: 5),
+          Flexible(
+            child: Text(
+              country.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

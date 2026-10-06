@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import '../../models/room_participant.dart';
 import '../../models/voiceroom.dart';
+import '../../services/auth_service.dart';
 import '../../services/exchange_rate_service.dart';
+import '../../services/partner_service.dart';
 import '../../services/room_participant_service.dart';
 import '../../services/voice_room_service.dart';
 import '../../theme/app_colors.dart';
@@ -543,11 +545,11 @@ class _VoiceRoomCard extends StatelessWidget {
             Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                // Host block: always the room's own denormalized host
-                // fields (never waits on a live roster fetch to render
-                // correctly) — avatar, name, and a gold "Host" badge so
-                // there's no mistaking who's hosting.
-                _Avatar(seed: room.hostName, imageUrl: room.hostAvatar, size: _kHostAvatarSize, isHost: true),
+                // Host block: always the room's host fields, kept live
+                // via PartnerService.streamAvatarUrl so a newly uploaded photo
+                // or profile update reflects immediately without waiting
+                // for room recreation.
+                _HostAvatar(room: room),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
@@ -702,7 +704,13 @@ class _OthersCluster extends StatelessWidget {
           for (var i = 0; i < others.length; i++)
             Positioned(
               left: i * (_kOtherAvatarSize - _kOtherOverlap),
-              child: _Avatar(seed: others[i].name, imageUrl: others[i].avatarUrl, size: _kOtherAvatarSize),
+              child: _Avatar(
+                seed: others[i].name,
+                imageUrl: others[i].avatarUrl,
+                size: _kOtherAvatarSize,
+                borderWidth: 1.5,
+                borderColor: AppColors.primaryPurple,
+              ),
             ),
           if (overflow > 0)
             Positioned(
@@ -714,7 +722,7 @@ class _OthersCluster extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: AppColors.primaryPurple.withValues(alpha: 0.14),
                   shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 1.5),
+                  border: Border.all(color: AppColors.primaryPurple, width: 1.5),
                 ),
                 child: Text(
                   '+$overflow',
@@ -732,16 +740,73 @@ class _OthersCluster extends StatelessWidget {
   }
 }
 
+class _HostAvatar extends StatelessWidget {
+  final VoiceRoom room;
+  const _HostAvatar({required this.room});
+
+  @override
+  Widget build(BuildContext context) {
+    final currentUser = AuthService.instance.currentUser;
+    final isMe = room.hostId.isNotEmpty && room.hostId == currentUser?.id;
+    final myAvatar = isMe ? currentUser?.avatarUrl : null;
+    final fallbackUrl = (myAvatar != null && myAvatar.isNotEmpty)
+        ? myAvatar
+        : room.hostAvatar;
+
+    if (room.hostId.isEmpty) {
+      return _Avatar(
+        seed: room.hostName,
+        imageUrl: fallbackUrl,
+        size: _kHostAvatarSize,
+        borderWidth: 2.5,
+        borderColor: AppColors.primaryPurple,
+      );
+    }
+
+    return StreamBuilder<String?>(
+      stream: PartnerService.streamAvatarUrl(room.hostId),
+      initialData: fallbackUrl.isNotEmpty ? fallbackUrl : null,
+      builder: (context, snapshot) {
+        final liveUrl = snapshot.data;
+        final effectiveUrl = (liveUrl != null && liveUrl.isNotEmpty)
+            ? liveUrl
+            : fallbackUrl;
+
+        // Auto-heal the room document in Firestore if the host is the signed-in
+        // user and the room's stored hostAvatar is empty or outdated.
+        if (isMe &&
+            effectiveUrl.isNotEmpty &&
+            room.hostAvatar != effectiveUrl &&
+            room.id.isNotEmpty) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            VoiceRoomService.repairHostAvatar(room.id, effectiveUrl);
+          });
+        }
+
+        return _Avatar(
+          seed: room.hostName,
+          imageUrl: effectiveUrl,
+          size: _kHostAvatarSize,
+          borderWidth: 2.5,
+          borderColor: AppColors.primaryPurple,
+        );
+      },
+    );
+  }
+}
+
 class _Avatar extends StatelessWidget {
   final String seed;
   final String imageUrl;
   final double size;
-  final bool isHost;
+  final double borderWidth;
+  final Color? borderColor;
   const _Avatar({
     required this.seed,
     required this.imageUrl,
     required this.size,
-    this.isHost = false,
+    this.borderWidth = 0,
+    this.borderColor,
   });
 
   @override
@@ -750,8 +815,8 @@ class _Avatar extends StatelessWidget {
       seed: seed.isEmpty ? 'H' : seed,
       size: size,
       imageUrl: imageUrl,
-      borderWidth: isHost ? 2.5 : 2,
-      borderColor: isHost ? AppColors.vipGold : Colors.white,
+      borderWidth: borderWidth,
+      borderColor: borderColor,
     );
   }
 }

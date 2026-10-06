@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../config/api_config.dart';
 import 'user.dart';
 
 /// One row in the chat list (hellotalk/chat_list_screen.dart): the other
@@ -84,7 +85,7 @@ class ChatMessage {
       roomId: data['roomId']?.toString() ?? '',
       roomTitle: data['roomTitle']?.toString() ?? '',
       roomHostName: data['roomHostName']?.toString() ?? '',
-      roomHostAvatar: data['roomHostAvatar']?.toString() ?? '',
+      roomHostAvatar: ApiConfig.resolveUrl(data['roomHostAvatar']?.toString() ?? ''),
       roomCategory: data['roomCategory']?.toString() ?? '',
       roomTag: data['roomTag']?.toString() ?? '',
       createdAt: ts is Timestamp ? ts.toDate() : null,

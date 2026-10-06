@@ -202,10 +202,19 @@ class RoomParticipantService {
           'sessionId': sessionId,
           'lastActiveAt': FieldValue.serverTimestamp(),
         };
-        if (user.avatarUrl.isNotEmpty && (existing.data()?['avatarUrl']?.toString().isEmpty ?? true)) {
+        if (user.avatarUrl.isNotEmpty && existing.data()?['avatarUrl'] != user.avatarUrl) {
           updates['avatarUrl'] = user.avatarUrl;
         }
+        if (user.name.isNotEmpty && existing.data()?['name'] != user.name) {
+          updates['name'] = user.name;
+        }
         tx.update(participantRef, updates);
+        if (isHost && user.avatarUrl.isNotEmpty) {
+          tx.update(_room(roomId), {
+            'hostAvatar': user.avatarUrl,
+            'hostName': user.name,
+          });
+        }
         return;
       }
       // Starting role: the room's hostId owner lands as 'host' (unmuted);
@@ -230,7 +239,14 @@ class RoomParticipantService {
         'joinedAt': FieldValue.serverTimestamp(),
         'lastActiveAt': FieldValue.serverTimestamp(),
       });
-      tx.update(_room(roomId), {'participantCount': FieldValue.increment(1)});
+      final roomUpdates = <String, dynamic>{
+        'participantCount': FieldValue.increment(1),
+      };
+      if (isHost && user.avatarUrl.isNotEmpty) {
+        roomUpdates['hostAvatar'] = user.avatarUrl;
+        roomUpdates['hostName'] = user.name;
+      }
+      tx.update(_room(roomId), roomUpdates);
     });
   }
 

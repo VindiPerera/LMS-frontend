@@ -380,7 +380,13 @@ class _ProfileHeader extends StatelessWidget {
                       ),
                     ),
                   ),
-                  Center(child: AppAvatar(seed: user.name, size: 66)),
+                  Center(
+                    child: AppAvatar(
+                      seed: user.name,
+                      size: 66,
+                      imageUrl: user.avatarUrl,
+                    ),
+                  ),
                 ],
               ),
             ),

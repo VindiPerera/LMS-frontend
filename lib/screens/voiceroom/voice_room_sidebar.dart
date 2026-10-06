@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../models/voiceroom.dart';
+import '../../services/partner_service.dart';
 import '../../services/voice_room_service.dart';
 import '../../widgets/app_avatar.dart';
 
@@ -221,10 +222,18 @@ class _RoomRow extends StatelessWidget {
                   // Host photo, or — when they have none — a colored circle
                   // with the first letter of the host's name (AppAvatar's
                   // own fallback), rather than an empty gray disc.
-                  AppAvatar(
-                    seed: room.hostName.trim().isNotEmpty ? room.hostName.trim() : room.title,
-                    size: 64,
-                    imageUrl: room.hostAvatar,
+                  StreamBuilder<String?>(
+                    stream: PartnerService.streamAvatarUrl(room.hostId),
+                    initialData: room.hostAvatar.isNotEmpty ? room.hostAvatar : null,
+                    builder: (context, snapshot) {
+                      return AppAvatar(
+                        seed: room.hostName.trim().isNotEmpty ? room.hostName.trim() : room.title,
+                        size: 64,
+                        imageUrl: snapshot.data ?? room.hostAvatar,
+                        borderWidth: 2.5,
+                        borderColor: const Color(0xFF7B68F4),
+                      );
+                    },
                   ),
                   Positioned(
                     left: 0,

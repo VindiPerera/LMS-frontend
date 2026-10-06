@@ -1,13 +1,16 @@
 import 'dart:async';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../models/media_library_item.dart';
 import '../../models/room_participant.dart';
 import '../../models/voiceroom.dart';
 import '../../models/whiteboard_item.dart';
+import '../../models/whiteboard_library_item.dart';
+import '../../services/media_library_service.dart';
 import '../../services/room_participant_service.dart';
 import '../../services/storage_service.dart';
 import '../../services/voice_room_service.dart';
@@ -16,6 +19,7 @@ import '../../services/whiteboard_service.dart';
 import '../../widgets/app_avatar.dart';
 import '../../widgets/dark_action_sheet.dart';
 import '../../widgets/whiteboard_canvas.dart';
+import '../../widgets/whiteboard_library_sheet.dart';
 import 'expanded_whiteboard_screen.dart';
 import 'open_voice_room.dart';
 import 'raised_hands_sheet.dart';
@@ -932,12 +936,89 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
     );
   }
 
-  /// Host/moderator-only "Add images" — picks a photo, uploads it via the
-  /// same hello-backend endpoint EditProfileScreen uses for avatars (see
-  /// StorageService.uploadWhiteboardImage), then adds it to the board sized
-  /// to match its own proportions (see WhiteboardService.addImage) and
-  /// placed somewhere that doesn't already have something on it.
-  Future<void> _addWhiteboardImage() async {
+  /// Host/moderator-only "Add images" — opens the Whiteboard Library sheet:
+  /// a folder browser over the built-in preset topic cards (see
+  /// WhiteboardLibraryItem.presets) plus the signed-in user's own
+  /// MediaLibraryService folders/images, any of which can be placed on
+  /// this room's board.
+  void _addWhiteboardImage() {
+    showWhiteboardLibrarySheet(
+      context: context,
+      onSelectPreset: _addLibraryItemToWhiteboard,
+      onSelectLibraryImage: _addMediaLibraryImageToWhiteboard,
+      onUploadToFolder: _pickAndUploadWhiteboardImage,
+    );
+  }
+
+  /// An existing MediaLibraryService image, picked from some folder — it
+  /// was already uploaded when it was first added to that folder (see
+  /// _pickAndUploadWhiteboardImage), so unlike a preset card this never
+  /// needs decoding/re-uploading, just placing directly.
+  Future<void> _addMediaLibraryImageToWhiteboard(MediaLibraryItem item) async {
+    setState(() => _addingImage = true);
+    try {
+      await WhiteboardService.addImage(
+        roomId: widget.room.id,
+        imageUrl: item.imageUrl,
+        aspectRatio: item.aspectRatio,
+        existingItems: _whiteboardItems,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not add image: ${e.toString().replaceFirst('Exception: ', '')}')),
+      );
+    } finally {
+      if (mounted) setState(() => _addingImage = false);
+    }
+  }
+
+  Future<void> _addLibraryItemToWhiteboard(WhiteboardLibraryItem item) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    setState(() => _addingImage = true);
+    try {
+      Uint8List bytes;
+      try {
+        final byteData = await rootBundle.load(item.assetPath);
+        bytes = byteData.buffer.asUint8List();
+      } catch (_) {
+        bytes = item.bytes;
+      }
+      final aspectRatio = await _decodeAspectRatio(bytes);
+
+      // Best-effort upload to backend storage so remote participants without
+      // local assets can view it via network URL.
+      String imageUrl = item.assetPath;
+      try {
+        final uploaded = await StorageService.uploadWhiteboardImage(uid, bytes);
+        if (uploaded.isNotEmpty) imageUrl = uploaded;
+      } catch (e) {
+        debugPrint('Whiteboard library upload fallback to asset: $e');
+      }
+
+      await WhiteboardService.addImage(
+        roomId: widget.room.id,
+        imageUrl: imageUrl,
+        aspectRatio: aspectRatio > 0 ? aspectRatio : item.aspectRatio,
+        existingItems: _whiteboardItems,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not add image: ${e.toString().replaceFirst('Exception: ', '')}')),
+      );
+    } finally {
+      if (mounted) setState(() => _addingImage = false);
+    }
+  }
+
+  /// [parentId] is the Library sheet's currently-open folder (null for its
+  /// root) — the upload is filed there via MediaLibraryService so it's
+  /// still there to reuse next time, in any room, not just placed on this
+  /// board once and forgotten.
+  Future<void> _pickAndUploadWhiteboardImage(String? parentId) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
 
@@ -949,6 +1030,19 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
       final bytes = await picked.readAsBytes();
       final aspectRatio = await _decodeAspectRatio(bytes);
       final url = await StorageService.uploadWhiteboardImage(uid, bytes);
+      // Best-effort: the board placement below is this action's main job,
+      // so a library-save failure (e.g. a transient Firestore error)
+      // shouldn't also block that.
+      try {
+        await MediaLibraryService.addImage(
+          name: 'Image ${DateTime.now().millisecondsSinceEpoch}',
+          imageUrl: url,
+          aspectRatio: aspectRatio,
+          parentId: parentId,
+        );
+      } catch (e) {
+        debugPrint('Could not save upload to library (non-fatal): $e');
+      }
       await WhiteboardService.addImage(
         roomId: widget.room.id,
         imageUrl: url,
@@ -1149,6 +1243,7 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
           onTransformEnd: _commitWhiteboardTransform,
           onOpenOptions: _openWhiteboardItemOptions,
           onQuickDelete: _removeWhiteboardItem,
+          onAddImage: canEdit ? _addWhiteboardImage : null,
         ),
       ),
     );
