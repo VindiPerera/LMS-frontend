@@ -8,6 +8,7 @@ import '../models/user.dart';
 import 'deep_link_service.dart';
 import 'moment_service.dart';
 import 'push_notification_service.dart';
+import 'voice_room_service.dart';
 
 /// Result of a successful register/login/Google sign-in.
 class AuthResult {
@@ -219,6 +220,12 @@ class AuthService {
     if (fields.containsKey('name') || fields.containsKey('avatarUrl')) {
       // ignore: discarded_futures
       MomentService.updateAuthorInfoAcrossMoments(
+        uid: uid,
+        name: updated.name,
+        avatarUrl: updated.avatarUrl,
+      );
+      // ignore: discarded_futures
+      VoiceRoomService.updateHostInfoAcrossRooms(
         uid: uid,
         name: updated.name,
         avatarUrl: updated.avatarUrl,

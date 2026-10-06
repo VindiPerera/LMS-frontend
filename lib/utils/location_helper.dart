@@ -1,3 +1,4 @@
+import '../data/countries.dart';
 import '../models/user.dart';
 
 class LocationHelper {
@@ -132,8 +133,22 @@ class LocationHelper {
 
   /// Resolves location info based on user countryFlag, native language, or defaults.
   static LocationInfo getLocationInfo(AppUser user) {
-    if (user.countryFlag.isNotEmpty && _countryMap.containsKey(user.countryFlag)) {
-      return _countryMap[user.countryFlag]!;
+    if (user.countryFlag.isNotEmpty) {
+      if (_countryMap.containsKey(user.countryFlag)) {
+        return _countryMap[user.countryFlag]!;
+      }
+      final c = Country.fromFlag(user.countryFlag);
+      if (c != null) {
+        return LocationInfo(
+          city: c.name,
+          country: c.name,
+          flag: c.flagEmoji,
+          utcOffsetHours: c.utcOffsetHours,
+          latitude: 0.0,
+          longitude: 0.0,
+          region: c.name,
+        );
+      }
     }
 
     final native = user.nativeLang.toLowerCase();

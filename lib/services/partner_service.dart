@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../config/api_config.dart';
 import '../models/user.dart';
 import '../utils/presence.dart';
 import '../utils/stream_fallback.dart';
@@ -58,21 +59,21 @@ class PartnerService {
         .withFallback(() => false);
   }
 
-  /// Live `users/{uid}.activeRoomId` — non-empty exactly while [uid] has a
-  /// live participant doc in that voice room (see
-  /// RoomParticipantService.join/leave). Drives the "in a voice room" badge
-  /// in chat_list_screen.dart and the "Go Look" banner in
-  /// chat_detail_screen.dart. Null (not '') once they're not in one, so a
-  /// caller can tell "definitely not in a room" apart from "still loading"
-  /// via a plain `snapshot.hasData` check if it needs to.
-  static Stream<String?> streamActiveRoomId(String uid) {
+  /// Live `users/{uid}.avatarUrl` — used anywhere a profile picture needs to
+  /// actually stay current rather than showing whatever was set the moment
+  /// a chat thread's denormalized `participantInfo` snapshot was last
+  /// written (see ChatService's class doc: that snapshot only refreshes
+  /// when either side next sends a message), so a newly-uploaded avatar
+  /// shows up immediately in an existing thread instead of waiting for the
+  /// next message. Null while unset, same as a missing avatar renders today.
+  static Stream<String?> streamAvatarUrl(String uid) {
     if (uid.isEmpty) return Stream.value(null);
     return _users
         .doc(uid)
         .snapshots()
         .map((doc) {
-          final id = doc.data()?['activeRoomId']?.toString() ?? '';
-          return id.isEmpty ? null : id;
+          final url = ApiConfig.resolveUrl(doc.data()?['avatarUrl']?.toString());
+          return url.isEmpty ? null : url;
         })
         .withFallback(() => null);
   }

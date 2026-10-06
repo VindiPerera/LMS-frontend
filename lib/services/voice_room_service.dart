@@ -129,16 +129,19 @@ class VoiceRoomService {
     String category = 'EN',
   }) async {
     final uid = _uid;
-    final user = AuthService.instance.currentUser;
+    var user = AuthService.instance.currentUser;
     if (uid == null || user == null) {
       throw StateError('You must be signed in to start a voice room.');
+    }
+    // Refresh user from Firestore if avatar is empty to pick up any freshly uploaded photo
+    if (user.avatarUrl.isEmpty) {
+      final refreshed = await AuthService.instance.refreshCurrentUser();
+      if (refreshed != null) user = refreshed;
     }
     final cleanTitle = title.trim();
     if (cleanTitle.isEmpty) {
       throw StateError('Give your room a topic before starting it.');
     }
-
-    await _endAllActiveRoomsFor(uid);
 
     final draft = VoiceRoom(
       hostId: uid,
@@ -159,9 +162,38 @@ class VoiceRoomService {
     );
 
     final ref = _rooms.doc();
+    // IMPORTANT: end old rooms FIRST, then create the new one — never
+    // concurrently. If both writes ran in parallel (Future.wait), there was
+    // a real race where the new room's document could be committed to
+    // Firestore before _endAllActiveRoomsFor's query snapshot was taken,
+    // causing the new room itself to appear in `existing.docs` and be
+    // immediately set isActive: false — triggering the "This room has
+    // ended." snackbar the moment VoiceRoomDetailScreen opened.
+    await _endAllActiveRoomsFor(uid);
     await ref.set(draft.toCreateMap());
-    final snap = await ref.get();
-    return VoiceRoom.fromFirestore(snap);
+    // No read-back of the doc we just wrote: VoiceRoomDetailScreen's own
+    // streamRoom subscription (see its initState) takes over moments later
+    // anyway, and everything it needs before that — id (ref.id) and hostId
+    // (uid) — is already known here, so re-fetching would just be a second
+    // round-trip for data this call already has.
+    return VoiceRoom(
+      id: ref.id,
+      hostId: draft.hostId,
+      title: draft.title,
+      hostName: draft.hostName,
+      hostAvatar: draft.hostAvatar,
+      hostFlag: draft.hostFlag,
+      category: draft.category,
+      tag: draft.tag,
+      coverGradientSeed: draft.coverGradientSeed,
+      participantAvatars: draft.participantAvatars,
+      participantCount: draft.participantCount,
+      isTop: draft.isTop,
+      isCreator: draft.isCreator,
+      isActive: true,
+      audience: draft.audience,
+      createdAt: DateTime.now(),
+    );
   }
 
   /// Ends [roomId] so it stops showing up anywhere. Only the host or a live
@@ -236,6 +268,45 @@ class VoiceRoomService {
       await _invites(roomId).doc(uid).delete();
     } catch (e) {
       debugPrint('VoiceRoomService.deleteModeratorInvite error (non-fatal): $e');
+    }
+  }
+
+  /// Repairs the denormalized hostAvatar on [roomId] if it was stored empty
+  /// or outdated. Only the host of the room can update this (governed by firestore.rules).
+  static Future<void> repairHostAvatar(String roomId, String avatarUrl) async {
+    if (roomId.isEmpty || avatarUrl.isEmpty) return;
+    try {
+      await _rooms.doc(roomId).update({'hostAvatar': avatarUrl});
+    } catch (e) {
+      debugPrint('VoiceRoomService.repairHostAvatar non-fatal: $e');
+    }
+  }
+
+  /// Updates the denormalized `hostName` and `hostAvatar` across all active
+  /// rooms hosted by [uid] — called by AuthService.updateProfile when the user
+  /// changes their name or avatar.
+  static Future<void> updateHostInfoAcrossRooms({
+    required String uid,
+    required String name,
+    required String avatarUrl,
+  }) async {
+    if (uid.isEmpty) return;
+    try {
+      final snap = await _rooms
+          .where('hostId', isEqualTo: uid)
+          .where('isActive', isEqualTo: true)
+          .get();
+      if (snap.docs.isEmpty) return;
+      final batch = FirebaseFirestore.instance.batch();
+      for (final doc in snap.docs) {
+        batch.update(doc.reference, {
+          'hostName': name,
+          'hostAvatar': avatarUrl,
+        });
+      }
+      await batch.commit();
+    } catch (e) {
+      debugPrint('VoiceRoomService.updateHostInfoAcrossRooms non-fatal: $e');
     }
   }
 

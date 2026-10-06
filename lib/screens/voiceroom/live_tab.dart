@@ -79,6 +79,8 @@ class _LiveCard extends StatelessWidget {
               size: 56,
               showFlag: true,
               flag: stream.hostFlag,
+              borderWidth: 2.5,
+              borderColor: AppColors.primaryPurple,
             ),
           ),
           const Spacer(),

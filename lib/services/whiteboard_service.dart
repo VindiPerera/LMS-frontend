@@ -29,8 +29,6 @@ class WhiteboardService {
   /// the board at once.
   static const double defaultWidth = 0.94;
   static const double defaultHeight = 0.94;
-  static const double _minPlacement = 0.04;
-  static const double _placementStep = 0.055;
 
   /// Oldest first — the initial fetch order; on-screen stacking is actually
   /// driven by each item's own `zIndex` (see WhiteboardCanvas), not this.
@@ -46,46 +44,6 @@ class WhiteboardService {
         });
   }
 
-  /// Picks a starting box for a new item that doesn't land on top of
-  /// anything already on the board, when there's room for that — a simple
-  /// diagonal cascade, skipping any slot that would overlap an existing
-  /// item. Once the board is too full to avoid overlap entirely, it still
-  /// cascades (so new items don't all pile up in exactly the same spot)
-  /// rather than giving up and stacking blindly at the origin.
-  static ({double x, double y}) _nextPlacement(
-    List<WhiteboardItem> existing, {
-    required double width,
-    required double height,
-  }) {
-    const columns = 6;
-    for (var attempt = 0; attempt < 30; attempt++) {
-      final x = (_minPlacement + (attempt % columns) * _placementStep).clamp(0.0, 1.0 - width);
-      final y = (_minPlacement + (attempt ~/ columns) * _placementStep).clamp(0.0, 1.0 - height);
-      final overlapsExisting = existing.any(
-        (item) => _overlaps(x, y, width, height, item.x, item.y, item.width, item.height),
-      );
-      if (!overlapsExisting) return (x: x, y: y);
-    }
-    final n = existing.length;
-    return (
-      x: (_minPlacement + (n % columns) * _placementStep).clamp(0.0, 1.0 - width),
-      y: (_minPlacement + (n ~/ columns) * _placementStep).clamp(0.0, 1.0 - height),
-    );
-  }
-
-  static bool _overlaps(
-    double ax,
-    double ay,
-    double aw,
-    double ah,
-    double bx,
-    double by,
-    double bw,
-    double bh,
-  ) {
-    return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
-  }
-
   static int _nextZIndex(List<WhiteboardItem> existing) {
     if (existing.isEmpty) return 0;
     return existing.map((e) => e.zIndex).reduce((a, b) => a > b ? a : b) + 1;
@@ -95,9 +53,16 @@ class WhiteboardService {
   /// WhiteboardCanvas's resize handle can keep the box in proportion.
   /// [existingItems] is the board's current items (the caller already has
   /// this in hand from its own live subscription — see
-  /// VoiceRoomDetailScreen._whiteboardItems), used only to pick a
-  /// non-overlapping starting position and a stacking order above
-  /// everything already placed.
+  /// VoiceRoomDetailScreen._whiteboardItems), used both to pick a
+  /// non-overlapping starting position/stacking order among the text items
+  /// staying behind, and to find any previous photo to replace.
+  ///
+  /// Only one photo is ever on the board at a time — a newly-added image
+  /// replaces whatever image was already there (deleted in the same batch,
+  /// so a viewer never sees both at once even for a frame) rather than
+  /// piling up alongside it; text items are untouched. Matches the stage
+  /// card's "start the board" single-topic-photo framing in its empty
+  /// state, not a freeform photo collage.
   static Future<void> addImage({
     required String roomId,
     required String imageUrl,
@@ -108,28 +73,47 @@ class WhiteboardService {
     final user = AuthService.instance.currentUser;
     if (uid == null || user == null || roomId.isEmpty || imageUrl.isEmpty) return;
 
-    // Starts full-size (see defaultWidth/defaultHeight's doc comment) —
-    // WhiteboardCanvas renders every image with BoxFit.cover, so this just
-    // fills/crops to the board's shape rather than letterboxing to the
-    // source image's own proportions. [aspectRatio] is still stored so a
-    // later manual resize (WhiteboardCanvas's resize handle) keeps the
-    // image in proportion instead of letting it stretch freely.
-    final placement = _nextPlacement(existingItems, width: defaultWidth, height: defaultHeight);
+    final priorImages = existingItems.where((item) => item.isImage);
+    final remainingItems = existingItems.where((item) => !item.isImage).toList();
 
-    await _items(roomId).add({
+    // Fit image to board bounds while maintaining its true aspect ratio so
+    // no part of the image is cropped or hidden.
+    final canvasRatio = WhiteboardGeometry.aspectRatio;
+    double initW, initH;
+    if (aspectRatio > 0) {
+      if (aspectRatio >= canvasRatio) {
+        initW = 0.92;
+        initH = (initW * canvasRatio / aspectRatio).clamp(0.15, 0.92);
+      } else {
+        initH = 0.92;
+        initW = (initH * aspectRatio / canvasRatio).clamp(0.15, 0.92);
+      }
+    } else {
+      initW = defaultWidth;
+      initH = defaultHeight;
+    }
+    final initX = ((1.0 - initW) / 2).clamp(0.02, 0.98);
+    final initY = ((1.0 - initH) / 2).clamp(0.02, 0.98);
+
+    final batch = FirebaseFirestore.instance.batch();
+    for (final old in priorImages) {
+      batch.delete(_items(roomId).doc(old.id));
+    }
+    batch.set(_items(roomId).doc(), {
       'type': 'image',
       'imageUrl': imageUrl,
       'addedBy': uid,
       'addedByName': user.name,
       'createdAt': FieldValue.serverTimestamp(),
-      'x': placement.x,
-      'y': placement.y,
-      'width': defaultWidth,
-      'height': defaultHeight,
+      'x': initX,
+      'y': initY,
+      'width': initW,
+      'height': initH,
       'rotation': 0,
-      'zIndex': _nextZIndex(existingItems),
+      'zIndex': _nextZIndex(remainingItems),
       'aspectRatio': aspectRatio,
     });
+    await batch.commit();
   }
 
   static Future<void> addText({

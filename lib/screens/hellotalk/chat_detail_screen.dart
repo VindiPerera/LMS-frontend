@@ -6,7 +6,7 @@ import '../../models/voiceroom.dart';
 import '../../services/chat_service.dart';
 import '../../services/partner_service.dart';
 import '../../services/push_notification_service.dart';
-import '../../services/voice_room_service.dart';
+import '../../services/room_participant_service.dart';
 import '../../theme/app_colors.dart';
 import '../../utils/chat_time.dart';
 import '../../widgets/app_avatar.dart';
@@ -27,13 +27,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   late final String _chatId = ChatService.chatIdFor(widget.user.id);
   late final Stream<List<ChatMessage>> _messagesStream =
       ChatService.streamMessages(_chatId);
-  // The OTHER person in this thread's live voice room, if they're currently
-  // in one at all — any role (host/moderator/speaker/listener), not just
-  // hosting. See AppUser.activeRoomId's doc comment; the room's own details
-  // (title etc.) are fetched separately once we know which room, via the
-  // nested StreamBuilder in build() below.
-  late final Stream<String?> _theirActiveRoomIdStream =
-      PartnerService.streamActiveRoomId(widget.user.id);
   // Live online/offline for the header — widget.user.isOnline alone would
   // just be whatever was true the moment this screen opened, never
   // updating while the chat stays open. Skipped for the FaceTalk system
@@ -41,6 +34,25 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   late final Stream<bool> _theirOnlineStream = _isSystemChat
       ? const Stream.empty()
       : PartnerService.streamIsOnline(widget.user.id);
+  // widget.user.avatarUrl is a denormalized participantInfo snapshot —
+  // only refreshed when either side next sends a message in this thread
+  // (see ChatService's class doc) — so a newly-uploaded avatar needs its
+  // own live listener to show up here right away instead of waiting for
+  // that next message.
+  late final Stream<String?> _theirAvatarStream = _isSystemChat
+      ? const Stream.empty()
+      : PartnerService.streamAvatarUrl(widget.user.id);
+  // The voice room they're actually, currently present in — NOT
+  // PartnerService.streamActiveRoomId's raw users/{uid}.activeRoomId, which
+  // only self-clears via RoomParticipantService.leave and so can stay
+  // stuck pointing at a room long after they've actually left it (crash,
+  // force-kill, lost connection — see that method's own doc comment on the
+  // stale-participant sweep deliberately not touching this field). This
+  // cross-checks their actual non-stale participant doc instead, the same
+  // source of truth partner_profile_screen.dart's "Go Look" card uses.
+  late final Stream<VoiceRoom?> _theirActiveRoomStream = _isSystemChat
+      ? const Stream.empty()
+      : RoomParticipantService.streamRoomUserIsIn(widget.user.id);
 
   bool get _isSystemChat => ChatService.isSystemChat(widget.user.id);
 
@@ -121,13 +133,19 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 // Built directly (not via AppAvatar.forUser) so the dot
                 // uses the live `isOnline` above instead of the static
                 // widget.user.isOnline snapshot forUser would read.
-                AppAvatar(
-                  seed: widget.user.name,
-                  imageUrl: widget.user.avatarUrl,
-                  size: 36,
-                  showFlag: false,
-                  showOnlineDot: !_isSystemChat,
-                  isOnline: isOnline,
+                StreamBuilder<String?>(
+                  stream: _theirAvatarStream,
+                  initialData: widget.user.avatarUrl.isEmpty ? null : widget.user.avatarUrl,
+                  builder: (context, avatarSnapshot) {
+                    return AppAvatar(
+                      seed: widget.user.name,
+                      imageUrl: avatarSnapshot.data,
+                      size: 36,
+                      showFlag: false,
+                      showOnlineDot: !_isSystemChat,
+                      isOnline: isOnline,
+                    );
+                  },
                 ),
                 const SizedBox(width: 10),
                 Column(
@@ -181,23 +199,16 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       ),
       body: Column(
         children: [
-          StreamBuilder<String?>(
-            stream: _theirActiveRoomIdStream,
-            builder: (context, roomIdSnapshot) {
-              final roomId = roomIdSnapshot.data;
-              if (roomId == null) return const SizedBox.shrink();
-              return StreamBuilder<VoiceRoom?>(
-                stream: VoiceRoomService.streamRoom(roomId),
-                builder: (context, roomSnapshot) {
-                  final room = roomSnapshot.data;
-                  // Also covers the room having just ended (isActive flips,
-                  // streamRoom then emits null) a beat before their own
-                  // activeRoomId finishes clearing — the banner disappears
-                  // on whichever of the two updates lands first.
-                  if (room == null || !room.isActive) return const SizedBox.shrink();
-                  return _PartnerVoiceRoomBanner(room: room);
-                },
-              );
+          StreamBuilder<VoiceRoom?>(
+            stream: _theirActiveRoomStream,
+            builder: (context, roomSnapshot) {
+              final room = roomSnapshot.data;
+              // streamRoomUserIsIn already only considers active, visible
+              // rooms where their participant doc is actually present and
+              // non-stale, so a null here covers "not in a room", "room
+              // ended", and "their session went stale" all at once.
+              if (room == null) return const SizedBox.shrink();
+              return _PartnerVoiceRoomBanner(room: room);
             },
           ),
           Expanded(
@@ -286,7 +297,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
 /// Banner shown atop a chat thread while the OTHER person is currently in a
 /// live Voice Room — any role (host/moderator/speaker/listener), not just
-/// hosting (see _theirActiveRoomIdStream). Tapping it (or "Go Look") opens
+/// hosting (see _theirActiveRoomStream). Tapping it (or "Go Look") opens
 /// that room via the normal openVoiceRoom entry point, ban check included.
 class _PartnerVoiceRoomBanner extends StatelessWidget {
   final VoiceRoom room;

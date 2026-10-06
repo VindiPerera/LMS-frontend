@@ -5,6 +5,7 @@ import '../../models/chat_message.dart';
 import '../../models/voiceroom.dart';
 import '../../services/chat_service.dart';
 import '../../services/partner_service.dart';
+import '../../services/room_participant_service.dart';
 import '../../services/voice_room_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
@@ -350,18 +351,40 @@ class _ChatListTile extends StatelessWidget {
               stream: PartnerService.streamIsOnline(chat.user.id),
               initialData: chat.user.isOnline,
               builder: (context, onlineSnapshot) {
-                return StreamBuilder<String?>(
-                  stream: PartnerService.streamActiveRoomId(chat.user.id),
+                return StreamBuilder<VoiceRoom?>(
+                  // RoomParticipantService.streamRoomUserIsIn, not the raw
+                  // users/{uid}.activeRoomId field — that field only ever
+                  // self-clears via RoomParticipantService.leave, so a
+                  // client that died without calling it (crash, force-kill,
+                  // lost connection) would otherwise leave this badge stuck
+                  // on even after the room's own stale-participant sweep
+                  // has already removed them from the room. This stream
+                  // cross-checks their actual (non-stale) participant doc
+                  // instead, same source of truth partner_profile_screen
+                  // .dart's "Go Look" card already relies on.
+                  stream: RoomParticipantService.streamRoomUserIsIn(chat.user.id),
                   builder: (context, roomSnapshot) {
-                    return AppAvatar(
-                      seed: chat.user.name,
-                      size: 54,
-                      showOnlineDot: true,
-                      isOnline: onlineSnapshot.data ?? false,
-                      inVoiceRoom: roomSnapshot.data != null,
-                      showFlag: true,
-                      flag: chat.user.countryFlag,
-                      imageUrl: chat.user.avatarUrl,
+                    return StreamBuilder<String?>(
+                      // chat.user.avatarUrl is that same denormalized
+                      // participantInfo snapshot — only refreshed when
+                      // either side next sends a message (see ChatService's
+                      // class doc) — so a newly-uploaded avatar needs its
+                      // own live listener too, same reasoning as isOnline
+                      // above, to show up here right away.
+                      stream: PartnerService.streamAvatarUrl(chat.user.id),
+                      initialData: chat.user.avatarUrl.isEmpty ? null : chat.user.avatarUrl,
+                      builder: (context, avatarSnapshot) {
+                        return AppAvatar(
+                          seed: chat.user.name,
+                          size: 54,
+                          showOnlineDot: true,
+                          isOnline: onlineSnapshot.data ?? false,
+                          inVoiceRoom: roomSnapshot.data != null,
+                          showFlag: true,
+                          flag: chat.user.countryFlag,
+                          imageUrl: avatarSnapshot.data,
+                        );
+                      },
                     );
                   },
                 );

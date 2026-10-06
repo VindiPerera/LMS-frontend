@@ -119,6 +119,17 @@ service cloud.firestore {
         allow create, delete: if isSignedIn() && request.auth.uid == likerUid;
         allow update: if false;
       }
+
+      // ------------------------------------------------------------------
+      // users/{uid}/mediaLibrary/{itemId} — a user's own personal folder
+      // tree of whiteboard images (MediaLibraryService), used from the
+      // voice room "Add Images" sheet. Entirely private — unlike the
+      // voiceRooms/{roomId}/whiteboard items this feeds, nobody but the
+      // owner ever reads or writes their own library.
+      // ------------------------------------------------------------------
+      match /mediaLibrary/{itemId} {
+        allow read, write: if isOwner(uid);
+      }
     }
 
     // ------------------------------------------------------------------

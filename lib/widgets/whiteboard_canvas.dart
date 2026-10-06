@@ -4,7 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/whiteboard_item.dart';
-import '../services/whiteboard_service.dart';
+import '../models/whiteboard_library_data.dart';
+import '../models/whiteboard_library_item.dart';
 
 /// A free-position canvas for a voice room's shared whiteboard: every item
 /// (image or text) can be dragged, resized, and — for images — rotated, all
@@ -151,47 +152,72 @@ class _WhiteboardCanvasState extends State<WhiteboardCanvas> {
     final start = _scaleStartItem ?? current;
     final marginX = _edgeMarginPx / canvasW;
     final marginY = _edgeMarginPx / canvasH;
+    final canvasRatio = canvasW / canvasH;
 
     var newWidth = current.width;
     var newHeight = current.height;
+    var newX = current.x;
+    var newY = current.y;
     double? newFontSize;
-    // pointerCount > 1 is what actually distinguishes a genuine pinch from
-    // an ordinary one-finger drag — details.scale alone can't (Flutter
-    // reports it as exactly 1.0 for a single pointer throughout, but
-    // checking pointerCount too keeps this correct if that ever changes).
+
     if (details.pointerCount > 1) {
-      final resized = _resizeWithinBounds(
-        item: item,
-        base: start,
-        targetWidth: start.width * details.scale,
-        targetHeight: start.height * details.scale,
-        canvasW: canvasW,
-        canvasH: canvasH,
-        marginX: marginX,
-        marginY: marginY,
-      );
-      newWidth = resized.width;
-      newHeight = resized.height;
-      newFontSize = resized.fontSize;
+      // TWO-FINGER PINCH TO ZOOM:
+      // Symmetrically scales around the pinch center, preserving the item's
+      // true aspect ratio without jumping or snapping.
+      final scale = details.scale;
+      final targetW = (start.width * scale).clamp(_minBoxFraction, 3.0);
+      double targetH;
+
+      final ratio = item.aspectRatio;
+      if (item.isImage && ratio != null && ratio > 0) {
+        targetH = targetW * canvasRatio / ratio;
+      } else {
+        targetH = (start.height * scale).clamp(_minBoxFraction, 3.0);
+      }
+
+      final deltaW = targetW - current.width;
+      final deltaH = targetH - current.height;
+
+      newWidth = targetW;
+      newHeight = targetH;
+      newX = current.x - (deltaW / 2) + (details.focalPointDelta.dx / canvasW);
+      newY = current.y - (deltaH / 2) + (details.focalPointDelta.dy / canvasH);
+
+      if (item.isText) {
+        final oldAreaPx = start.width * canvasW * start.height * canvasH;
+        final newAreaPx = newWidth * canvasW * newHeight * canvasH;
+        if (oldAreaPx > 0) {
+          final fontScale = math.sqrt(newAreaPx / oldAreaPx);
+          newFontSize = (start.fontSize * fontScale).clamp(10.0, 96.0);
+        }
+      }
+    } else {
+      // ONE-FINGER DRAG TO MOVE:
+      newX = current.x + (details.focalPointDelta.dx / canvasW);
+      newY = current.y + (details.focalPointDelta.dy / canvasH);
     }
 
-    // Position tracks the pinch/drag focal point either way — for a single
-    // finger this is just that finger's own movement (identical to the old
-    // Pan-based drag); for a pinch it lets the box recenter under wherever
-    // the two fingers' midpoint drifts to, matching how pinch-zoom behaves
-    // in other apps rather than resizing only around a fixed corner.
-    // math.max guards against an oversized item (wider/taller than the
-    // canvas minus both margins) making the clamp's own bounds invalid —
-    // falls back to pinning against the near edge only, rather than
-    // reserving a margin on both sides for something that can't fit.
-    final double newX = (current.x + details.focalPointDelta.dx / canvasW)
-        .clamp(marginX, math.max(marginX, 1.0 - newWidth - marginX));
-    final double newY = (current.y + details.focalPointDelta.dy / canvasH)
-        .clamp(marginY, math.max(marginY, 1.0 - newHeight - marginY));
+    // Boundary clamp: keeps the item within usable whiteboard area
+    if (newWidth <= 1.0 - 2 * marginX) {
+      newX = newX.clamp(marginX, math.max(marginX, 1.0 - newWidth - marginX));
+    } else {
+      newX = newX.clamp(1.0 - newWidth - marginX, marginX);
+    }
+
+    if (newHeight <= 1.0 - 2 * marginY) {
+      newY = newY.clamp(marginY, math.max(marginY, 1.0 - newHeight - marginY));
+    } else {
+      newY = newY.clamp(1.0 - newHeight - marginY, marginY);
+    }
 
     setState(() {
-      _liveOverrides[item.id] =
-          current.copyWith(x: newX, y: newY, width: newWidth, height: newHeight, fontSize: newFontSize);
+      _liveOverrides[item.id] = current.copyWith(
+        x: newX,
+        y: newY,
+        width: newWidth,
+        height: newHeight,
+        fontSize: newFontSize,
+      );
     });
   }
 
@@ -263,17 +289,14 @@ class _WhiteboardCanvasState extends State<WhiteboardCanvas> {
     double newHeight;
 
     final ratio = item.aspectRatio;
+    final canvasRatio = canvasW / canvasH;
     if (item.isImage && ratio != null && ratio > 0) {
       // Locked to the source image's own proportions — width drives the
-      // box; height (and, if that would run off the bottom edge, width
-      // again) follows to keep the box's true visual aspect ratio, not
-      // just its stored width/height fractions (see WhiteboardGeometry's
-      // doc comment for why those two only match when every canvas this
-      // renders in shares the same aspect ratio).
-      newHeight = newWidth * WhiteboardGeometry.aspectRatio / ratio;
+      // box; height follows to keep the box's true visual aspect ratio.
+      newHeight = newWidth * canvasRatio / ratio;
       if (newHeight > maxHeightBound) {
         newHeight = maxHeightBound;
-        newWidth = (newHeight * ratio / WhiteboardGeometry.aspectRatio).clamp(_minBoxFraction, maxWidth);
+        newWidth = (newHeight * ratio / canvasRatio).clamp(_minBoxFraction, maxWidth);
       }
       if (newHeight < _minBoxFraction) newHeight = _minBoxFraction;
     } else {
@@ -325,12 +348,30 @@ class _WhiteboardCanvasState extends State<WhiteboardCanvas> {
         return Stack(
           clipBehavior: Clip.none,
           children: [
-            // Tapping empty canvas space deselects whatever's selected.
+            // Tapping empty canvas space deselects; two-finger pinch on the canvas
+            // zooms the active image smoothly even if fingers touch outside its box.
             if (widget.canEdit)
               Positioned.fill(
                 child: GestureDetector(
                   behavior: HitTestBehavior.translucent,
                   onTap: () => setState(() => _selectedId = null),
+                  onScaleStart: (_) {
+                    final target = sorted.where((i) => i.id == _selectedId).firstOrNull ??
+                        (sorted.length == 1 && sorted.first.isImage ? sorted.first : null);
+                    if (target != null) _onBodyScaleStart(target);
+                  },
+                  onScaleUpdate: (d) {
+                    final target = sorted.where((i) => i.id == _selectedId).firstOrNull ??
+                        (sorted.length == 1 && sorted.first.isImage ? sorted.first : null);
+                    if (target != null && d.pointerCount > 1) {
+                      _onBodyScaleUpdate(target, d, canvasW, canvasH);
+                    }
+                  },
+                  onScaleEnd: (_) {
+                    final target = sorted.where((i) => i.id == _selectedId).firstOrNull ??
+                        (sorted.length == 1 && sorted.first.isImage ? sorted.first : null);
+                    if (target != null) _onBodyScaleEnd(target);
+                  },
                 ),
               ),
             for (final raw in sorted) ..._buildItem(raw, canvasW, canvasH),
@@ -452,18 +493,62 @@ class _WhiteboardCanvasState extends State<WhiteboardCanvas> {
   }
 
   Widget _buildImage(WhiteboardItem item, double width, double height, double radius) {
+    final isAsset = item.imageUrl.startsWith('assets/');
+
+    Widget brokenImagePlaceholder() => Container(
+      color: Colors.white12,
+      alignment: Alignment.center,
+      child: const Icon(Icons.broken_image_outlined, color: Colors.white38),
+    );
+
+    Widget fallbackImage() {
+      final topicId = RegExp(r'topic_[a-z_]+').firstMatch(item.imageUrl)?.group(0);
+      if (topicId != null) {
+        final bytes = WhiteboardLibraryData.getBytes(topicId);
+        if (bytes.isNotEmpty) {
+          return Image.memory(bytes, width: width, height: height, fit: BoxFit.contain);
+        }
+        // A preset added after whiteboard_library_data.dart's embedded set
+        // (see WhiteboardLibraryItem.presets) has no entry there, but still
+        // ships as a real bundled asset — fall back to that instead of
+        // treating every network failure as unrecoverable.
+        for (final preset in WhiteboardLibraryItem.presets) {
+          if (preset.id == topicId) {
+            return Image.asset(
+              preset.assetPath,
+              width: width,
+              height: height,
+              fit: BoxFit.contain,
+              errorBuilder: (_, _, _) => brokenImagePlaceholder(),
+            );
+          }
+        }
+      }
+      return brokenImagePlaceholder();
+    }
+
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
-      child: Image.network(
-        item.imageUrl,
+      child: Container(
         width: width,
         height: height,
-        fit: BoxFit.cover,
-        errorBuilder: (_, _, _) => Container(
-          color: Colors.white12,
-          alignment: Alignment.center,
-          child: const Icon(Icons.broken_image_outlined, color: Colors.white38),
-        ),
+        alignment: Alignment.center,
+        color: Colors.black.withValues(alpha: 0.15),
+        child: isAsset
+            ? Image.asset(
+                item.imageUrl,
+                width: width,
+                height: height,
+                fit: BoxFit.contain,
+                errorBuilder: (_, _, _) => fallbackImage(),
+              )
+            : Image.network(
+                item.imageUrl,
+                width: width,
+                height: height,
+                fit: BoxFit.contain,
+                errorBuilder: (_, _, _) => fallbackImage(),
+              ),
       ),
     );
   }

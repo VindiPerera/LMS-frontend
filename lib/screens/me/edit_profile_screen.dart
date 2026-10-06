@@ -10,6 +10,7 @@ import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
 import '../../widgets/auth_widgets.dart';
 import '../../widgets/country_picker_sheet.dart';
+import '../../widgets/image_crop_screen.dart';
 
 /// Lets the signed-in user edit their own profile (Firestore
 /// `users/{uid}` document). Pops with the updated AppUser on success so
@@ -100,20 +101,34 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
 
-    final picked = await ImagePicker().pickImage(
-      source: ImageSource.gallery,
-      maxWidth: 512,
-      imageQuality: 85,
+    // Pick at full resolution — the crop screen will downscale to 512 px
+    // before upload, so reducing quality here only hurts crop accuracy.
+    final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
+    if (picked == null || !mounted) return;
+
+    // Capture the navigator synchronously — using Navigator.of(context) after
+    // any await would trigger use_build_context_synchronously.
+    final nav = Navigator.of(context);
+
+    final raw = await picked.readAsBytes();
+
+    // Open the crop screen and wait for the user to confirm or cancel.
+    final cropped = await nav.push<Uint8List>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => ImageCropScreen(imageBytes: raw),
+      ),
     );
-    if (picked == null) return;
+
+    // Null means the user cancelled — do nothing.
+    if (cropped == null || !mounted) return;
 
     setState(() => _uploadingPhoto = true);
     try {
-      final Uint8List bytes = await picked.readAsBytes();
-      final url = await StorageService.uploadAvatar(uid, bytes);
+      final url = await StorageService.uploadAvatar(uid, cropped);
       if (mounted) setState(() => _avatarUrl = url);
     } catch (_) {
-      _showError('Could not upload photo. Please try again.');
+      if (mounted) _showError('Could not upload photo. Please try again.');
     } finally {
       if (mounted) setState(() => _uploadingPhoto = false);
     }

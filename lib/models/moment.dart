@@ -175,7 +175,7 @@ class Moment {
       voiceRoomId: json['voiceRoomId']?.toString() ?? '',
       voiceRoomTitle: json['voiceRoomTitle']?.toString() ?? '',
       voiceRoomHostName: json['voiceRoomHostName']?.toString() ?? '',
-      voiceRoomHostAvatar: json['voiceRoomHostAvatar']?.toString() ?? '',
+      voiceRoomHostAvatar: ApiConfig.resolveUrl(json['voiceRoomHostAvatar']?.toString() ?? ''),
       voiceRoomCategory: json['voiceRoomCategory']?.toString() ?? '',
       voiceRoomTag: json['voiceRoomTag']?.toString() ?? '',
       isDeleted: json['isDeleted'] == true,

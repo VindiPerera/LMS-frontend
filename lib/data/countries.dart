@@ -17,6 +17,55 @@ class Country {
   String get flagEmoji => String.fromCharCodes(
     code.toUpperCase().codeUnits.map((c) => 0x1F1E6 + (c - 0x41)),
   );
+
+  /// Standard UTC offset in hours for this country.
+  double get utcOffsetHours => countryUtcOffsets[code.toUpperCase()] ?? 0.0;
+
+  /// Resolves a [Country] from a flag emoji string (e.g. '🇦🇷', '🇱🇰').
+  static Country? fromFlag(String? flag) {
+    if (flag == null || flag.isEmpty) return null;
+    final clean = flag.replaceAll('\uFE0F', '').trim();
+    if (clean.isEmpty) return null;
+    for (final c in countries) {
+      if (c.flagEmoji == clean || c.flagEmoji.replaceAll('\uFE0F', '') == clean) {
+        return c;
+      }
+    }
+    try {
+      final runes = clean.runes.toList();
+      if (runes.length >= 2 &&
+          runes[0] >= 0x1F1E6 && runes[0] <= 0x1F1FF &&
+          runes[1] >= 0x1F1E6 && runes[1] <= 0x1F1FF) {
+        final code = String.fromCharCode(runes[0] - 0x1F1E6 + 0x41) +
+                     String.fromCharCode(runes[1] - 0x1F1E6 + 0x41);
+        for (final c in countries) {
+          if (c.code.toUpperCase() == code.toUpperCase()) return c;
+        }
+      }
+    } catch (_) {}
+    if (clean.length == 2) {
+      for (final c in countries) {
+        if (c.code.toUpperCase() == clean.toUpperCase()) return c;
+      }
+    }
+    for (final c in countries) {
+      if (c.name.toLowerCase() == clean.toLowerCase()) return c;
+    }
+    return null;
+  }
+
+  /// Calculates real-time local time formatted as `h:mm a` (e.g. "10:17 am")
+  /// for this country's timezone offset.
+  String localTimeFormatted([DateTime? now]) {
+    final utc = (now ?? DateTime.now()).toUtc();
+    final offsetMinutes = (utcOffsetHours * 60).round();
+    final local = utc.add(Duration(minutes: offsetMinutes));
+    final hour24 = local.hour;
+    final period = hour24 >= 12 ? 'pm' : 'am';
+    final hour12 = hour24 % 12 == 0 ? 12 : hour24 % 12;
+    final minute = local.minute.toString().padLeft(2, '0');
+    return '$hour12:$minute $period';
+  }
 }
 
 /// Every ISO-3166-1 country (plus a few widely-recognized non-UN entries —
@@ -223,3 +272,204 @@ const List<Country> countries = [
   Country('ZM', 'Zambia'),
   Country('ZW', 'Zimbabwe'),
 ];
+
+/// Standard UTC offset in hours for every ISO country in [countries].
+const Map<String, double> countryUtcOffsets = {
+  'AF': 4.5,
+  'AL': 1.0,
+  'DZ': 1.0,
+  'AD': 1.0,
+  'AO': 1.0,
+  'AG': -4.0,
+  'AR': -3.0,
+  'AM': 4.0,
+  'AU': 10.0,
+  'AT': 1.0,
+  'AZ': 4.0,
+  'BS': -5.0,
+  'BH': 3.0,
+  'BD': 6.0,
+  'BB': -4.0,
+  'BY': 3.0,
+  'BE': 1.0,
+  'BZ': -6.0,
+  'BJ': 1.0,
+  'BT': 6.0,
+  'BO': -4.0,
+  'BA': 1.0,
+  'BW': 2.0,
+  'BR': -3.0,
+  'BN': 8.0,
+  'BG': 2.0,
+  'BF': 0.0,
+  'BI': 2.0,
+  'CV': -1.0,
+  'KH': 7.0,
+  'CM': 1.0,
+  'CA': -5.0,
+  'CF': 1.0,
+  'TD': 1.0,
+  'CL': -3.0,
+  'CN': 8.0,
+  'CO': -5.0,
+  'KM': 3.0,
+  'CG': 1.0,
+  'CD': 1.0,
+  'CR': -6.0,
+  'CI': 0.0,
+  'HR': 1.0,
+  'CU': -5.0,
+  'CY': 2.0,
+  'CZ': 1.0,
+  'DK': 1.0,
+  'DJ': 3.0,
+  'DM': -4.0,
+  'DO': -4.0,
+  'EC': -5.0,
+  'EG': 2.0,
+  'SV': -6.0,
+  'GQ': 1.0,
+  'ER': 3.0,
+  'EE': 2.0,
+  'SZ': 2.0,
+  'ET': 3.0,
+  'FJ': 12.0,
+  'FI': 2.0,
+  'FR': 1.0,
+  'GA': 1.0,
+  'GM': 0.0,
+  'GE': 4.0,
+  'DE': 1.0,
+  'GH': 0.0,
+  'GR': 2.0,
+  'GD': -4.0,
+  'GT': -6.0,
+  'GN': 0.0,
+  'GW': 0.0,
+  'GY': -4.0,
+  'HT': -5.0,
+  'HN': -6.0,
+  'HU': 1.0,
+  'IS': 0.0,
+  'IN': 5.5,
+  'ID': 7.0,
+  'IR': 3.5,
+  'IQ': 3.0,
+  'IE': 0.0,
+  'IL': 2.0,
+  'IT': 1.0,
+  'JM': -5.0,
+  'JP': 9.0,
+  'JO': 3.0,
+  'KZ': 5.0,
+  'KE': 3.0,
+  'KI': 12.0,
+  'XK': 1.0,
+  'KW': 3.0,
+  'KG': 6.0,
+  'LA': 7.0,
+  'LV': 2.0,
+  'LB': 2.0,
+  'LS': 2.0,
+  'LR': 0.0,
+  'LY': 2.0,
+  'LI': 1.0,
+  'LT': 2.0,
+  'LU': 1.0,
+  'MG': 3.0,
+  'MW': 2.0,
+  'MY': 8.0,
+  'MV': 5.0,
+  'ML': 0.0,
+  'MT': 1.0,
+  'MH': 12.0,
+  'MR': 0.0,
+  'MU': 4.0,
+  'MX': -6.0,
+  'FM': 11.0,
+  'MD': 2.0,
+  'MC': 1.0,
+  'MN': 8.0,
+  'ME': 1.0,
+  'MA': 1.0,
+  'MZ': 2.0,
+  'MM': 6.5,
+  'NA': 2.0,
+  'NR': 12.0,
+  'NP': 5.75,
+  'NL': 1.0,
+  'NZ': 12.0,
+  'NI': -6.0,
+  'NE': 1.0,
+  'NG': 1.0,
+  'KP': 9.0,
+  'MK': 1.0,
+  'NO': 1.0,
+  'OM': 4.0,
+  'PK': 5.0,
+  'PW': 9.0,
+  'PS': 2.0,
+  'PA': -5.0,
+  'PG': 10.0,
+  'PY': -4.0,
+  'PE': -5.0,
+  'PH': 8.0,
+  'PL': 1.0,
+  'PT': 0.0,
+  'QA': 3.0,
+  'RO': 2.0,
+  'RU': 3.0,
+  'RW': 2.0,
+  'KN': -4.0,
+  'LC': -4.0,
+  'VC': -4.0,
+  'WS': 13.0,
+  'SM': 1.0,
+  'ST': 0.0,
+  'SA': 3.0,
+  'SN': 0.0,
+  'RS': 1.0,
+  'SC': 4.0,
+  'SL': 0.0,
+  'SG': 8.0,
+  'SK': 1.0,
+  'SI': 1.0,
+  'SB': 11.0,
+  'SO': 3.0,
+  'ZA': 2.0,
+  'KR': 9.0,
+  'SS': 2.0,
+  'ES': 1.0,
+  'LK': 5.5,
+  'SD': 2.0,
+  'SR': -3.0,
+  'SE': 1.0,
+  'CH': 1.0,
+  'SY': 3.0,
+  'TW': 8.0,
+  'TJ': 5.0,
+  'TZ': 3.0,
+  'TH': 7.0,
+  'TL': 9.0,
+  'TG': 0.0,
+  'TO': 13.0,
+  'TT': -4.0,
+  'TN': 1.0,
+  'TR': 3.0,
+  'TM': 5.0,
+  'TV': 12.0,
+  'UG': 3.0,
+  'UA': 2.0,
+  'AE': 4.0,
+  'GB': 0.0,
+  'US': -5.0,
+  'UY': -3.0,
+  'UZ': 5.0,
+  'VU': 11.0,
+  'VA': 1.0,
+  'VE': -4.0,
+  'VN': 7.0,
+  'YE': 3.0,
+  'ZM': 2.0,
+  'ZW': 2.0,
+};
