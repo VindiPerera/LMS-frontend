@@ -445,6 +445,33 @@ class RoomParticipantService {
     if (uid == null || roomId.isEmpty) return;
     final participantRef = _participants(roomId).doc(uid);
     final userRef = _user(uid);
+
+    // Must run BEFORE the participant doc is deleted below, and as a
+    // plain (non-transactional) read+write, not folded into the same
+    // transaction as that delete: firestore.rules only lets a moderator
+    // flip voiceRooms/{roomId}.isActive via a write that touches isActive
+    // and nothing else, checked against THIS uid's own participants/{uid}
+    // doc still showing role=='moderator' at write time — so ending the
+    // room has to happen while that doc still exists, and can't be
+    // batched with the participantCount/delete writes the transaction
+    // below makes in the same call. See VoiceRoomDetailScreen._leave's
+    // "Add Moderator Reminder" dialog, which already warns a host this
+    // will happen; this is what actually makes it happen for every way a
+    // room can end up with nobody left to run it — that dialog's own
+    // "Close" tap, the host leaving some other way (back button, crash),
+    // or a moderator the host handed off to later leaving too.
+    try {
+      final snap = await participantRef.get();
+      if (snap.exists && snap.data()?['sessionId'] == sessionId) {
+        final role = snap.data()?['role']?.toString();
+        if (role == 'host' || role == 'moderator') {
+          await _closeIfNobodyElseInCharge(roomId, leavingUid: uid);
+        }
+      }
+    } catch (e) {
+      debugPrint('RoomParticipantService.leave: could not check for auto-close (non-fatal): $e');
+    }
+
     try {
       await FirebaseFirestore.instance.runTransaction((tx) async {
         final snap = await tx.get(participantRef);
@@ -462,6 +489,34 @@ class RoomParticipantService {
       // or the connection may have dropped on the way out — never block
       // the screen from closing over cleanup.
       debugPrint('RoomParticipantService.leave failed (non-fatal): $e');
+    }
+  }
+
+  /// Ends [roomId] if neither its host nor its designated moderator (other
+  /// than [leavingUid], who is on their way out right now) has a live
+  /// participant doc — i.e. nobody is left who could ever run or even
+  /// close this room again. Only called for a departing host/moderator
+  /// (see [leave]) — a speaker/listener leaving never changes who's in
+  /// charge, so it never needs this extra pair of reads.
+  static Future<void> _closeIfNobodyElseInCharge(String roomId, {required String leavingUid}) async {
+    try {
+      final roomSnap = await _room(roomId).get();
+      if (!roomSnap.exists || roomSnap.data()?['isActive'] == false) return;
+      final hostId = roomSnap.data()?['hostId']?.toString() ?? '';
+      final moderatorUid = roomSnap.data()?['moderatorUid']?.toString() ?? '';
+
+      var someoneElseInCharge = false;
+      if (hostId.isNotEmpty && hostId != leavingUid) {
+        someoneElseInCharge = (await _participants(roomId).doc(hostId).get()).exists;
+      }
+      if (!someoneElseInCharge && moderatorUid.isNotEmpty && moderatorUid != leavingUid) {
+        someoneElseInCharge = (await _participants(roomId).doc(moderatorUid).get()).exists;
+      }
+      if (!someoneElseInCharge) {
+        await VoiceRoomService.endRoom(roomId);
+      }
+    } catch (e) {
+      debugPrint('RoomParticipantService: could not auto-close an orphaned room (non-fatal): $e');
     }
   }
 
@@ -771,10 +826,14 @@ class RoomParticipantService {
         });
   }
 
-  /// Host/moderator-only: moves [uid] back to the audience. firestore.rules
-  /// also enforces that only the room's host or a live moderator can do
-  /// this. If the removed participant was the room's designated moderator,
-  /// the room-level moderatorUid is also cleared so they don't get the role
+  /// Moves [uid] back to the audience — host/moderator acting on someone
+  /// else (room_profile_sheet.dart's Host Controls card), or a seated
+  /// participant stepping down themselves (that same sheet's self-view
+  /// "Off Stage" button). firestore.rules' participants update rule has a
+  /// matching branch for each case: host/live-moderator-over-non-host, or
+  /// a plain self-write setting your own role to 'listener'. If the
+  /// removed participant was the room's designated moderator, the
+  /// room-level moderatorUid is also cleared so they don't get the role
   /// restored on a future rejoin.
   static Future<void> removeFromStage({required String roomId, required String uid}) async {
     if (roomId.isEmpty || uid.isEmpty) return;

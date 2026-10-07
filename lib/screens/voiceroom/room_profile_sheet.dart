@@ -67,7 +67,9 @@ class _RoomProfileSheetState extends State<RoomProfileSheet> {
   static const _bg = Color(0xFF16162E);
   static const _card = Color(0xFF1B1B3A);
   static const _pink = Color(0xFFE83E8C);
+  static const _blue = Color(0xFF4FA8FF);
   static const _green = Color(0xFF3DDC97);
+  static const _accent = Color(0xFF7B68F4);
 
   late Timer _timer;
   late DateTime _now;
@@ -347,6 +349,60 @@ class _RoomProfileSheetState extends State<RoomProfileSheet> {
         SnackBar(
           content: Text(
             'Could not remove: ${e.toString().replaceFirst('Exception: ', '')}',
+          ),
+        ),
+      );
+    }
+  }
+
+  /// Self-service step-down — RoomParticipantService.removeFromStage's
+  /// generic `{roomId, uid}` signature already permits a self-targeted
+  /// call (firestore.rules' participants update rule has a dedicated
+  /// self-write branch allowing role -> 'listener'/'speaker' for the
+  /// caller's own doc), so this reuses it exactly as the Host Controls
+  /// card above does for someone else, just with the signed-in user's own
+  /// uid. Pops this sheet on success so the now-audience view underneath
+  /// is what's left on screen, matching a normal "leave the stage" moment.
+  Future<void> _confirmOffStage() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1B1B3A),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        content: const Text(
+          'You need to raise your hand again to return to the stage. Do you want to leave the stage?',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text(
+              'Confirm',
+              style: TextStyle(color: _accent, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await RoomParticipantService.removeFromStage(
+        roomId: widget.roomId,
+        uid: widget.participant.uid,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Could not leave the stage: ${e.toString().replaceFirst('Exception: ', '')}',
           ),
         ),
       );
@@ -690,34 +746,17 @@ class _RoomProfileSheetState extends State<RoomProfileSheet> {
                         const SizedBox(width: 6),
                       ],
                       Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 3,
-                        ),
+                        padding: const EdgeInsets.all(4),
                         decoration: BoxDecoration(
-                          color: _pink,
-                          borderRadius: BorderRadius.circular(12),
+                          color: participant.gender == 'male' ? _blue : _pink,
+                          shape: BoxShape.circle,
                         ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              participant.gender == 'male'
-                                  ? Icons.male_rounded
-                                  : Icons.female_rounded,
-                              size: 13,
-                              color: Colors.white,
-                            ),
-                            const SizedBox(width: 2),
-                            Text(
-                              '${participant.age}',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ],
+                        child: Icon(
+                          participant.gender == 'male'
+                              ? Icons.male_rounded
+                              : Icons.female_rounded,
+                          size: 13,
+                          color: Colors.white,
                         ),
                       ),
                     ],
@@ -937,6 +976,43 @@ class _RoomProfileSheetState extends State<RoomProfileSheet> {
                               ),
                             ),
                         ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                  ],
+                  // Self-service "step down to the audience" — shown only
+                  // while viewing your own profile and actually seated
+                  // (moderator or speaker; never the host themselves, who
+                  // has no "audience" state to step down into — the room
+                  // doc's hostId, not this participant doc's role, is what
+                  // every other _isHost check in this screen keys off, so
+                  // demoting the host's own participant role would just
+                  // desync the two rather than meaning anything). Mirrors
+                  // RoomParticipantService.removeFromStage's own self-write
+                  // branch in firestore.rules, not a host/moderator action
+                  // like the Host Controls card above it.
+                  if (_isSelf &&
+                      !widget.isHost &&
+                      widget.participant.isSeated) ...[
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: _confirmOffStage,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _accent,
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: const Text(
+                          'Off Stage',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                       ),
                     ),
                     const SizedBox(height: 14),
@@ -1164,15 +1240,26 @@ class _RoomProfileSheetState extends State<RoomProfileSheet> {
     return GestureDetector(onTap: onTap, child: content);
   }
 
+  // Only ever used for the "…" more-menu circle below (both its disabled
+  // self-view and interactive states) — not shared with any other button,
+  // so resizing/nudging it here can't affect anything else in this sheet.
   Widget _iconCircle(IconData icon) {
-    return Container(
-      width: 44,
-      height: 44,
-      decoration: const BoxDecoration(
-        color: Colors.white10,
-        shape: BoxShape.circle,
+    return Transform.translate(
+      // A paint-time nudge, not extra padding/margin — it doesn't reserve
+      // any additional space in the row, so the avatar/name/other buttons
+      // this sits beside are laid out exactly as before; this only shifts
+      // where the already-sized circle gets drawn, closer to the sheet's
+      // right edge.
+      offset: const Offset(6, 0),
+      child: Container(
+        width: 50,
+        height: 50,
+        decoration: const BoxDecoration(
+          color: Colors.white10,
+          shape: BoxShape.circle,
+        ),
+        child: Icon(icon, size: 20, color: Colors.white70),
       ),
-      child: Icon(icon, size: 16, color: Colors.white70),
     );
   }
 

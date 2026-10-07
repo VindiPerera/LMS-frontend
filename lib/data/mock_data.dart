@@ -241,7 +241,7 @@ const learnLanguageFlags = [
 
 final List<LearnCard> learnCourseCards = [
   const LearnCard(
-    title: 'HelloWords',
+    title: 'Words',
     subtitle: 'Unlock new words',
     badge: 'AI Tech',
     coverSeed: 'course_a',
@@ -252,7 +252,7 @@ final List<LearnCard> learnCourseCards = [
     coverSeed: 'course_b',
   ),
   const LearnCard(
-    title: 'HelloEnglish',
+    title: 'English',
     subtitle: 'Learn anywhere anytime',
     coverSeed: 'course_c',
   ),
