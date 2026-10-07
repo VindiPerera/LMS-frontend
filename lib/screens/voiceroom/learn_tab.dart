@@ -630,7 +630,7 @@ class _CourseCoverCard extends StatelessWidget {
     final colors = _gradients[card.coverSeed] ?? _gradients['course_a']!;
     return GestureDetector(
       onTap: () {
-        if (card.title == 'HelloEnglish') {
+        if (card.title == 'English') {
           Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => const EnglishCoursesScreen()),
           );

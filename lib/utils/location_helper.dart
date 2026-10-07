@@ -1,4 +1,5 @@
 import '../data/countries.dart';
+import '../data/country_coordinates.dart';
 import '../models/user.dart';
 
 class LocationHelper {
@@ -139,14 +140,20 @@ class LocationHelper {
       }
       final c = Country.fromFlag(user.countryFlag);
       if (c != null) {
+        // CountryCoordinates covers every country not already hand-curated
+        // in _countryMap above — real capital-city coordinates instead of
+        // this always falling back to 0.0/0.0 ("Null Island"), which is
+        // what put ProfileMapHeader's pin nowhere near the actual country
+        // for most users before this existed.
+        final coord = CountryCoordinates.byCode[c.code.toUpperCase()];
         return LocationInfo(
-          city: c.name,
+          city: coord?.city ?? c.name,
           country: c.name,
           flag: c.flagEmoji,
           utcOffsetHours: c.utcOffsetHours,
-          latitude: 0.0,
-          longitude: 0.0,
-          region: c.name,
+          latitude: coord?.latitude ?? 0.0,
+          longitude: coord?.longitude ?? 0.0,
+          region: coord?.region ?? c.name,
         );
       }
     }

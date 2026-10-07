@@ -10,7 +10,6 @@ import '../../models/room_participant.dart';
 import '../../models/voiceroom.dart';
 import '../../models/whiteboard_item.dart';
 import '../../models/whiteboard_library_item.dart';
-import '../../services/media_library_service.dart';
 import '../../services/room_participant_service.dart';
 import '../../services/storage_service.dart';
 import '../../services/voice_room_service.dart';
@@ -946,7 +945,7 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
       context: context,
       onSelectPreset: _addLibraryItemToWhiteboard,
       onSelectLibraryImage: _addMediaLibraryImageToWhiteboard,
-      onUploadToFolder: _pickAndUploadWhiteboardImage,
+      onUploadToBoard: _pickAndUploadWhiteboardImage,
     );
   }
 
@@ -991,11 +990,20 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
       // Best-effort upload to backend storage so remote participants without
       // local assets can view it via network URL.
       String imageUrl = item.assetPath;
-      try {
-        final uploaded = await StorageService.uploadWhiteboardImage(uid, bytes);
-        if (uploaded.isNotEmpty) imageUrl = uploaded;
-      } catch (e) {
-        debugPrint('Whiteboard library upload fallback to asset: $e');
+      // Both the real asset (rootBundle.load above) and the embedded
+      // fallback (item.bytes) failed to produce anything — uploading an
+      // empty payload would still "succeed" at the HTTP level (hello-
+      // backend writes whatever it's given) and leave this card pointing
+      // at a URL with no actual image data, rendering as permanently
+      // broken for every viewer rather than falling back to the asset
+      // path the way an upload failure below already does.
+      if (bytes.isNotEmpty) {
+        try {
+          final uploaded = await StorageService.uploadWhiteboardImage(uid, bytes);
+          if (uploaded.isNotEmpty) imageUrl = uploaded;
+        } catch (e) {
+          debugPrint('Whiteboard library upload fallback to asset: $e');
+        }
       }
 
       await WhiteboardService.addImage(
@@ -1014,11 +1022,12 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
     }
   }
 
-  /// [parentId] is the Library sheet's currently-open folder (null for its
-  /// root) — the upload is filed there via MediaLibraryService so it's
-  /// still there to reuse next time, in any room, not just placed on this
-  /// board once and forgotten.
-  Future<void> _pickAndUploadWhiteboardImage(String? parentId) async {
+  /// Picks straight from the device gallery and places it on the board —
+  /// board-only, unlike MediaLibraryService-backed items (presets, an
+  /// existing library image): this never gets filed into any folder. Use
+  /// a folder's own "+" (whiteboard_library_sheet.dart's _addImageToFolder)
+  /// to add something to the library itself.
+  Future<void> _pickAndUploadWhiteboardImage() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
 
@@ -1030,19 +1039,6 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
       final bytes = await picked.readAsBytes();
       final aspectRatio = await _decodeAspectRatio(bytes);
       final url = await StorageService.uploadWhiteboardImage(uid, bytes);
-      // Best-effort: the board placement below is this action's main job,
-      // so a library-save failure (e.g. a transient Firestore error)
-      // shouldn't also block that.
-      try {
-        await MediaLibraryService.addImage(
-          name: 'Image ${DateTime.now().millisecondsSinceEpoch}',
-          imageUrl: url,
-          aspectRatio: aspectRatio,
-          parentId: parentId,
-        );
-      } catch (e) {
-        debugPrint('Could not save upload to library (non-fatal): $e');
-      }
       await WhiteboardService.addImage(
         roomId: widget.room.id,
         imageUrl: url,
@@ -1264,6 +1260,11 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
     final text = _controller.text;
     if (text.trim().isEmpty) return;
     _controller.clear();
+    // Dismiss the keyboard immediately on send, rather than leaving it up
+    // until the user taps away themselves — the comment itself appears in
+    // the feed via the live stream regardless of this, so this only
+    // affects the keyboard.
+    FocusManager.instance.primaryFocus?.unfocus();
     try {
       await RoomParticipantService.sendComment(roomId: widget.room.id, text: text);
     } catch (e) {
@@ -2684,11 +2685,19 @@ class _Composer extends StatelessWidget {
                   textInputAction: TextInputAction.send,
                   onSubmitted: (_) => onSend(),
                   style: const TextStyle(fontSize: 12.5, color: Colors.white),
+                  // The outer Center only centers the TextField's own box
+                  // within the 36px bubble — it doesn't tell EditableText
+                  // to center the text/hint *within that box*, which
+                  // defaults to top-aligned whenever the field ends up
+                  // taller than one line needs (zeroing contentPadding
+                  // alone wasn't enough). This is the actual knob for that.
+                  textAlignVertical: TextAlignVertical.center,
                   decoration: InputDecoration(
                     hintText: isSeated ? 'Comments...' : 'Raise your hand to join the stage and chat',
                     hintStyle: const TextStyle(color: Colors.white38, fontSize: 12.5),
                     border: InputBorder.none,
                     isDense: true,
+                    contentPadding: EdgeInsets.zero,
                     suffixIcon: isSeated
                         ? ValueListenableBuilder<TextEditingValue>(
                             valueListenable: controller,

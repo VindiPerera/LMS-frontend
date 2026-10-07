@@ -1,9 +1,14 @@
+import 'dart:ui' as ui;
+
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../models/media_library_item.dart';
 import '../models/whiteboard_library_item.dart';
 import '../services/media_library_service.dart';
+import '../services/storage_service.dart';
 
 const _bgColor = Color(0xFF1B1B3A);
 const _cardColor = Color(0xFF242449);
@@ -13,15 +18,17 @@ const _accent = Color(0xFF7B68F4);
 /// the app's fixed preset topic cards (shown inside the virtual "Library"
 /// folder — see MediaLibraryService.libraryFolderId) with the signed-in
 /// user's own folders/images (MediaLibraryService). Folder/image
-/// create-rename-delete is handled entirely inside this sheet; only
-/// actually placing something on the whiteboard calls back out to the
+/// create-rename-delete-upload-to-a-folder is handled entirely inside this
+/// sheet (none of it needs the room's whiteboard state); only actually
+/// placing something on the whiteboard — a preset, an existing library
+/// image, or a fresh "Upload from Gallery" pick — calls back out to the
 /// caller, since the room/whiteboard state (and the "replace the current
 /// photo" / re-upload logic a preset needs) lives there, not here.
 Future<void> showWhiteboardLibrarySheet({
   required BuildContext context,
   required ValueChanged<WhiteboardLibraryItem> onSelectPreset,
   required ValueChanged<MediaLibraryItem> onSelectLibraryImage,
-  required ValueChanged<String?> onUploadToFolder,
+  required VoidCallback onUploadToBoard,
 }) {
   return showModalBottomSheet(
     context: context,
@@ -36,9 +43,9 @@ Future<void> showWhiteboardLibrarySheet({
         Navigator.of(ctx).pop();
         onSelectLibraryImage(item);
       },
-      onUploadToFolder: (parentId) {
+      onUploadToBoard: () {
         Navigator.of(ctx).pop();
-        onUploadToFolder(parentId);
+        onUploadToBoard();
       },
     ),
   );
@@ -47,13 +54,13 @@ Future<void> showWhiteboardLibrarySheet({
 class WhiteboardLibrarySheet extends StatefulWidget {
   final ValueChanged<WhiteboardLibraryItem> onSelectPreset;
   final ValueChanged<MediaLibraryItem> onSelectLibraryImage;
-  final ValueChanged<String?> onUploadToFolder;
+  final VoidCallback onUploadToBoard;
 
   const WhiteboardLibrarySheet({
     super.key,
     required this.onSelectPreset,
     required this.onSelectLibraryImage,
-    required this.onUploadToFolder,
+    required this.onUploadToBoard,
   });
 
   @override
@@ -79,11 +86,64 @@ class _WhiteboardLibrarySheetState extends State<WhiteboardLibrarySheet> {
   // among others) and not inside some other folder.
   bool get _inLibraryFolder => _currentId == MediaLibraryService.libraryFolderId;
 
+  // Guards the per-folder "+" button against a second tap while an upload
+  // from the first one is still in flight — this sheet has no board state
+  // to disable the way voice_room_detail_screen.dart's _addingImage does
+  // for its own actions, so it needs its own.
+  bool _uploadingToFolder = false;
+
   void _open(String? id, String name) => setState(() => _stack.add(_FolderStackEntry(id, name)));
 
   void _back() {
     if (_atRoot) return;
     setState(() => _stack.removeLast());
+  }
+
+  /// Files a freshly-picked photo directly into [parentId] — library
+  /// management only, never placed on the whiteboard (that's what the
+  /// "Upload from Gallery" card and tapping an existing image are for).
+  /// Self-contained: unlike those two, this needs nothing from the room/
+  /// whiteboard the caller has, so it never leaves this sheet.
+  Future<void> _addImageToFolder(String? parentId) async {
+    if (_uploadingToFolder) return;
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: 1280, imageQuality: 85);
+    if (picked == null) return;
+
+    setState(() => _uploadingToFolder = true);
+    try {
+      final bytes = await picked.readAsBytes();
+      final aspectRatio = await _decodeAspectRatio(bytes);
+      final url = await StorageService.uploadWhiteboardImage(uid, bytes);
+      await MediaLibraryService.addImage(
+        name: 'Image ${DateTime.now().millisecondsSinceEpoch}',
+        imageUrl: url,
+        aspectRatio: aspectRatio,
+        parentId: parentId,
+      );
+    } catch (e) {
+      _showError('Could not add image: ${e.toString().replaceFirst('Exception: ', '')}');
+    } finally {
+      if (mounted) setState(() => _uploadingToFolder = false);
+    }
+  }
+
+  /// Same fallback-to-square-ratio behavior as voice_room_detail_screen
+  /// .dart's own _decodeAspectRatio — kept local since nothing else here
+  /// needs the rest of that screen's state to do this one thing.
+  Future<double> _decodeAspectRatio(Uint8List bytes) async {
+    try {
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      final ratio = frame.image.width / frame.image.height;
+      frame.image.dispose();
+      codec.dispose();
+      return ratio > 0 ? ratio : 1;
+    } catch (_) {
+      return 1;
+    }
   }
 
   void _showError(String message) {
@@ -224,6 +284,11 @@ class _WhiteboardLibrarySheetState extends State<WhiteboardLibrarySheet> {
             ),
           ),
           IconButton(
+            onPressed: _uploadingToFolder ? null : () => _addImageToFolder(_currentId),
+            icon: const Icon(Icons.add_photo_alternate_outlined, color: Colors.white70),
+            tooltip: 'Add image to this folder',
+          ),
+          IconButton(
             onPressed: _createFolder,
             icon: const Icon(Icons.create_new_folder_outlined, color: Colors.white70),
             tooltip: 'New folder',
@@ -246,20 +311,27 @@ class _WhiteboardLibrarySheetState extends State<WhiteboardLibrarySheet> {
         final liveFolders = liveItems.where((i) => i.isFolder);
         final liveImages = liveItems.where((i) => i.isImage);
 
-        final tiles = <Widget>[
+        // Folders as compact full-width rows (standard file-browser shape —
+        // just an icon and a name, nothing worth a big square thumbnail
+        // card for) rather than squeezed into the same grid as image
+        // tiles, which left them looking stretched and sparse.
+        final folderRows = <Widget>[
           if (_atRoot)
-            _FolderTile(
+            _FolderRow(
               name: 'Library',
               builtIn: true,
               onTap: () => _open(MediaLibraryService.libraryFolderId, 'Library'),
             ),
           for (final folder in liveFolders)
-            _FolderTile(
+            _FolderRow(
               name: folder.name,
               builtIn: false,
               onTap: () => _open(folder.id, folder.name),
               onLongPress: () => _showItemOptions(folder),
             ),
+        ];
+
+        final mediaTiles = <Widget>[
           if (_inLibraryFolder)
             for (final preset in WhiteboardLibraryItem.presets)
               _PresetImageTile(item: preset, onTap: () => widget.onSelectPreset(preset)),
@@ -276,23 +348,27 @@ class _WhiteboardLibrarySheetState extends State<WhiteboardLibrarySheet> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _UploadCard(onTap: () => widget.onUploadToFolder(_currentId)),
-              const SizedBox(height: 20),
-              if (tiles.isEmpty)
-                const _EmptyFolderNotice()
-              else
+              _UploadCard(onTap: widget.onUploadToBoard),
+              if (folderRows.isNotEmpty) ...[
+                const SizedBox(height: 20),
+                for (final row in folderRows) Padding(padding: const EdgeInsets.only(bottom: 10), child: row),
+              ],
+              if (mediaTiles.isNotEmpty) ...[
+                const SizedBox(height: 10),
                 GridView.builder(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
-                  itemCount: tiles.length,
+                  itemCount: mediaTiles.length,
                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: 2,
                     crossAxisSpacing: 12,
                     mainAxisSpacing: 12,
                     childAspectRatio: 1.35,
                   ),
-                  itemBuilder: (context, i) => tiles[i],
+                  itemBuilder: (context, i) => mediaTiles[i],
                 ),
+              ],
+              if (folderRows.isEmpty && mediaTiles.isEmpty) const _EmptyFolderNotice(),
             ],
           ),
         );
@@ -410,7 +486,7 @@ class _UploadCard extends StatelessWidget {
                   ),
                   SizedBox(height: 2),
                   Text(
-                    'Adds to this folder and to the board',
+                    'Choose any image from your device',
                     style: TextStyle(color: Colors.white60, fontSize: 12),
                   ),
                 ],
@@ -445,17 +521,21 @@ class _EmptyFolderNotice extends StatelessWidget {
   }
 }
 
-/// A folder tile — the built-in "Library" folder (locked icon, no long-press
+/// A folder row — the built-in "Library" folder (locked icon, no long-press
 /// menu — see WhiteboardLibraryItem's own doc comment on why it can't be
-/// renamed or deleted) or a user-created folder (plain folder icon, long-
-/// press for rename/delete).
-class _FolderTile extends StatelessWidget {
+/// renamed or deleted, though its contents are still addable via the
+/// header's own "+" once you've opened it) or a user-created folder (plain
+/// folder icon, long-press for rename/delete). A compact full-width row —
+/// just an icon and a name — rather than a square grid card, which left
+/// folders looking stretched and sparse next to how little they need to
+/// show.
+class _FolderRow extends StatelessWidget {
   final String name;
   final bool builtIn;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
 
-  const _FolderTile({
+  const _FolderRow({
     required this.name,
     required this.builtIn,
     required this.onTap,
@@ -466,42 +546,44 @@ class _FolderTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: _cardColor,
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(12),
       child: InkWell(
         onTap: () {
           HapticFeedback.selectionClick();
           onTap();
         },
         onLongPress: onLongPress,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
         child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(color: Colors.white.withValues(alpha: 0.12), width: 1),
           ),
-          padding: const EdgeInsets.all(10),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+          child: Row(
             children: [
               Stack(
                 clipBehavior: Clip.none,
                 children: [
-                  Icon(Icons.folder_rounded, color: _accent, size: 36),
+                  const Icon(Icons.folder_rounded, color: _accent, size: 24),
                   if (builtIn)
                     const Positioned(
                       right: -2,
                       bottom: -2,
-                      child: Icon(Icons.lock_rounded, color: Colors.white54, size: 13),
+                      child: Icon(Icons.lock_rounded, color: Colors.white54, size: 11),
                     ),
                 ],
               ),
-              const SizedBox(height: 8),
-              Text(
-                name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white, fontSize: 12.5, fontWeight: FontWeight.w700),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+                ),
               ),
+              const Icon(Icons.chevron_right_rounded, color: Colors.white38, size: 20),
             ],
           ),
         ),

@@ -46,7 +46,20 @@ class AuthService {
   /// loads the matching Firestore profile if there is one. Called once from
   /// splash_screen.dart on app start.
   Future<AppUser?> init() async {
-    final user = await FirebaseAuth.instance.authStateChanges().first;
+    // FirebaseAuth.instance.currentUser is populated synchronously as soon
+    // as Firebase.initializeApp() resolves (main.dart awaits that before
+    // ever reaching this screen) — it reads straight from the native SDK's
+    // already-restored persisted session. authStateChanges().first is less
+    // reliable here: on some devices (slower storage I/O, heavy OEM skins
+    // like MIUI/ColorOS that throttle cold-start work) its very first
+    // emission can fire null before the native SDK has actually finished
+    // restoring that session from disk — which is what made the splash
+    // screen wrongly treat an already-signed-in user as logged out and
+    // send them back to the login screen on every reopen. The stream is
+    // now only a fallback for the one case where currentUser genuinely
+    // isn't populated yet.
+    final user = FirebaseAuth.instance.currentUser ??
+        await FirebaseAuth.instance.authStateChanges().first;
     if (user == null) return null;
     // Resuming an existing session (the common case — most launches aren't
     // a fresh login) still needs a fresh FCM token registered, per the
