@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import '../models/media_library_item.dart';
 import '../models/whiteboard_library_item.dart';
 import '../services/media_library_service.dart';
+import '../services/media_service.dart';
 import '../services/storage_service.dart';
 
 const _bgColor = Color(0xFF1B1B3A);
@@ -29,6 +30,7 @@ Future<void> showWhiteboardLibrarySheet({
   required ValueChanged<WhiteboardLibraryItem> onSelectPreset,
   required ValueChanged<MediaLibraryItem> onSelectLibraryImage,
   required VoidCallback onUploadToBoard,
+  required ValueChanged<MediaLibraryItem> onImageAddedToFolder,
 }) {
   return showModalBottomSheet(
     context: context,
@@ -47,6 +49,12 @@ Future<void> showWhiteboardLibrarySheet({
         Navigator.of(ctx).pop();
         onUploadToBoard();
       },
+      // Deliberately NOT wrapped with Navigator.pop like the callbacks
+      // above — adding an image to a folder via the header "+" should
+      // place it on the board immediately (see _addImageToFolder) while
+      // leaving the sheet open, so the host can keep filing more images
+      // into the same folder without reopening it each time.
+      onImageAddedToFolder: onImageAddedToFolder,
     ),
   );
 }
@@ -55,12 +63,14 @@ class WhiteboardLibrarySheet extends StatefulWidget {
   final ValueChanged<WhiteboardLibraryItem> onSelectPreset;
   final ValueChanged<MediaLibraryItem> onSelectLibraryImage;
   final VoidCallback onUploadToBoard;
+  final ValueChanged<MediaLibraryItem> onImageAddedToFolder;
 
   const WhiteboardLibrarySheet({
     super.key,
     required this.onSelectPreset,
     required this.onSelectLibraryImage,
     required this.onUploadToBoard,
+    required this.onImageAddedToFolder,
   });
 
   @override
@@ -99,30 +109,55 @@ class _WhiteboardLibrarySheetState extends State<WhiteboardLibrarySheet> {
     setState(() => _stack.removeLast());
   }
 
-  /// Files a freshly-picked photo directly into [parentId] — library
-  /// management only, never placed on the whiteboard (that's what the
-  /// "Upload from Gallery" card and tapping an existing image are for).
-  /// Self-contained: unlike those two, this needs nothing from the room/
-  /// whiteboard the caller has, so it never leaves this sheet.
+  /// Files a freshly-picked photo into [parentId] and places that same
+  /// upload on the board right away (widget.onImageAddedToFolder) — one
+  /// tap, both effects, so the host doesn't need a second tap on the new
+  /// thumbnail just to see it on the board. [parentId] is captured as a
+  /// plain argument before anything async happens below, so it stays
+  /// correct (the exact folder open when "+" was pressed) no matter what
+  /// navigation happens in this sheet while the picker/upload are in
+  /// flight.
+  ///
+  /// The busy flag is set *before* awaiting the picker, not after — it
+  /// used to flip only once pickImage() returned, which left "+" tappable
+  /// for the whole time the gallery picker was open. A second tap in that
+  /// window started a second, fully independent upload (its own pick, its
+  /// own addImage call), which is how a single-looking upload could end
+  /// up as two library documents.
   Future<void> _addImageToFolder(String? parentId) async {
     if (_uploadingToFolder) return;
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
 
-    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: 1280, imageQuality: 85);
-    if (picked == null) return;
-
     setState(() => _uploadingToFolder = true);
     try {
-      final bytes = await picked.readAsBytes();
+      final picked = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: 1280, imageQuality: 85);
+      if (picked == null) return;
+
+      // Compressed (not the raw picked bytes): flutter_image_compress
+      // decodes/re-encodes through the native platform codec, which bakes
+      // in EXIF rotation — unlike ui.instantiateImageCodec below (used for
+      // the aspect ratio) and Flutter's own Image widget (used to render
+      // it), neither of which reads EXIF orientation at all. Skipping this
+      // left a portrait photo (Android's image_picker returns the file
+      // as-is, orientation tag intact, rather than pre-rotating like iOS
+      // does) decoded and rendered using its raw, un-rotated landscape
+      // pixel dimensions — sideways content sized for the wrong box.
+      final bytes = await MediaService.compressImageBytes(await picked.readAsBytes());
       final aspectRatio = await _decodeAspectRatio(bytes);
       final url = await StorageService.uploadWhiteboardImage(uid, bytes);
+      final name = 'Image ${DateTime.now().millisecondsSinceEpoch}';
       await MediaLibraryService.addImage(
-        name: 'Image ${DateTime.now().millisecondsSinceEpoch}',
+        name: name,
         imageUrl: url,
         aspectRatio: aspectRatio,
         parentId: parentId,
       );
+      if (mounted) {
+        widget.onImageAddedToFolder(
+          MediaLibraryItem(type: 'image', name: name, imageUrl: url, aspectRatio: aspectRatio, parentId: parentId),
+        );
+      }
     } catch (e) {
       _showError('Could not add image: ${e.toString().replaceFirst('Exception: ', '')}');
     } finally {

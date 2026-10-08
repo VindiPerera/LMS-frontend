@@ -10,6 +10,7 @@ import '../../models/room_participant.dart';
 import '../../models/voiceroom.dart';
 import '../../models/whiteboard_item.dart';
 import '../../models/whiteboard_library_item.dart';
+import '../../services/media_service.dart';
 import '../../services/room_participant_service.dart';
 import '../../services/storage_service.dart';
 import '../../services/voice_room_service.dart';
@@ -946,6 +947,7 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
       onSelectPreset: _addLibraryItemToWhiteboard,
       onSelectLibraryImage: _addMediaLibraryImageToWhiteboard,
       onUploadToBoard: _pickAndUploadWhiteboardImage,
+      onImageAddedToFolder: _addMediaLibraryImageToWhiteboard,
     );
   }
 
@@ -1036,7 +1038,14 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
 
     setState(() => _addingImage = true);
     try {
-      final bytes = await picked.readAsBytes();
+      // Compressed (not the raw picked bytes) — see whiteboard_library_
+      // sheet.dart's _addImageToFolder for why: flutter_image_compress
+      // bakes in EXIF rotation during its native decode/re-encode, which
+      // neither ui.instantiateImageCodec below (the aspect ratio) nor
+      // Flutter's Image widget (the actual render) does on their own —
+      // without this, a portrait photo picked on Android decoded and
+      // rendered using its raw, un-rotated landscape pixel dimensions.
+      final bytes = await MediaService.compressImageBytes(await picked.readAsBytes());
       final aspectRatio = await _decodeAspectRatio(bytes);
       final url = await StorageService.uploadWhiteboardImage(uid, bytes);
       await WhiteboardService.addImage(

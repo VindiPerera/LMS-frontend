@@ -284,8 +284,8 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
                               ),
                             ),
                             const SizedBox(width: 8),
-                            // Gender / Age Pill
-                            _buildGenderAgeBadge(user),
+                            // Gender badge
+                            _buildGenderBadge(user),
                             if (user.isVip) ...[
                               const SizedBox(width: 6),
                               const VipBadge(),
@@ -413,36 +413,21 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
     );
   }
 
-  Widget _buildGenderAgeBadge(AppUser user) {
+  Widget _buildGenderBadge(AppUser user) {
     final isMale = user.gender.toLowerCase() == 'male';
-    final age = user.age > 0 ? user.age : 26;
     final bgColor = isMale ? const Color(0xFFE8F2FF) : const Color(0xFFFFEEF5);
     final textColor = isMale ? const Color(0xFF1E88E5) : const Color(0xFFE91E63);
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+      padding: const EdgeInsets.all(3.5),
       decoration: BoxDecoration(
         color: bgColor,
-        borderRadius: BorderRadius.circular(12),
+        shape: BoxShape.circle,
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            isMale ? Icons.male_rounded : Icons.female_rounded,
-            size: 13,
-            color: textColor,
-          ),
-          const SizedBox(width: 1),
-          Text(
-            '$age',
-            style: TextStyle(
-              fontSize: 11.5,
-              fontWeight: FontWeight.w800,
-              color: textColor,
-            ),
-          ),
-        ],
+      child: Icon(
+        isMale ? Icons.male_rounded : Icons.female_rounded,
+        size: 13,
+        color: textColor,
       ),
     );
   }

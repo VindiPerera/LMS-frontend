@@ -52,11 +52,19 @@ class MediaLibraryService {
   static Stream<List<MediaLibraryItem>> streamChildren(String? parentId) {
     final uid = _uid;
     if (uid == null) return Stream.value(const []);
-    return _items(uid)
-        .where('parentId', isEqualTo: parentId)
+    // `where('parentId', isEqualTo: null)` doesn't behave as a real filter
+    // on cloud_firestore_web — confirmed by a debug trace that found it
+    // returning every document in the collection, parentId regardless,
+    // while the same equality filter with a non-null value (any other
+    // folder's id) filters correctly. So root-level items (parentId ==
+    // null) fetch the whole collection and get filtered to null here in
+    // Dart instead of trusting Firestore's query engine to do it.
+    final query = parentId == null ? _items(uid) : _items(uid).where('parentId', isEqualTo: parentId);
+    return query
         .snapshots()
         .map((snap) {
-          final docs = snap.docs.toList()
+          final docs = (parentId == null ? snap.docs.where((d) => d.data()['parentId'] == null) : snap.docs)
+              .toList()
             ..sort((a, b) {
               final at = a.data()['createdAt'];
               final bt = b.data()['createdAt'];

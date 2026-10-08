@@ -3,7 +3,7 @@ import '../data/mock_data.dart';
 import '../models/user.dart';
 
 /// Circular initials-based avatar so the UI never depends on network images.
-class AppAvatar extends StatelessWidget {
+class AppAvatar extends StatefulWidget {
   final String seed;
   final double size;
   final bool showOnlineDot;
@@ -56,8 +56,6 @@ class AppAvatar extends StatelessWidget {
     );
   }
 
-  bool get _hasImage => imageUrl != null && imageUrl!.startsWith('http');
-
   // The photo ring's thickness and the small themed-background gap that
   // separates it from the actual photo — both proportional to [size], and
   // both inset WITHIN it (same footprint as a plain [borderWidth], never
@@ -69,10 +67,34 @@ class AppAvatar extends StatelessWidget {
   double get _ringGap => size * 0.035;
 
   @override
+  State<AppAvatar> createState() => _AppAvatarState();
+}
+
+class _AppAvatarState extends State<AppAvatar> {
+  // Set by the DecorationImage's onError below when imageUrl points at
+  // something that doesn't actually load (deleted file, stale host from a
+  // different environment, timeout, ...) — without this, a broken URL used
+  // to leave the whole circle blank forever: _hasImage locked the gradient
+  // +initial fallback out as soon as imageUrl looked like a URL, regardless
+  // of whether it ever actually rendered anything, and NetworkImage has no
+  // built-in recovery of its own.
+  bool _imageFailed = false;
+
+  @override
+  void didUpdateWidget(covariant AppAvatar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.imageUrl != widget.imageUrl) _imageFailed = false;
+  }
+
+  bool get _hasImage => widget.imageUrl != null && widget.imageUrl!.startsWith('http') && !_imageFailed;
+
+  @override
   Widget build(BuildContext context) {
+    final seed = widget.seed;
+    final size = widget.size;
     final color = avatarColorFor(seed);
     final initial = seed.isNotEmpty ? seed.substring(0, 1).toUpperCase() : '?';
-    final photoSize = inVoiceRoom ? size - 2 * (_ringWidth + _ringGap) : size;
+    final photoSize = widget.inVoiceRoom ? size - 2 * (widget._ringWidth + widget._ringGap) : size;
 
     Widget photo = Container(
       width: photoSize,
@@ -88,12 +110,15 @@ class AppAvatar extends StatelessWidget {
               ),
         image: _hasImage
             ? DecorationImage(
-                image: NetworkImage(imageUrl!),
+                image: NetworkImage(widget.imageUrl!),
                 fit: BoxFit.cover,
+                onError: (exception, stackTrace) {
+                  if (mounted) setState(() => _imageFailed = true);
+                },
               )
             : null,
-        border: borderWidth > 0
-            ? Border.all(color: borderColor ?? color, width: borderWidth)
+        border: widget.borderWidth > 0
+            ? Border.all(color: widget.borderColor ?? color, width: widget.borderWidth)
             : null,
       ),
       alignment: Alignment.center,
@@ -113,9 +138,9 @@ class AppAvatar extends StatelessWidget {
     // outside it — the same "small breathing gap" a story-style ring always
     // has, so the ring reads as its own distinct outline rather than
     // bleeding straight into the photo.
-    if (inVoiceRoom) {
+    if (widget.inVoiceRoom) {
       photo = Container(
-        padding: EdgeInsets.all(_ringGap),
+        padding: EdgeInsets.all(widget._ringGap),
         decoration: BoxDecoration(shape: BoxShape.circle, color: Theme.of(context).scaffoldBackgroundColor),
         child: photo,
       );
@@ -127,7 +152,7 @@ class AppAvatar extends StatelessWidget {
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          if (inVoiceRoom)
+          if (widget.inVoiceRoom)
             // The "sparkling"/glowing ring itself — several magenta/violet/
             // lilac stops swept around the circle for a shimmering look
             // (rather than one flat border color), plus a soft two-layer
@@ -157,7 +182,7 @@ class AppAvatar extends StatelessWidget {
               ),
             ),
           Center(child: photo),
-          if (inVoiceRoom)
+          if (widget.inVoiceRoom)
             Positioned(
               right: -1,
               bottom: -1,
@@ -176,7 +201,7 @@ class AppAvatar extends StatelessWidget {
                 child: Icon(Icons.mic_rounded, color: Colors.white, size: size * 0.19),
               ),
             )
-          else if (showOnlineDot)
+          else if (widget.showOnlineDot)
             Positioned(
               right: 0,
               bottom: 0,
@@ -184,7 +209,7 @@ class AppAvatar extends StatelessWidget {
                 width: size * 0.28,
                 height: size * 0.28,
                 decoration: BoxDecoration(
-                  color: isOnline
+                  color: widget.isOnline
                       ? const Color(0xFF3DDC97)
                       : const Color(0xFF6E6E78),
                   shape: BoxShape.circle,
@@ -195,11 +220,11 @@ class AppAvatar extends StatelessWidget {
                 ),
               ),
             ),
-          if (showFlag && flag != null)
+          if (widget.showFlag && widget.flag != null)
             Positioned(
               left: -2,
               bottom: -2,
-              child: Text(flag!, style: TextStyle(fontSize: size * 0.26)),
+              child: Text(widget.flag!, style: TextStyle(fontSize: size * 0.26)),
             ),
         ],
       ),
