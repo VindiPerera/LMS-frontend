@@ -6,8 +6,16 @@ class ApiConfig {
   static String? _customBaseUrl;
 
   /// The live production server. hello-backend is deployed here — see
-  /// LMS---Backend's admin panel at https://lmsbackend.jaan.lk/admin/login.
-  static const String? _prodBaseUrl = 'https://lmsbackend.jaan.lk';
+  /// LMS---Backend's admin panel, reachable at either https://lmsbackend
+  /// .jaan.lk/admin/login or https://www.facetalkenglish.com/admin/login
+  /// (same server, same app — lmsbackend.jaan.lk just has no SSL
+  /// certificate of its own, so this has to be the facetalkenglish.com
+  /// domain specifically, or every HTTPS request from the app — uploads,
+  /// avatar/whiteboard image loads, everything — fails certificate
+  /// verification). No trailing slash: every call site below concatenates
+  /// this directly as '$baseUrl/api/...', so one here would produce a
+  /// double slash.
+  static const String? _prodBaseUrl = 'https://www.facetalkenglish.com';
 
   /// [baseUrl] and [candidateUploadUrls] both need this exact same
   /// "unset production URL" guard in their `kReleaseMode` branch — shared
