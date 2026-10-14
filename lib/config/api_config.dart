@@ -104,6 +104,22 @@ class ApiConfig {
 
     try {
       final uri = Uri.parse(rawUrl);
+
+      // Never touch a URL that's already pointing at production — only a
+      // release build's baseUrl ever resolves there (see the kReleaseMode
+      // branch above), so a URL here with that host is always a genuine,
+      // directly-reachable production media URL, not some local dev
+      // address that needs normalizing to this session's host. Without
+      // this guard, viewing (from a local debug session) a photo that was
+      // uploaded by a release build — e.g. an installed APK, which always
+      // talks to production — got silently redirected to this session's
+      // local backend instead, which has never heard of that file
+      // (separate database, separate disk storage — see .env), turning a
+      // perfectly live production photo into a 404.
+      final prodBaseUrl = _prodBaseUrl;
+      final prodHost = prodBaseUrl != null ? Uri.tryParse(prodBaseUrl)?.host : null;
+      if (prodHost != null && uri.host == prodHost) return rawUrl;
+
       if (candidatePorts.contains(uri.port) ||
           uri.path.startsWith('/storage') ||
           uri.path.startsWith('/media') ||
