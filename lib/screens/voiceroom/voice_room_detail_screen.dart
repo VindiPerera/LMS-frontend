@@ -386,6 +386,28 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
     final moderators = participants.where((p) => p.isModerator);
     final otherSpeakers = participants.where((p) => p.role == 'speaker');
     final seats = [...host, ...moderators, ...otherSpeakers];
+    // The participants stream's first snapshot only lands once
+    // RoomParticipantService.join's Firestore transaction (started in
+    // initState) round-trips — a real network gap, most noticeable right
+    // after VoiceRoomService.createRoom, where it shows up as the host's
+    // own avatar popping in a beat after the room itself opens. The host's
+    // name/avatar/flag are already known synchronously from widget.room (set
+    // by createRoom's return value, or loaded with the room doc), so seed an
+    // instant placeholder seat from that instead of leaving it blank until
+    // the real participant doc arrives — [join]'s eventual snapshot (a real
+    // 'host' entry) replaces this the moment it lands.
+    if (!seats.any((p) => p.isHost) && widget.room.hostId.isNotEmpty) {
+      seats.insert(
+        0,
+        RoomParticipant(
+          uid: widget.room.hostId,
+          name: widget.room.hostName,
+          avatarUrl: widget.room.hostAvatar,
+          flag: widget.room.hostFlag,
+          role: 'host',
+        ),
+      );
+    }
     final seatCount = seats.length > RoomParticipantService.speakerSeats
         ? seats.length
         : RoomParticipantService.speakerSeats;

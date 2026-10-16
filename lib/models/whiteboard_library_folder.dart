@@ -21,22 +21,37 @@ class WhiteboardLibraryFolder {
     required this.items,
   });
 
-  /// Generates [count] plain image items for [folderSlug] — sequentially
-  /// numbered assets at assets/images/library_topics/[folderSlug]/01.jpg,
-  /// 02.jpg, etc. (see pubspec.yaml). Unlike WhiteboardLibraryItem.presets'
-  /// discussion-prompt cards, these have no title/prompt text to overlay —
-  /// just the image itself (see _PresetImageTile's title.isEmpty check in
+  /// Builds one plain image item for [folderSlug]/[fileName] (see
+  /// pubspec.yaml). Unlike WhiteboardLibraryItem.presets' discussion-prompt
+  /// cards, these have no title/prompt text to overlay — just the image
+  /// itself (see _PresetImageTile's title.isEmpty check in
   /// whiteboard_library_sheet.dart).
-  static List<WhiteboardLibraryItem> _images(String folderSlug, int count) {
+  static WhiteboardLibraryItem _image(String folderSlug, String fileName) {
+    return WhiteboardLibraryItem(
+      id: 'library_topic_${folderSlug}_$fileName',
+      title: '',
+      prompt: '',
+      assetPath: 'assets/images/library_topics/$folderSlug/$fileName',
+    );
+  }
+
+  /// [count] sequentially numbered assets: 01.jpg, 02.jpg, etc.
+  static List<WhiteboardLibraryItem> _sequentialImages(
+    String folderSlug,
+    int count,
+  ) {
     return List.generate(count, (i) {
       final n = (i + 1).toString().padLeft(2, '0');
-      return WhiteboardLibraryItem(
-        id: 'library_topic_${folderSlug}_$n',
-        title: '',
-        prompt: '',
-        assetPath: 'assets/images/library_topics/$folderSlug/$n.jpg',
-      );
+      return _image(folderSlug, '$n.jpg');
     });
+  }
+
+  /// Assets with non-sequential file names, listed explicitly.
+  static List<WhiteboardLibraryItem> _namedImages(
+    String folderSlug,
+    List<String> fileNames,
+  ) {
+    return fileNames.map((f) => _image(folderSlug, f)).toList();
   }
 
   /// The 6 built-in topic-image folders shown inside the Library folder,
@@ -45,32 +60,45 @@ class WhiteboardLibraryFolder {
     WhiteboardLibraryFolder(
       id: '__library_topic_discribe__',
       name: 'Discribe',
-      items: _images('discribe', 1),
+      items: _namedImages('discribe', ['ABC.jpg']),
     ),
     WhiteboardLibraryFolder(
       id: '__library_topic_discussion__',
       name: 'Discussion',
-      items: _images('discussion', 6),
+      items: _sequentialImages('discussion', 6),
     ),
     WhiteboardLibraryFolder(
       id: '__library_topic_ielts__',
       name: 'IELTS',
-      items: _images('ielts', 63),
+      items: _sequentialImages('ielts', 63),
     ),
     WhiteboardLibraryFolder(
-      id: '__library_topic_question_02__',
-      name: 'Question 02',
-      items: _images('question_02', 3),
+      id: '__library_topic_question__',
+      name: 'Question',
+      items: _namedImages('question', ['A.jpg', 'B.jpg', 'D.jpg']),
     ),
     WhiteboardLibraryFolder(
-      id: '__library_topic_questions__',
-      name: 'Questions',
-      items: _images('questions', 12),
+      id: '__library_topic_perpal_questions__',
+      name: 'Perpal Questions',
+      items: _namedImages('perpal_questions', [
+        'B (1).jpg',
+        'B (2).jpg',
+        'B (3).jpg',
+        'B (4).jpg',
+        'B (5).jpg',
+        'B (6).jpg',
+        'B (7).jpg',
+        'B (8).jpg',
+        'B (9).jpg',
+        'B (10).jpg',
+        'B (11).jpg',
+        'B (12).jpg',
+      ]),
     ),
     WhiteboardLibraryFolder(
       id: '__library_topic_short_answers__',
       name: 'Short Answers',
-      items: _images('short_answers', 1),
+      items: _namedImages('short_answers', ['123.jpg']),
     ),
   ];
 

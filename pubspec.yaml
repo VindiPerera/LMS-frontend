@@ -151,8 +151,8 @@ flutter:
     - assets/images/library_topics/discribe/
     - assets/images/library_topics/discussion/
     - assets/images/library_topics/ielts/
-    - assets/images/library_topics/question_02/
-    - assets/images/library_topics/questions/
+    - assets/images/library_topics/question/
+    - assets/images/library_topics/perpal_questions/
     - assets/images/library_topics/short_answers/
 
   # An image asset can refer to one or more resolution-specific "variants", see
