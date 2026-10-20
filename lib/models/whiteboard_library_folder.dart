@@ -58,28 +58,8 @@ class WhiteboardLibraryFolder {
   /// alongside any folders the user has created there themselves.
   static final List<WhiteboardLibraryFolder> all = [
     WhiteboardLibraryFolder(
-      id: '__library_topic_discribe__',
-      name: 'Discribe',
-      items: _namedImages('discribe', ['ABC.jpg']),
-    ),
-    WhiteboardLibraryFolder(
-      id: '__library_topic_discussion__',
-      name: 'Discussion',
-      items: _sequentialImages('discussion', 6),
-    ),
-    WhiteboardLibraryFolder(
-      id: '__library_topic_ielts__',
-      name: 'IELTS',
-      items: _sequentialImages('ielts', 63),
-    ),
-    WhiteboardLibraryFolder(
-      id: '__library_topic_question__',
-      name: 'Question',
-      items: _namedImages('question', ['A.jpg', 'B.jpg', 'D.jpg']),
-    ),
-    WhiteboardLibraryFolder(
       id: '__library_topic_perpal_questions__',
-      name: 'Perpal Questions',
+      name: '01.Perpal Questions',
       items: _namedImages('perpal_questions', [
         'B (1).jpg',
         'B (2).jpg',
@@ -96,8 +76,28 @@ class WhiteboardLibraryFolder {
       ]),
     ),
     WhiteboardLibraryFolder(
+      id: '__library_topic_ielts__',
+      name: '02.IELTS',
+      items: _sequentialImages('ielts', 63),
+    ),
+    WhiteboardLibraryFolder(
+      id: '__library_topic_discussion__',
+      name: '03.Discussion',
+      items: _sequentialImages('discussion', 6),
+    ),
+    WhiteboardLibraryFolder(
+      id: '__library_topic_question__',
+      name: '04.Question',
+      items: _namedImages('question', ['A.jpg', 'B.jpg', 'D.jpg']),
+    ),
+    WhiteboardLibraryFolder(
+      id: '__library_topic_discribe__',
+      name: '05.Discribe',
+      items: _namedImages('discribe', ['ABC.jpg']),
+    ),
+    WhiteboardLibraryFolder(
       id: '__library_topic_short_answers__',
-      name: 'Short Answers',
+      name: '06.Short Answers',
       items: _namedImages('short_answers', ['123.jpg']),
     ),
   ];
