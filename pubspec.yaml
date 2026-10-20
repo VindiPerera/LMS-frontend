@@ -93,6 +93,10 @@ dependencies:
   flutter_local_notifications: ^22.3.0
   linkify: ^5.0.0
   flutter_map: ^8.3.2
+
+  # Live voice in voice rooms — see lib/services/voice_room_audio_service.dart.
+  # The server (hello-backend's VoiceRoomController) mints the join tokens.
+  livekit_client: ^2.3.0
   latlong2: ^0.10.1
 
 dev_dependencies:

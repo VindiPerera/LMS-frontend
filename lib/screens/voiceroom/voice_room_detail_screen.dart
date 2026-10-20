@@ -14,6 +14,7 @@ import '../../services/media_service.dart';
 import '../../services/room_participant_service.dart';
 import '../../services/storage_service.dart';
 import '../../services/voice_room_service.dart';
+import '../../services/voice_room_audio_service.dart';
 import '../../services/voice_room_session_controller.dart';
 import '../../services/whiteboard_service.dart';
 import '../../widgets/app_avatar.dart';
@@ -175,7 +176,11 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
         roomId: widget.room.id,
         isHost: _isHost,
         sessionId: _sessionId,
-      ).catchError((e) {
+      )
+          // Audio needs the participant doc join() just wrote (the server
+          // derives publish rights from it). connect() never throws.
+          .then((_) => VoiceRoomAudioService.instance.connect(widget.room.id))
+          .catchError((e) {
         debugPrint('Failed to join room ${widget.room.id}: $e');
         // A kickParticipant ban still within its 24h window — see
         // RoomParticipantService.join's pre-check and firestore.rules'
@@ -359,6 +364,7 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
       // minimized — VoiceRoomSessionController now owns this session's
       // presence instead of it ending here.
       RoomParticipantService.leave(widget.room.id, _sessionId);
+      VoiceRoomAudioService.instance.disconnect();
     }
     super.dispose();
   }
