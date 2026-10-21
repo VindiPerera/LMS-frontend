@@ -113,5 +113,16 @@
             <action android:name="android.intent.action.VIEW"/>
             <data android:scheme="fb-messenger"/>
         </intent>
+        <!-- Same package-visibility fix for my_qr_code_screen.dart's
+             WhatsApp (wa.me) and Telegram (t.me) share buttons, which use
+             plain https:// links rather than a custom scheme. Without this,
+             canLaunchUrl can't see WhatsApp/Telegram (or even the browser)
+             as able to handle them on Android 11+, so both buttons silently
+             fall back to "Link copied to clipboard" instead of opening. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <category android:name="android.intent.category.BROWSABLE"/>
+            <data android:scheme="https"/>
+        </intent>
     </queries>
 </manifest>

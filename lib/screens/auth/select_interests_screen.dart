@@ -7,8 +7,8 @@ import '../main_shell.dart';
 /// One-time step shown right after [CreateProfileScreen] finishes, the first
 /// time a new account completes signup. Selected chips are saved onto
 /// `AppUser.tags` (already rendered elsewhere — see
-/// partner_profile_screen.dart / friend_profile_screen.dart / me_screen.dart)
-/// so this is the only place that ever needs to populate that field.
+/// partner_profile_screen.dart / me_screen.dart) so this is the only place
+/// that ever needs to populate that field.
 ///
 /// Reached only once per account: by the time this screen's Continue button
 /// runs, `profileCompleted` is already true (set by CreateProfileScreen), so

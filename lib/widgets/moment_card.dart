@@ -10,12 +10,13 @@ import 'package:linkify/linkify.dart' show UserTagLinkifier, UserTagElement;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/moment.dart';
-import '../screens/friends/friend_profile_screen.dart';
+import '../screens/connect/partner_profile_screen.dart';
 import '../screens/moments/create_moment_screen.dart';
 import '../screens/moments/image_viewer_screen.dart';
 import '../screens/moments/video_player_screen.dart';
 import '../services/comment_service.dart';
 import '../services/moment_service.dart';
+import '../services/partner_service.dart';
 import '../theme/app_colors.dart';
 import 'app_avatar.dart';
 import 'comment_sheet.dart';
@@ -250,7 +251,7 @@ class _MomentCardState extends State<MomentCard> {
   void _openProfile() {
     if (_moment.user.id.isEmpty) return;
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => FriendProfileScreen(friendId: _moment.user.id, source: 'moment')),
+      MaterialPageRoute(builder: (_) => PartnerProfileScreen(initial: _moment.user)),
     );
   }
 
@@ -275,9 +276,18 @@ class _MomentCardState extends State<MomentCard> {
   Future<void> _openMention(String handle) async {
     final uid = await CommentService.findUserIdByHandle(handle);
     if (!mounted || uid == null) return;
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => FriendProfileScreen(friendId: uid, source: 'moment')),
-    );
+    try {
+      final user = await PartnerService.fetchPartner(uid);
+      if (!mounted) return;
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => PartnerProfileScreen(initial: user)),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Couldn't load that profile.")),
+      );
+    }
   }
 
   Future<void> _handleLinkOpen(LinkableElement link) async {

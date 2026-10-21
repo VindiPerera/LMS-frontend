@@ -124,6 +124,21 @@ class FollowService {
         .handleError((_) => 0);
   }
 
+  /// One-time snapshot of [uid]'s followers' uids — used by
+  /// MomentService to resolve a "Followers only" moment's `audience` at
+  /// post time (a stream would outlive that write; see MomentService
+  /// ._audienceFor's doc comment, same reasoning as the old
+  /// FriendService.getFriendIds this replaces).
+  static Future<Set<String>> getFollowerIds(String uid) async {
+    if (uid.isEmpty) return const <String>{};
+    try {
+      final snap = await _users.doc(uid).collection('followers').get();
+      return snap.docs.map((d) => d.id).toSet();
+    } catch (_) {
+      return const <String>{};
+    }
+  }
+
   /// Live list for follow_list_screen.dart.
   static Stream<List<AppUser>> streamFollowing(String uid) => _streamEdges(uid, 'following');
 

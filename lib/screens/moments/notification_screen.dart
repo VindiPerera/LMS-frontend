@@ -5,10 +5,11 @@ import '../../models/moment.dart';
 import '../../models/notification_model.dart';
 import '../../services/moment_service.dart';
 import '../../services/notification_service.dart';
+import '../../services/partner_service.dart';
 import '../../services/voice_room_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
-import '../friends/friend_profile_screen.dart';
+import '../connect/partner_profile_screen.dart';
 import '../voiceroom/open_voice_room.dart';
 import 'post_detail_screen.dart';
 
@@ -79,13 +80,23 @@ class _NotificationTile extends StatelessWidget {
     NotificationService.markAsRead(notification.id);
 
     switch (notification.type) {
+      // No longer sent (the app has no friend-request feature anymore,
+      // just Follow) but an old one already in someone's notification
+      // history should still open something sensible rather than dead-end.
       case NotificationType.friendRequest:
       case NotificationType.friendAccept:
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => FriendProfileScreen(friendId: notification.actorId, source: 'notification'),
-          ),
-        );
+        try {
+          final user = await PartnerService.fetchPartner(notification.actorId);
+          if (!context.mounted) return;
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => PartnerProfileScreen(initial: user)),
+          );
+        } catch (_) {
+          if (!context.mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Couldn't load that profile.")),
+          );
+        }
         return;
 
       case NotificationType.voiceroom:

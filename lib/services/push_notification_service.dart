@@ -192,7 +192,7 @@ class PushNotificationService {
       case 'friendAccept':
         final actorId = data['actorId'];
         if (actorId != null && actorId.isNotEmpty) {
-          NavigationService.openFriendProfile(actorId);
+          NavigationService.openProfile(actorId);
         }
         return;
 

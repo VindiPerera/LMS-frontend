@@ -207,6 +207,6 @@ class DeepLinkService {
       return; // Expired/invalid code, or it's the signed-in user's own link.
     }
 
-    NavigationService.openFriendProfile(resolved.uid, source: 'link');
+    NavigationService.openProfile(resolved.uid);
   }
 }
