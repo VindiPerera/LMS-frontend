@@ -71,7 +71,17 @@ class ChatService {
         .orderBy('lastMessageAt', descending: true)
         .snapshots()
         .map(
-          (snap) => snap.docs.map((doc) => _previewFromDoc(doc, uid)).toList(),
+          (snap) => snap.docs
+              // Swiped-to-delete by this user (see hideChat) — a per-user
+              // flag, not an actual delete: the thread document is shared
+              // with the other participant (firestore.rules blocks
+              // deleting it outright), and _send clears this again for
+              // whoever gets the next message, so "deleting" a chat here
+              // just hides it until either side messages again, the same
+              // behavior most chat apps give "delete conversation".
+              .where((doc) => !_hiddenFor(doc.data(), uid))
+              .map((doc) => _previewFromDoc(doc, uid))
+              .toList(),
         )
         .withFallback(
           () => <ChatPreview>[],
@@ -214,6 +224,12 @@ class ChatService {
         'lastMessageSenderId': uid,
         'unread.${other.id}': FieldValue.increment(1),
         'unread.$uid': 0,
+        // A chat either side swiped to delete (see hideChat) reappears the
+        // moment there's new activity — same as most chat apps' "delete
+        // conversation" only hides it until the next message, rather than
+        // leaving someone able to message into a thread the recipient can
+        // no longer see at all.
+        'hiddenFor': FieldValue.arrayRemove(ids),
       },
       SetOptions(merge: true),
     );
@@ -273,6 +289,81 @@ class ChatService {
     } catch (_) {
       // No thread yet, or offline — fine, there's nothing to clear.
     }
+  }
+
+  static bool _hiddenFor(Map<String, dynamic> data, String uid) {
+    final hidden = data['hiddenFor'] as List?;
+    return hidden != null && hidden.contains(uid);
+  }
+
+  /// Swipe-to-delete on a chat list row (chat_list_screen.dart). Only hides
+  /// the thread from the caller's own list (see streamChatPreviews' doc
+  /// comment) — firestore.rules blocks deleting a chats/{chatId} doc
+  /// outright (`allow delete: if false`) since it's shared with the other
+  /// participant, who'd otherwise lose their own copy of the conversation
+  /// the moment this user "deleted" it. No-op if the thread doesn't exist.
+  static Future<void> hideChat(String otherUid) async {
+    final uid = _uid();
+    try {
+      await _chats.doc(chatIdFor(otherUid)).update({
+        'hiddenFor': FieldValue.arrayUnion([uid]),
+      });
+    } catch (_) {
+      // No thread yet, or offline — nothing to hide.
+    }
+  }
+
+  /// Sends a photo — the composer's "+" > Photo option. [imageUrl] is
+  /// already uploaded (see MediaService.uploadImageBytes) before this is
+  /// called, same division of labor as [sendVoiceMessage]/[sendFileMessage].
+  static Future<void> sendImageMessage({
+    required AppUser other,
+    required String imageUrl,
+  }) {
+    return _send(
+      other: other,
+      previewText: '📷 Photo',
+      fields: {'text': '', 'type': 'image', 'mediaUrl': imageUrl},
+    );
+  }
+
+  /// Sends a voice note — the composer's mic button. [audioUrl] is already
+  /// uploaded (see MediaService.uploadVoiceBytes) by the time this runs.
+  static Future<void> sendVoiceMessage({
+    required AppUser other,
+    required String audioUrl,
+    required int seconds,
+  }) {
+    return _send(
+      other: other,
+      previewText: '🎤 Voice message',
+      fields: {
+        'text': '',
+        'type': 'voice',
+        'mediaUrl': audioUrl,
+        'voiceSeconds': seconds,
+      },
+    );
+  }
+
+  /// Sends a generic file attachment — the composer's "+" > File option.
+  static Future<void> sendFileMessage({
+    required AppUser other,
+    required String fileUrl,
+    required String fileName,
+    required int fileSize,
+  }) {
+    return _send(
+      other: other,
+      previewText: '📎 $fileName',
+      fields: {
+        'text': '',
+        'type': 'file',
+        'mediaUrl': fileUrl,
+        'fileName': fileName,
+        'fileSize': fileSize,
+      },
+    );
   }
 
   static Map<String, dynamic> _infoFor(AppUser? user) {

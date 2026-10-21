@@ -2,7 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../models/moment.dart';
-import '../screens/friends/friend_profile_screen.dart';
+import '../screens/connect/partner_profile_screen.dart';
 import '../screens/moments/image_viewer_screen.dart';
 import '../screens/moments/video_player_screen.dart';
 import '../services/moment_service.dart';
@@ -72,10 +72,7 @@ class EmbeddedPostCard extends StatelessWidget {
                     if (original.user.id.isEmpty) return;
                     Navigator.of(context).push(
                       MaterialPageRoute(
-                        builder: (_) => FriendProfileScreen(
-                          friendId: original.user.id,
-                          source: 'moment',
-                        ),
+                        builder: (_) => PartnerProfileScreen(initial: original.user),
                       ),
                     );
                   },

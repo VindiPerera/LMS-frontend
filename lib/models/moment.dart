@@ -42,7 +42,7 @@ enum MomentVisibility {
 /// A single post in the Moments feed — mirrors the `moments/{postId}`
 /// Firestore document. The author is kept as a denormalized [AppUser]
 /// snapshot (`user`) rather than flat `userId`/`userName`/`userAvatar`
-/// fields, matching how the rest of the app (AppAvatar, FriendProfileScreen,
+/// fields, matching how the rest of the app (AppAvatar, PartnerProfileScreen,
 /// language badges) already expects to consume author data.
 class Moment {
   final String id;

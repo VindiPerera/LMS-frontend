@@ -30,18 +30,22 @@ service cloud.firestore {
     }
 
     // Deterministic friendship doc id used by FriendService: sorted uid pair
-    // joined with "_". Mirrors FriendService.getFriendshipDocId.
+    // joined with "_".
     function friendshipId(uidA, uidB) {
       return uidA < uidB ? uidA + '_' + uidB : uidB + '_' + uidA;
     }
 
+    // The app's own friend-request feature (send/accept/decline/unfriend)
+    // has been retired in favor of Follow (see FollowService) — nothing
+    // client-side writes a 'friends' status into friendships/{docId}
+    // anymore. This, the friendships/{docId} match block below, and
+    // isBlockedBy() stay only because nothing ever implemented blocking
+    // either (no UI ever wrote 'blocked' status), so there's no live
+    // 'blocked' behavior to actually migrate — just unused-but-harmless
+    // scaffolding for if that's ever built.
     function friendshipStatus(uidA, uidB) {
       let path = /databases/$(database)/documents/friendships/$(friendshipId(uidA, uidB));
       return exists(path) ? get(path).data.status : 'none';
-    }
-
-    function isFriendOf(otherUid) {
-      return isSignedIn() && friendshipStatus(request.auth.uid, otherUid) == 'friends';
     }
 
     function isBlockedBy(otherUid) {
@@ -59,9 +63,13 @@ service cloud.firestore {
       allow delete: if false;
 
       // ----------------------------------------------------------------
-      // users/{uid}/friend_requests/{requestId} — written under the
-      // RECIPIENT's uid (`uid` here) by the SENDER (`fromUserId`) — see
-      // FriendService.sendFriendRequest/cancelRequest. Both sides need
+      // users/{uid}/friend_requests/{requestId} — the app's friend-request
+      // feature (send/accept/decline/cancel) has been retired in favor of
+      // Follow (see FollowService); nothing client-side writes here
+      // anymore. Left in place rather than removed since it's an inbox
+      // scoped to its own owner either way — inert, not a security
+      // liability — written under the RECIPIENT's uid (`uid` here) by the
+      // SENDER (`fromUserId`) when it was still used. Both sides needed
       // some access: the recipient to read/accept/decline their inbox,
       // the sender to write the initial request and cancel it later.
       // ------------------------------------------------------------------
@@ -76,10 +84,10 @@ service cloud.firestore {
         allow update: if isOwner(uid);
 
         // The recipient can delete when declining; the original sender
-        // needs this too for "cancel" (FriendService.cancelRequest) —
-        // restricting delete to just the recipient silently breaks
-        // canceling an outgoing request (the whole batch, including the
-        // friendships doc update, fails since batches are all-or-nothing).
+        // needed this too for "cancel" — restricting delete to just the
+        // recipient would have silently broken canceling an outgoing
+        // request (the whole batch, including the friendships doc update,
+        // fails since batches are all-or-nothing).
         allow delete: if isOwner(uid) ||
           (resource != null && request.auth.uid == resource.data.fromUserId);
       }
@@ -285,7 +293,13 @@ service cloud.firestore {
         idMatchesParticipants(request.resource.data.participants);
 
       // Participants never change after creation — only per-message fields
-      // (lastMessage, unread.*, participantInfo) do — see ChatService.
+      // (lastMessage, unread.*, participantInfo, hiddenFor) do — see
+      // ChatService. hiddenFor backs the chat list's swipe-to-delete
+      // (ChatService.hideChat): since a real delete below is blocked (the
+      // doc is shared with the other participant, who'd lose their own
+      // copy), "deleting" a chat is just adding your own uid to this array,
+      // which streamChatPreviews filters on and _send clears again the
+      // moment either side next messages.
       allow update: if isSignedIn() &&
         request.auth.uid in resource.data.participants &&
         request.resource.data.participants == resource.data.participants;

@@ -810,9 +810,8 @@ class _RoomProfileSheetState extends State<RoomProfileSheet> {
                       GestureDetector(
                         onTap: participant.uid.isEmpty
                             ? null
-                            // PartnerProfileScreen (not FriendProfileScreen)
-                            // — the full HelloTalk-style profile with the
-                            // map header, likes, Following/Followers,
+                            // PartnerProfileScreen — the full HelloTalk-style
+                            // profile with the map header, likes, Following/Followers,
                             // About Me/Moments/Achievements tabs, and
                             // bottom Follow/Chat/Booking bar, same as every
                             // other "view this person's profile" entry

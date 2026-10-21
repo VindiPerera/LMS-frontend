@@ -3,7 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import '../models/moment.dart';
 import 'auth_service.dart';
-import 'friend_service.dart';
+import 'follow_service.dart';
 import 'notification_api_service.dart';
 
 /// One page of the Moments feed, keyed by a [DocumentSnapshot] cursor
@@ -78,9 +78,15 @@ class MomentService {
         return [ownerUid, 'public'];
       case MomentVisibility.onlyMe:
         return [ownerUid];
+      // Storage value stays 'friends' (see MomentVisibility.storageValue)
+      // for compatibility with posts already stored under the old scheme —
+      // only what it resolves to changed: the app no longer has a "friends"
+      // relationship (see FollowService), so this now means "my followers"
+      // instead, surfaced to the user as "Followers" (see
+      // widgets/visibility_selector.dart).
       case MomentVisibility.friends:
-        final friendIds = await FriendService.instance.getFriendIds();
-        return {ownerUid, ...friendIds}.toList();
+        final followerIds = await FollowService.getFollowerIds(ownerUid);
+        return {ownerUid, ...followerIds}.toList();
     }
   }
 

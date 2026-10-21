@@ -24,7 +24,7 @@ class ChatPreview {
   });
 }
 
-enum MessageType { text, image, voice, correction, voiceRoomInvite }
+enum MessageType { text, image, voice, file, correction, voiceRoomInvite }
 
 MessageType _typeFromString(String? value) {
   return MessageType.values.firstWhere(
@@ -40,6 +40,17 @@ class ChatMessage {
   final String text;
   final MessageType type;
   final int voiceSeconds;
+  // The uploaded file's URL — set for MessageType.image/voice/file, empty
+  // for a plain text message (see ChatService.sendImageMessage/
+  // sendVoiceMessage/sendFileMessage, which all go through MediaService's
+  // upload pipeline before writing the message doc).
+  final String mediaUrl;
+  // Only meaningful for MessageType.file — the original filename/size so
+  // the bubble can show something more useful than a bare link (an image or
+  // voice note doesn't need these: the bubble renders the photo/waveform
+  // directly instead of a filename).
+  final String fileName;
+  final int fileSize;
   // Only set when type == voiceRoomInvite — a snapshot of the room at the
   // moment it was shared (see ChatService.sendVoiceRoomInvite), so the card
   // still shows a title/host even if the room is later renamed or has
@@ -63,6 +74,9 @@ class ChatMessage {
     required this.text,
     this.type = MessageType.text,
     this.voiceSeconds = 0,
+    this.mediaUrl = '',
+    this.fileName = '',
+    this.fileSize = 0,
     this.roomId = '',
     this.roomTitle = '',
     this.roomHostName = '',
@@ -82,6 +96,9 @@ class ChatMessage {
       text: data['text']?.toString() ?? '',
       type: _typeFromString(data['type']?.toString()),
       voiceSeconds: (data['voiceSeconds'] as num?)?.toInt() ?? 0,
+      mediaUrl: ApiConfig.resolveUrl(data['mediaUrl']?.toString() ?? ''),
+      fileName: data['fileName']?.toString() ?? '',
+      fileSize: (data['fileSize'] as num?)?.toInt() ?? 0,
       roomId: data['roomId']?.toString() ?? '',
       roomTitle: data['roomTitle']?.toString() ?? '',
       roomHostName: data['roomHostName']?.toString() ?? '',

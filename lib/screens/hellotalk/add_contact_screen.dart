@@ -8,7 +8,8 @@ import '../../services/friend_link_service.dart';
 import '../../services/partner_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
-import '../friends/friend_profile_screen.dart';
+import '../../widgets/follow_button.dart';
+import '../connect/partner_profile_screen.dart';
 import '../friends/my_qr_code_screen.dart';
 import '../friends/scan_qr_screen.dart';
 
@@ -276,33 +277,17 @@ class _AddContactScreenState extends State<AddContactScreen> {
                               fontSize: 13,
                             ),
                           ),
-                          trailing: ElevatedButton(
-                            onPressed: () {
-                              Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => FriendProfileScreen(
-                                    friendId: user.id.isNotEmpty
-                                        ? user.id
-                                        : user.handle,
-                                    source: 'search',
-                                  ),
-                                ),
-                              );
-                            },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: AppColors.primaryPurple,
-                              foregroundColor: Colors.white,
-                              elevation: 0,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                                vertical: 6,
+                          // The row itself opens the profile; the trailing
+                          // button is the follow procedure acting right here
+                          // (no navigation) — same split as follow_list_screen.dart.
+                          trailing: FollowButton(user: user),
+                          onTap: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => PartnerProfileScreen(initial: user),
                               ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                            ),
-                            child: const Text('View Profile'),
-                          ),
+                            );
+                          },
                         );
                       },
                     ),
