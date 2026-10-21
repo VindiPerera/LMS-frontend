@@ -38,6 +38,13 @@ class _ChatListScreenState extends State<ChatListScreen> {
   final Map<String, StreamSubscription<bool>> _onlineSubs = {};
   StreamSubscription<List<ChatPreview>>? _chatsSub;
 
+  // Swiped-to-delete rows, filtered out immediately rather than waiting for
+  // ChatService.hideChat's Firestore write to round-trip back through
+  // _chatsStream — without this, a Dismissible whose key is still present
+  // in the next build (because the write hasn't landed yet) throws "A
+  // dismissed Dismissible widget is still part of the tree."
+  final Set<String> _locallyHidden = {};
+
   @override
   void initState() {
     super.initState();
@@ -88,6 +95,40 @@ class _ChatListScreenState extends State<ChatListScreen> {
       (isOnline ? online : offline).add(chat);
     }
     return [...online, ...offline];
+  }
+
+  /// Swipe-right confirmation before a chat actually disappears — cheap
+  /// insurance against a slightly-too-eager swipe, since undoing this means
+  /// re-starting the conversation from Connect/Add People rather than any
+  /// in-app "undo".
+  Future<bool> _confirmDeleteChat(ChatPreview chat) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete this chat?'),
+        content: Text("Your conversation with ${chat.user.name} will be removed from your chat list. They'll still see it on their side."),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Delete', style: TextStyle(color: AppColors.badgeRed)),
+          ),
+        ],
+      ),
+    );
+    return confirmed ?? false;
+  }
+
+  /// Hides [chat] from this user's own list — see ChatService.hideChat's
+  /// doc comment for why this is a per-user flag rather than an actual
+  /// delete (the thread document is shared with the other participant).
+  /// Removed from the UI immediately (before the Firestore write even
+  /// lands) so the just-dismissed Dismissible doesn't reappear for a beat —
+  /// see _locallyHidden's own doc comment.
+  void _deleteChat(ChatPreview chat) {
+    setState(() => _locallyHidden.add(chat.user.id));
+    // ignore: discarded_futures
+    ChatService.hideChat(chat.user.id);
   }
 
   @override
@@ -144,6 +185,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
         builder: (context, snapshot) {
           final chats = snapshot.data ?? [];
           final filteredChats = _sortedChats(chats.where((chat) {
+            if (_locallyHidden.contains(chat.user.id)) return false;
             if (_searchQuery.isEmpty) return true;
             final q = _searchQuery.toLowerCase();
             return chat.user.name.toLowerCase().contains(q) ||
@@ -301,10 +343,35 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   delegate: SliverChildBuilderDelegate(
                     (context, index) {
                       final chat = filteredChats[index];
-                      // While searching, a tapped result opens that user's profile
-                      // (with its live "Go Look" voice-room card); the normal,
-                      // un-searched list still opens the chat as before.
-                      return _ChatListTile(chat: chat, openProfile: _searchQuery.isNotEmpty);
+                      // Swipe right to reveal a delete action — see
+                      // _deleteChat's doc comment for what "delete" means
+                      // here (hides it from this user's own list only).
+                      return Dismissible(
+                        key: ValueKey(chat.user.id),
+                        direction: DismissDirection.startToEnd,
+                        background: Container(
+                          color: AppColors.badgeRed,
+                          alignment: Alignment.centerLeft,
+                          padding: const EdgeInsets.only(left: 24),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.delete_rounded, color: Colors.white),
+                              SizedBox(width: 8),
+                              Text(
+                                'Delete',
+                                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                              ),
+                            ],
+                          ),
+                        ),
+                        confirmDismiss: (_) => _confirmDeleteChat(chat),
+                        onDismissed: (_) => _deleteChat(chat),
+                        // While searching, a tapped result opens that user's profile
+                        // (with its live "Go Look" voice-room card); the normal,
+                        // un-searched list still opens the chat as before.
+                        child: _ChatListTile(chat: chat, openProfile: _searchQuery.isNotEmpty),
+                      );
                     },
                     childCount: filteredChats.length,
                   ),
@@ -370,8 +437,15 @@ class _ChatListTile extends StatelessWidget {
                       // either side next sends a message (see ChatService's
                       // class doc) — so a newly-uploaded avatar needs its
                       // own live listener too, same reasoning as isOnline
-                      // above, to show up here right away.
-                      stream: PartnerService.streamAvatarUrl(chat.user.id),
+                      // above, to show up here right away. Skipped for the
+                      // FaceTalk system account (same guard
+                      // chat_detail_screen.dart already has): it isn't a
+                      // real user doc, so streamAvatarUrl would resolve to
+                      // null and permanently blank out the logo this
+                      // denormalized snapshot already carries.
+                      stream: ChatService.isSystemChat(chat.user.id)
+                          ? const Stream<String?>.empty()
+                          : PartnerService.streamAvatarUrl(chat.user.id),
                       initialData: chat.user.avatarUrl.isEmpty ? null : chat.user.avatarUrl,
                       builder: (context, avatarSnapshot) {
                         return AppAvatar(

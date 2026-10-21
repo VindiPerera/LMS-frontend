@@ -66,6 +66,48 @@ class MediaService {
     );
   }
 
+  /// A recorded voice message (chat_detail_screen.dart's mic button) —
+  /// [extension] matches whatever format `record` actually wrote (see
+  /// _Composer._stopAndSend; AAC/.m4a on every platform this app ships).
+  static Future<String> uploadVoiceBytes({
+    required Uint8List bytes,
+    required String uid,
+    required String chatId,
+    String extension = 'm4a',
+  }) {
+    return _uploadToBackend(
+      bytes: bytes,
+      filename: '${_uuid.v4()}.$extension',
+      extension: extension,
+      contentType: MediaType('audio', extension == 'm4a' ? 'mp4' : extension),
+      uid: uid,
+      postId: chatId,
+      type: 'voice',
+    );
+  }
+
+  /// A generic file attachment (chat_detail_screen.dart's "+" > File
+  /// option) — unlike [uploadImageBytes]/[uploadVoiceBytes], the content
+  /// type can be anything the user picked, so it's passed in rather than
+  /// assumed.
+  static Future<String> uploadFileBytes({
+    required Uint8List bytes,
+    required String uid,
+    required String chatId,
+    required String filename,
+    required String extension,
+  }) {
+    return _uploadToBackend(
+      bytes: bytes,
+      filename: filename,
+      extension: extension,
+      contentType: MediaType('application', 'octet-stream'),
+      uid: uid,
+      postId: chatId,
+      type: 'file',
+    );
+  }
+
   static Future<String> _uploadToBackend({
     required Uint8List bytes,
     required String filename,

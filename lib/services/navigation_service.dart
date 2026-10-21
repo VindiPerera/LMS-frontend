@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../screens/friends/friend_profile_screen.dart';
+import '../screens/connect/partner_profile_screen.dart';
 import '../screens/hellotalk/chat_detail_screen.dart';
 import '../screens/moments/post_detail_screen.dart';
 import '../screens/voiceroom/open_voice_room.dart' as voice_room_nav;
@@ -47,19 +47,26 @@ class NavigationService {
     }
   }
 
-  /// Deep-links to [uid]'s profile — friend request/accept notifications by
-  /// default ([source] 'notification'), or a QR/link tap (deep_link_service
-  /// .dart passes 'link'). FriendProfileScreen loads the user itself, so no
-  /// fetch needed here.
-  static void openFriendProfile(String uid, {String source = 'notification'}) {
+  /// Deep-links to [uid]'s profile — a legacy friend-request/accept push
+  /// notification tap (see push_notification_service.dart; the app no
+  /// longer sends these, but an old one could still be tapped from the
+  /// system tray shortly after an update), or a QR/link tap
+  /// (deep_link_service.dart). PartnerProfileScreen needs a full AppUser, so
+  /// (unlike the old FriendProfileScreen, which loaded the user itself) this
+  /// fetches first — fire-and-forget from the notification/link tap handler,
+  /// same as [openChat].
+  static Future<void> openProfile(String uid) async {
     if (uid.isEmpty) return;
     final navigator = navigatorKey.currentState;
     if (navigator == null) return;
-    navigator.push(
-      MaterialPageRoute(
-        builder: (_) => FriendProfileScreen(friendId: uid, source: source),
-      ),
-    );
+    try {
+      final user = await PartnerService.fetchPartner(uid);
+      navigator.push(
+        MaterialPageRoute(builder: (_) => PartnerProfileScreen(initial: user)),
+      );
+    } catch (e) {
+      debugPrint('NavigationService.openProfile($uid) failed: $e');
+    }
   }
 
   /// Deep-links to voice room [roomId] — from a Voice Room invite

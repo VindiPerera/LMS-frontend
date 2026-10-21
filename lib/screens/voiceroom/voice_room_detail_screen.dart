@@ -173,35 +173,36 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
     super.initState();
     if (widget.room.id.isNotEmpty) {
       RoomParticipantService.join(
-        roomId: widget.room.id,
-        isHost: _isHost,
-        sessionId: _sessionId,
-      )
+            roomId: widget.room.id,
+            isHost: _isHost,
+            sessionId: _sessionId,
+          )
           // Audio needs the participant doc join() just wrote (the server
           // derives publish rights from it). connect() never throws.
           .then((_) => VoiceRoomAudioService.instance.connect(widget.room.id))
           .catchError((e) {
-        debugPrint('Failed to join room ${widget.room.id}: $e');
-        // A kickParticipant ban still within its 24h window — see
-        // RoomParticipantService.join's pre-check and firestore.rules'
-        // isBanned(), the actual enforcement this message is just fronting
-        // for. Distinct, specific copy (with the remaining time) rather
-        // than the generic "no access" case below.
-        if (e is RoomBanException) {
-          _bounceWithMessage(e.toString());
-          return;
-        }
-        // Every room this app creates today is public and joinable by any
-        // signed-in user, so firestore.rules should never actually reject
-        // this — but it still can for a room document that predates that
-        // (a restricted audience from before rooms went public-only) or one
-        // whose audience was otherwise revoked. Without this, the screen
-        // would otherwise just sit there looking joined while silently
-        // having no seat, no roster write, nothing.
-        final denied = e is FirebaseException && e.code == 'permission-denied';
-        if (!denied) return;
-        _bounceWithMessage("You don't have access to this room.");
-      });
+            debugPrint('Failed to join room ${widget.room.id}: $e');
+            // A kickParticipant ban still within its 24h window — see
+            // RoomParticipantService.join's pre-check and firestore.rules'
+            // isBanned(), the actual enforcement this message is just fronting
+            // for. Distinct, specific copy (with the remaining time) rather
+            // than the generic "no access" case below.
+            if (e is RoomBanException) {
+              _bounceWithMessage(e.toString());
+              return;
+            }
+            // Every room this app creates today is public and joinable by any
+            // signed-in user, so firestore.rules should never actually reject
+            // this — but it still can for a room document that predates that
+            // (a restricted audience from before rooms went public-only) or one
+            // whose audience was otherwise revoked. Without this, the screen
+            // would otherwise just sit there looking joined while silently
+            // having no seat, no roster write, nothing.
+            final denied =
+                e is FirebaseException && e.code == 'permission-denied';
+            if (!denied) return;
+            _bounceWithMessage("You don't have access to this room.");
+          });
       _roomSub = VoiceRoomService.streamRoom(widget.room.id).listen((room) {
         if (!mounted || _ending) return;
         if (room == null || !room.isActive) {
@@ -1915,219 +1916,262 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                         const SizedBox(height: 8),
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 12),
-                          child: GridView.builder(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            gridDelegate:
-                                const SliverGridDelegateWithFixedCrossAxisCount(
-                                  crossAxisCount: 4,
-                                  mainAxisSpacing: 8,
-                                  crossAxisSpacing: 4,
-                                  // Cells only need ~74px (56px avatar + 4px
-                                  // gap + ~14px name label) to avoid
-                                  // overflowing on narrow screens — 1.05 stays
-                                  // comfortably above that while trimming the
-                                  // extra headroom 0.85 used to leave, pulling
-                                  // the second row of seats upward to make room
-                                  // for the subtitles panel below.
-                                  childAspectRatio: 1.05,
-                                ),
-                            itemCount: seats.length,
-                            itemBuilder: (context, i) {
-                              final speaker = seats[i];
-                              return GestureDetector(
-                                onTap: speaker.isEmptySeat
-                                    ? () => _raiseHand(me)
-                                    : () => showRoomProfileSheet(
-                                        context,
-                                        speaker,
-                                        roomId: widget.room.id,
-                                        canModerate: me?.canModerate ?? false,
-                                        isHost: _isHost,
-                                      ),
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    speaker.isEmptySeat
-                                        ? Container(
-                                            width: 56,
-                                            height: 56,
-                                            decoration: BoxDecoration(
-                                              color: (me?.handRaised ?? false)
-                                                  ? const Color(
-                                                      0xFFE8A23C,
-                                                    ).withValues(alpha: 0.22)
-                                                  : Colors.white12,
-                                              shape: BoxShape.circle,
-                                              border: Border.all(
+                          // Rebuilds the grid on every LiveKit
+                          // ActiveSpeakersChangedEvent (see
+                          // VoiceRoomAudioService.speakingUids) so each
+                          // seat's speaking ring below tracks real voice
+                          // activity, not just mic-on/off state.
+                          child: ListenableBuilder(
+                            listenable: VoiceRoomAudioService.instance,
+                            builder: (context, _) => GridView.builder(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              gridDelegate:
+                                  const SliverGridDelegateWithFixedCrossAxisCount(
+                                    crossAxisCount: 4,
+                                    mainAxisSpacing: 8,
+                                    crossAxisSpacing: 4,
+                                    // Cells only need ~74px (56px avatar + 4px
+                                    // gap + ~14px name label) to avoid
+                                    // overflowing on narrow screens — 1.05 stays
+                                    // comfortably above that while trimming the
+                                    // extra headroom 0.85 used to leave, pulling
+                                    // the second row of seats upward to make room
+                                    // for the subtitles panel below.
+                                    childAspectRatio: 1.05,
+                                  ),
+                              itemCount: seats.length,
+                              itemBuilder: (context, i) {
+                                final speaker = seats[i];
+                                return GestureDetector(
+                                  onTap: speaker.isEmptySeat
+                                      ? () => _raiseHand(me)
+                                      : () => showRoomProfileSheet(
+                                          context,
+                                          speaker,
+                                          roomId: widget.room.id,
+                                          canModerate: me?.canModerate ?? false,
+                                          isHost: _isHost,
+                                        ),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      speaker.isEmptySeat
+                                          ? Container(
+                                              width: 56,
+                                              height: 56,
+                                              decoration: BoxDecoration(
+                                                color: (me?.handRaised ?? false)
+                                                    ? const Color(
+                                                        0xFFE8A23C,
+                                                      ).withValues(alpha: 0.22)
+                                                    : Colors.white12,
+                                                shape: BoxShape.circle,
+                                                border: Border.all(
+                                                  color:
+                                                      (me?.handRaised ?? false)
+                                                      ? const Color(0xFFE8A23C)
+                                                      : Colors.white38,
+                                                  width: 1,
+                                                ),
+                                              ),
+                                              // Amber once the signed-in user has
+                                              // raised their own hand — a plain
+                                              // "you're in the queue" indicator,
+                                              // not something every empty seat
+                                              // shows (only ever reflects the
+                                              // viewer's own state; the grid has
+                                              // no per-seat "who raised" concept).
+                                              child: Icon(
+                                                Icons.front_hand_rounded,
                                                 color: (me?.handRaised ?? false)
                                                     ? const Color(0xFFE8A23C)
                                                     : Colors.white38,
-                                                width: 1,
-                                              ),
-                                            ),
-                                            // Amber once the signed-in user has
-                                            // raised their own hand — a plain
-                                            // "you're in the queue" indicator,
-                                            // not something every empty seat
-                                            // shows (only ever reflects the
-                                            // viewer's own state; the grid has
-                                            // no per-seat "who raised" concept).
-                                            child: Icon(
-                                              Icons.front_hand_rounded,
-                                              color: (me?.handRaised ?? false)
-                                                  ? const Color(0xFFE8A23C)
-                                                  : Colors.white38,
-                                              size: 22,
-                                            ),
-                                          )
-                                        : Stack(
-                                            clipBehavior: Clip.none,
-                                            children: [
-                                              // While unmuted/speaking a red ring is
-                                              // drawn just OUTSIDE the avatar, so the
-                                              // photo keeps its size and nothing
-                                              // around it shifts. It comes first in
-                                              // the Stack (i.e. underneath) so the
-                                              // avatar's country-flag badge, which
-                                              // sits on the avatar's corner, always
-                                              // paints on top of it.
-                                              if (speaker.isSpeaking)
-                                                Positioned(
-                                                  left: -4,
-                                                  top: -4,
-                                                  right: -4,
-                                                  bottom: -4,
-                                                  child: IgnorePointer(
-                                                    child: Container(
-                                                      decoration: BoxDecoration(
-                                                        shape: BoxShape.circle,
-                                                        border: Border.all(
-                                                          color: const Color(
-                                                            0xFFFF3B47,
-                                                          ),
-                                                          width: 2.5,
-                                                        ),
-                                                        boxShadow: [
-                                                          BoxShadow(
-                                                            color:
-                                                                const Color(
-                                                                  0xFFFF3B47,
-                                                                ).withValues(
-                                                                  alpha: 0.45,
-                                                                ),
-                                                            blurRadius: 8,
-                                                          ),
-                                                        ],
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ),
-                                              AppAvatar(
-                                                seed: speaker.uid.isNotEmpty
-                                                    ? speaker.uid
-                                                    : '${speaker.name}$i',
-                                                size: 56,
-                                                showFlag: true,
-                                                flag: speaker.flag,
-                                                imageUrl: speaker.avatarUrl,
-                                              ),
-                                              // Muted badge — a small mic-off
-                                              // circle centered over the middle
-                                              // of the avatar, but only a
-                                              // fraction of its size — not the
-                                              // full-circle overlay this used
-                                              // to be (which hid the photo/
-                                              // initial entirely while muted),
-                                              // and not pinned to the edge
-                                              // either. Only shown when the
-                                              // seat is occupied AND the
-                                              // participant is muted.
-                                              if (!speaker.isSpeaking)
-                                                Positioned.fill(
-                                                  child: Center(
-                                                    child: Container(
-                                                      width: 28,
-                                                      height: 28,
-                                                      decoration: BoxDecoration(
-                                                        color: Colors.black
-                                                            .withValues(
-                                                              alpha: 0.4,
-                                                            ),
-                                                        shape: BoxShape.circle,
-                                                      ),
-                                                      child: const Icon(
-                                                        Icons.mic_off_rounded,
-                                                        color: Colors.white,
-                                                        size: 17,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ),
-                                              // When unmuted/speaking the red ring
-                                              // above is the sole visual indicator —
-                                              // no extra badge needed.
-                                            ],
-                                          ),
-                                    const SizedBox(height: 4),
-                                    // Name row — prefixed with a host/moderator
-                                    // role icon so rank is readable without
-                                    // blocking the profile picture.
-                                    if (speaker.isEmptySeat)
-                                      Text(
-                                        '${i + 1}',
-                                        style: const TextStyle(
-                                          color: Colors.white54,
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      )
-                                    else
-                                      Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        children: [
-                                          if (speaker.isHost)
-                                            const Padding(
-                                              padding: EdgeInsets.only(
-                                                right: 3,
-                                              ),
-                                              child: Icon(
-                                                Icons.star_rounded,
-                                                color: Color(0xFFE8A23C),
-                                                size: 11,
+                                                size: 22,
                                               ),
                                             )
-                                          else if (speaker.isModerator)
-                                            const Padding(
-                                              padding: EdgeInsets.only(
-                                                right: 3,
-                                              ),
-                                              child: Icon(
-                                                Icons.shield_rounded,
-                                                color: Color(0xFF7B68F4),
-                                                size: 11,
-                                              ),
+                                          : Stack(
+                                              clipBehavior: Clip.none,
+                                              children: [
+                                                // A soft pulsing glow blooms just
+                                                // outside the (always-static) unmuted
+                                                // ring below, but only while LiveKit's
+                                                // own voice-activity detection says this
+                                                // person is actually making sound right
+                                                // now (VoiceRoomAudioService.speakingUids
+                                                // — distinct from speaker.isSpeaking,
+                                                // which only reflects mic-on/off state
+                                                // and drives the ring itself). Sits
+                                                // underneath the ring in the Stack so it
+                                                // reads as emanating from behind it
+                                                // rather than competing with it.
+                                                Positioned(
+                                                  left: -8,
+                                                  top: -8,
+                                                  right: -8,
+                                                  bottom: -8,
+                                                  child: IgnorePointer(
+                                                    child: _TalkingGlow(
+                                                      key: ValueKey(
+                                                        'talk_${speaker.uid}',
+                                                      ),
+                                                      talking:
+                                                          VoiceRoomAudioService
+                                                              .instance
+                                                              .speakingUids
+                                                              .contains(
+                                                                speaker.uid,
+                                                              ),
+                                                    ),
+                                                  ),
+                                                ),
+                                                // While unmuted a plain, static red
+                                                // ring is drawn just OUTSIDE the avatar
+                                                // — this is a mic-state indicator (see
+                                                // speaker.isSpeaking), not a live
+                                                // "talking right now" signal; that's
+                                                // the glow above.
+                                                if (speaker.isSpeaking)
+                                                  Positioned(
+                                                    left: -4,
+                                                    top: -4,
+                                                    right: -4,
+                                                    bottom: -4,
+                                                    child: IgnorePointer(
+                                                      child: Container(
+                                                        decoration: BoxDecoration(
+                                                          shape:
+                                                              BoxShape.circle,
+                                                          border: Border.all(
+                                                            color: const Color(
+                                                              0xFFFF3B47,
+                                                            ),
+                                                            width: 2.5,
+                                                          ),
+                                                          boxShadow: [
+                                                            BoxShadow(
+                                                              color:
+                                                                  const Color(
+                                                                    0xFFFF3B47,
+                                                                  ).withValues(
+                                                                    alpha: 0.45,
+                                                                  ),
+                                                              blurRadius: 8,
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                AppAvatar(
+                                                  seed: speaker.uid.isNotEmpty
+                                                      ? speaker.uid
+                                                      : '${speaker.name}$i',
+                                                  size: 56,
+                                                  showFlag: true,
+                                                  flag: speaker.flag,
+                                                  imageUrl: speaker.avatarUrl,
+                                                ),
+                                                // Muted badge — a small mic-off
+                                                // circle centered over the middle
+                                                // of the avatar, but only a
+                                                // fraction of its size — not the
+                                                // full-circle overlay this used
+                                                // to be (which hid the photo/
+                                                // initial entirely while muted),
+                                                // and not pinned to the edge
+                                                // either. Only shown when the
+                                                // seat is occupied AND the
+                                                // participant is muted.
+                                                if (!speaker.isSpeaking)
+                                                  Positioned.fill(
+                                                    child: Center(
+                                                      child: Container(
+                                                        width: 28,
+                                                        height: 28,
+                                                        decoration:
+                                                            BoxDecoration(
+                                                              color: Colors
+                                                                  .black
+                                                                  .withValues(
+                                                                    alpha: 0.4,
+                                                                  ),
+                                                              shape: BoxShape
+                                                                  .circle,
+                                                            ),
+                                                        child: const Icon(
+                                                          Icons.mic_off_rounded,
+                                                          color: Colors.white,
+                                                          size: 17,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                // When unmuted/speaking the red ring
+                                                // above is the sole visual indicator —
+                                                // no extra badge needed.
+                                              ],
                                             ),
-                                          Flexible(
-                                            child: Text(
-                                              speaker.name,
-                                              style: const TextStyle(
-                                                color: Colors.white54,
-                                                fontSize: 12,
-                                                fontWeight: FontWeight.w600,
-                                              ),
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
+                                      const SizedBox(height: 4),
+                                      // Name row — prefixed with a host/moderator
+                                      // role icon so rank is readable without
+                                      // blocking the profile picture.
+                                      if (speaker.isEmptySeat)
+                                        Text(
+                                          '${i + 1}',
+                                          style: const TextStyle(
+                                            color: Colors.white54,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
                                           ),
-                                        ],
-                                      ),
-                                  ],
-                                ),
-                              );
-                            },
+                                        )
+                                      else
+                                        Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
+                                          children: [
+                                            if (speaker.isHost)
+                                              const Padding(
+                                                padding: EdgeInsets.only(
+                                                  right: 3,
+                                                ),
+                                                child: Icon(
+                                                  Icons.star_rounded,
+                                                  color: Color(0xFFE8A23C),
+                                                  size: 11,
+                                                ),
+                                              )
+                                            else if (speaker.isModerator)
+                                              const Padding(
+                                                padding: EdgeInsets.only(
+                                                  right: 3,
+                                                ),
+                                                child: Icon(
+                                                  Icons.shield_rounded,
+                                                  color: Color(0xFF7B68F4),
+                                                  size: 11,
+                                                ),
+                                              ),
+                                            Flexible(
+                                              child: Text(
+                                                speaker.name,
+                                                style: const TextStyle(
+                                                  color: Colors.white54,
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
                           ),
                         ),
                         const SizedBox(height: 6),
@@ -3156,6 +3200,86 @@ class _Composer extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// The speaker grid's "this person is talking right now" effect — a soft,
+/// looping glow (no border of its own, purely a pulsing [BoxShadow]) that
+/// blooms just outside the avatar's always-static unmuted ring, separate
+/// from it so the two never get confused: the ring means "mic is on," this
+/// glow means "and LiveKit can actually hear them right now." Owns its own
+/// [AnimationController] and only runs the ticker while [talking] is
+/// actually true, so the seven other (usually silent) seats in the grid
+/// cost nothing. See its one call site in _buildSeats' speaker grid for what
+/// [talking] is computed from — real LiveKit voice-activity detection
+/// (VoiceRoomAudioService.speakingUids).
+class _TalkingGlow extends StatefulWidget {
+  final bool talking;
+  const _TalkingGlow({super.key, required this.talking});
+
+  @override
+  State<_TalkingGlow> createState() => _TalkingGlowState();
+}
+
+class _TalkingGlowState extends State<_TalkingGlow>
+    with SingleTickerProviderStateMixin {
+  late final _pulse = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.talking) _pulse.repeat(reverse: true);
+  }
+
+  @override
+  void didUpdateWidget(covariant _TalkingGlow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.talking == oldWidget.talking) return;
+    if (widget.talking) {
+      _pulse.repeat(reverse: true);
+    } else {
+      _pulse.stop();
+    }
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedOpacity(
+      // A quick fade rather than a hard cut — LiveKit's active-speaker
+      // updates land a few times a second while someone talks, so a flash
+      // transition on every one of them would read as flickering rather
+      // than a single continuous "speaking" state.
+      duration: const Duration(milliseconds: 150),
+      opacity: widget.talking ? 1 : 0,
+      child: AnimatedBuilder(
+        animation: _pulse,
+        builder: (context, _) {
+          final t = _pulse.value;
+          return Container(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(
+                    0xFFFF3B47,
+                  ).withValues(alpha: 0.35 + t * 0.15),
+                  blurRadius: 10 + t * 8,
+                ),
+              ],
+            ),
+          );
+        },
       ),
     );
   }

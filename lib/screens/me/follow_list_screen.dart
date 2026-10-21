@@ -4,7 +4,8 @@ import '../../models/user.dart';
 import '../../services/follow_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
-import '../friends/friend_profile_screen.dart';
+import '../../widgets/follow_button.dart';
+import '../connect/partner_profile_screen.dart';
 
 /// Who [uid] follows / is followed by — reached by tapping the Following or
 /// Followers count on me_screen.dart's (or, via partner_profile_screen.dart,
@@ -136,53 +137,11 @@ class _FollowRow extends StatelessWidget {
         '@${user.handle}',
         style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
       ),
-      trailing: _isSelf ? null : _FollowButton(user: user),
+      trailing: _isSelf ? null : FollowButton(user: user),
       onTap: () {
         Navigator.of(context).push(
           MaterialPageRoute(
-            builder: (_) => FriendProfileScreen(friendId: user.id, source: 'search'),
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _FollowButton extends StatelessWidget {
-  final AppUser user;
-  const _FollowButton({required this.user});
-
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<bool>(
-      stream: FollowService.streamIsFollowing(user.id),
-      initialData: false,
-      builder: (context, snapshot) {
-        final isFollowing = snapshot.data ?? false;
-        return SizedBox(
-          height: 32,
-          child: OutlinedButton(
-            onPressed: () {
-              if (isFollowing) {
-                FollowService.unfollow(user.id);
-              } else {
-                FollowService.follow(user);
-              }
-            },
-            style: OutlinedButton.styleFrom(
-              foregroundColor: isFollowing
-                  ? AppColors.textSecondary
-                  : AppColors.primaryPurple,
-              side: BorderSide(
-                color: isFollowing ? AppColors.divider : AppColors.primaryPurple,
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            ),
-            child: Text(
-              isFollowing ? 'Following' : 'Follow',
-              style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
-            ),
+            builder: (_) => PartnerProfileScreen(initial: user),
           ),
         );
       },

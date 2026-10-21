@@ -36,11 +36,13 @@ class NotificationApiService {
   }
 
   /// Sends a push notification to [recipientUid]. [data] should include at
-  /// least a `type` key (`chat` / `friendRequest` / `friendAccept` /
-  /// `voiceroom` / `comment` / `reshare` / `mention`) — the backend uses it
-  /// to route to the matching Android notification channel, and the
-  /// client's push_notification_service.dart uses it again on tap to
-  /// decide where to navigate.
+  /// least a `type` key (`chat` / `voiceroom` / `comment` / `reshare` /
+  /// `mention`) — the backend uses it to route to the matching Android
+  /// notification channel, and the client's push_notification_service.dart
+  /// uses it again on tap to decide where to navigate. (`friendRequest` /
+  /// `friendAccept` are no longer sent — the app has no friend-request
+  /// feature anymore, just Follow — but push_notification_service.dart
+  /// still routes them if an old one is ever tapped.)
   static Future<void> sendPush({
     required String recipientUid,
     required String title,
