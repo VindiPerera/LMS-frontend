@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 
 import '../../models/moment.dart';
 import '../../services/auth_service.dart';
-import '../../services/friend_service.dart';
 import '../../services/moment_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
@@ -33,7 +32,6 @@ class _MomentsScreenState extends State<MomentsScreen> {
   bool _hasUserSharedFirstMoment = false;
 
   final Set<String> _hiddenPostIds = {}; // reported this session
-  Set<String> _blockedIds = {};
 
   // Set on any failure loading/streaming the feed (e.g. a missing Firestore
   // index or a permission-denied) so the UI can show a retry state instead
@@ -42,15 +40,11 @@ class _MomentsScreenState extends State<MomentsScreen> {
 
   final _scrollController = ScrollController();
   StreamSubscription<List<Moment>>? _liveSub;
-  StreamSubscription<Set<String>>? _blockedSub;
 
   @override
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
-    _blockedSub = FriendService.instance.streamBlockedIds().listen((ids) {
-      if (mounted) setState(() => _blockedIds = ids);
-    });
     _loadFirstPage();
     _subscribeLiveWindow();
     _checkUserMoments();
@@ -75,7 +69,6 @@ class _MomentsScreenState extends State<MomentsScreen> {
   void dispose() {
     _scrollController.dispose();
     _liveSub?.cancel();
-    _blockedSub?.cancel();
     super.dispose();
   }
 
@@ -180,17 +173,14 @@ class _MomentsScreenState extends State<MomentsScreen> {
     await _loadFirstPage();
   }
 
-  // Visibility (public/friends/onlyMe) is already enforced server-side via
+  // Visibility (public/followers/onlyMe) is already enforced server-side via
   // each moment's `audience` field (see MomentService/firestore.rules) —
   // every post reaching `_posts` is one this user is allowed to see. This
-  // only needs to cover the two purely-client-side, instantly-toggleable
-  // concerns: this session's own reports, and live block status.
+  // only needs to cover this session's own reports — a purely client-side,
+  // instantly-toggleable concern (blocking isn't implemented anywhere in
+  // the app yet, so there's nothing else to filter here).
   List<Moment> get _visiblePosts {
-    return _posts.where((moment) {
-      if (_hiddenPostIds.contains(moment.id)) return false;
-      if (_blockedIds.contains(moment.user.id)) return false;
-      return true;
-    }).toList();
+    return _posts.where((moment) => !_hiddenPostIds.contains(moment.id)).toList();
   }
 
   Future<void> _openCreateMoment({String? initialText, String? initialPicker}) async {

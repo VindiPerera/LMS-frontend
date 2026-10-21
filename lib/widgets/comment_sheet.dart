@@ -6,9 +6,10 @@ import 'package:flutter/services.dart';
 
 import '../models/comment_model.dart';
 import '../models/moment.dart';
-import '../screens/friends/friend_profile_screen.dart';
+import '../screens/connect/partner_profile_screen.dart';
 import '../services/auth_service.dart';
 import '../services/comment_service.dart';
+import '../services/partner_service.dart';
 import '../theme/app_colors.dart';
 import 'app_avatar.dart';
 import 'report_sheet.dart';
@@ -150,9 +151,18 @@ class _CommentSheetState extends State<CommentSheet> {
   Future<void> _openMention(String handle) async {
     final uid = await CommentService.findUserIdByHandle(handle);
     if (!mounted || uid == null) return;
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => FriendProfileScreen(friendId: uid, source: 'moment')),
-    );
+    try {
+      final user = await PartnerService.fetchPartner(uid);
+      if (!mounted) return;
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => PartnerProfileScreen(initial: user)),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Couldn't load that profile.")),
+      );
+    }
   }
 
   Future<void> _handleLongPress(CommentModel comment) async {

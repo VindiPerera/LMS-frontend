@@ -3,13 +3,18 @@ import 'package:flutter/material.dart';
 import '../models/moment.dart';
 import '../theme/app_colors.dart';
 
+// MomentVisibility.friends' storage value stays 'friends' (existing posts
+// are already stored that way — see MomentService._audienceFor's doc
+// comment), but the app has no "friends" relationship anymore, just Follow —
+// so this reads as "Followers" here, the only place that enum value is ever
+// shown to a user.
 const List<(MomentVisibility, IconData, String)> _kVisibilityOptions = [
   (MomentVisibility.public, Icons.public_rounded, 'Public'),
-  (MomentVisibility.friends, Icons.people_rounded, 'Friends'),
+  (MomentVisibility.friends, Icons.people_rounded, 'Followers'),
   (MomentVisibility.onlyMe, Icons.lock_outline_rounded, 'Only me'),
 ];
 
-/// Segmented Public / Friends / Only me picker, shared by
+/// Segmented Public / Followers / Only me picker, shared by
 /// create_moment_screen.dart (new post visibility) and reshare_sheet.dart
 /// (the reshare's own visibility).
 class VisibilitySelector extends StatelessWidget {

@@ -3,8 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../services/friend_link_service.dart';
+import '../../services/partner_service.dart';
 import '../../theme/app_colors.dart';
-import 'friend_profile_screen.dart';
+import '../connect/partner_profile_screen.dart';
 
 class ScanQRScreen extends StatefulWidget {
   const ScanQRScreen({super.key});
@@ -70,14 +71,26 @@ class _ScanQRScreenState extends State<ScanQRScreen> {
 
     setState(() => _hasScanned = true);
 
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(
-        builder: (_) => FriendProfileScreen(
-          friendId: resolved.uid,
-          source: 'qr',
-        ),
-      ),
-    );
+    // PartnerProfileScreen needs a full AppUser, not just the scanned uid —
+    // fetch it before navigating (still under _resolving's spinner) rather
+    // than passing a blank placeholder and letting the profile screen's own
+    // background refresh fill it in a beat later. A scanned code can point
+    // at a deleted/corrupted/foreign account, so a real failure here needs
+    // a real error — not a silently blank profile.
+    try {
+      final user = await PartnerService.fetchPartner(resolved.uid);
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => PartnerProfileScreen(initial: user)),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _resolving = false;
+        _hasScanned = false;
+      });
+      _showSnackBar("Couldn't load that profile.");
+    }
   }
 
   Future<void> _pickImageFromGallery() async {

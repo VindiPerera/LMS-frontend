@@ -99,6 +99,19 @@ dependencies:
   livekit_client: ^2.3.0
   latlong2: ^0.10.1
 
+  # 1:1 chat voice messages (chat_detail_screen.dart's composer) and
+  # generic file attachments — record captures the mic to a file,
+  # audioplayers plays a sent voice note back, file_picker backs the "+"
+  # button's "File" option (separate from image_picker's "Photo" option,
+  # already a dependency above).
+  record: ^7.1.2
+  audioplayers: ^6.8.1
+  file_picker: ^11.0.3
+  # Where `record` writes the in-progress recording — the device's own
+  # temp/cache dir, not Firebase Storage (that's only where it ends up
+  # after MediaService.uploadVoiceBytes).
+  path_provider: ^2.1.6
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
