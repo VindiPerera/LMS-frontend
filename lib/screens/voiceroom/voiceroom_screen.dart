@@ -62,6 +62,11 @@ class _VoiceroomScreenState extends State<VoiceroomScreen>
   void _openCreateRoomSheet() {
     final titleController = TextEditingController();
     final tagController = TextEditingController();
+    // 'EN'/'KO' — matches VoiceRoom.category and _filteredRooms' matching
+    // (see that method's doc comment) so a room created here lands in the
+    // right All/English/Korean tab immediately, not just by title/tag
+    // text happening to mention the language.
+    String selectedCategory = 'EN';
 
     // This app only ever creates public rooms — listed on Voice for anyone
     // to join — so the sheet no longer offers a Private option at all
@@ -74,113 +79,140 @@ class _VoiceroomScreenState extends State<VoiceroomScreen>
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) {
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom + 16,
-            left: 20,
-            right: 20,
-            top: 20,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+                left: 20,
+                right: 20,
+                top: 20,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Text(
-                    'Create a VoiceRoom',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 17,
+                  Row(
+                    children: [
+                      const Text(
+                        'Create a VoiceRoom',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 17,
+                        ),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded),
+                        onPressed: () => Navigator.of(context).pop(),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: titleController,
+                    autofocus: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Room Topic / Title',
+                      hintText: 'English Practice',
+                      border: OutlineInputBorder(),
                     ),
                   ),
-                  const Spacer(),
-                  IconButton(
-                    icon: const Icon(Icons.close_rounded),
-                    onPressed: () => Navigator.of(context).pop(),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: tagController,
+                    decoration: const InputDecoration(
+                      labelText: 'Tag (Optional)',
+                      hintText: 'Beginner Level English',
+                      border: OutlineInputBorder(),
+                    ),
                   ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              TextField(
-                controller: titleController,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  labelText: 'Room Topic / Title',
-                  hintText: 'English Practice',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: tagController,
-                decoration: const InputDecoration(
-                  labelText: 'Tag (Optional)',
-                  hintText: 'Beginner Level English',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 8),
-              const Row(
-                children: [
-                  Icon(Icons.public_rounded, size: 15, color: Colors.black45),
-                  SizedBox(width: 6),
-                  Text(
-                    'Listed on Voice for anyone to join',
-                    style: TextStyle(fontSize: 12.5, color: Colors.black45),
+                  const SizedBox(height: 14),
+                  const Text(
+                    'Room language',
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Colors.black54),
                   ),
-                ],
-              ),
-              const SizedBox(height: 18),
-              ElevatedButton(
-                onPressed: () async {
-                  final title = titleController.text.trim();
-                  if (title.isEmpty) return;
-                  final tag = tagController.text.trim().isEmpty
-                      ? 'General'
-                      : tagController.text.trim();
-                  final sheetContext = context;
-                  try {
-                    final newRoom = await VoiceRoomService.createRoom(
-                      title: title,
-                      tag: tag,
-                      category: 'EN',
-                    );
-                    if (!sheetContext.mounted) return;
-                    Navigator.of(sheetContext).pop();
-                    Navigator.of(sheetContext).push(
-                      MaterialPageRoute(
-                        builder: (_) => VoiceRoomDetailScreen(room: newRoom, justCreated: true),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      _CategoryChip(
+                        label: 'English',
+                        flag: '🇺🇸',
+                        selected: selectedCategory == 'EN',
+                        onTap: () => setSheetState(() => selectedCategory = 'EN'),
                       ),
-                    );
-                  } catch (e) {
-                    // Deliberately NOT falling back to a local-only room
-                    // here — a room nobody else can ever see (it was never
-                    // written to Firestore) is worse than a clear error,
-                    // since it looks like it worked while silently not
-                    // showing up anywhere else in the app (profile, Chat's
-                    // "you're hosting" banner, etc).
-                    if (!sheetContext.mounted) return;
-                    ScaffoldMessenger.of(sheetContext).showSnackBar(
-                      SnackBar(content: Text('Could not start room: ${e.toString().replaceFirst('Exception: ', '')}')),
-                    );
-                  }
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primaryPurple,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
+                      const SizedBox(width: 10),
+                      _CategoryChip(
+                        label: 'Korean',
+                        flag: '🇰🇷',
+                        selected: selectedCategory == 'KO',
+                        onTap: () => setSheetState(() => selectedCategory = 'KO'),
+                      ),
+                    ],
                   ),
-                ),
-                child: const Text(
-                  'Start Room Now',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
+                  const SizedBox(height: 14),
+                  const Row(
+                    children: [
+                      Icon(Icons.public_rounded, size: 15, color: Colors.black45),
+                      SizedBox(width: 6),
+                      Text(
+                        'Listed on Voice for anyone to join',
+                        style: TextStyle(fontSize: 12.5, color: Colors.black45),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+                  ElevatedButton(
+                    onPressed: () async {
+                      final title = titleController.text.trim();
+                      if (title.isEmpty) return;
+                      final tag = tagController.text.trim().isEmpty
+                          ? 'General'
+                          : tagController.text.trim();
+                      final sheetContext = context;
+                      try {
+                        final newRoom = await VoiceRoomService.createRoom(
+                          title: title,
+                          tag: tag,
+                          category: selectedCategory,
+                        );
+                        if (!sheetContext.mounted) return;
+                        Navigator.of(sheetContext).pop();
+                        Navigator.of(sheetContext).push(
+                          MaterialPageRoute(
+                            builder: (_) => VoiceRoomDetailScreen(room: newRoom, justCreated: true),
+                          ),
+                        );
+                      } catch (e) {
+                        // Deliberately NOT falling back to a local-only room
+                        // here — a room nobody else can ever see (it was never
+                        // written to Firestore) is worse than a clear error,
+                        // since it looks like it worked while silently not
+                        // showing up anywhere else in the app (profile, Chat's
+                        // "you're hosting" banner, etc).
+                        if (!sheetContext.mounted) return;
+                        ScaffoldMessenger.of(sheetContext).showSnackBar(
+                          SnackBar(content: Text('Could not start room: ${e.toString().replaceFirst('Exception: ', '')}')),
+                        );
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primaryPurple,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                    ),
+                    child: const Text(
+                      'Start Room Now',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            );
+          },
         );
       },
     );
@@ -371,6 +403,58 @@ class _VoiceroomScreenState extends State<VoiceroomScreen>
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+/// English/Korean picker in the create-room sheet — plain chips (not
+/// VisibilitySelector, which is Moments-specific) since there are only two
+/// options here and no "public/followers/only me" semantics to share.
+class _CategoryChip extends StatelessWidget {
+  final String label;
+  final String flag;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _CategoryChip({
+    required this.label,
+    required this.flag,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: selected ? AppColors.primaryPurple.withValues(alpha: 0.12) : Colors.grey.shade100,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected ? AppColors.primaryPurple : Colors.transparent,
+              width: 1.4,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(flag, style: const TextStyle(fontSize: 16)),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  color: selected ? AppColors.primaryPurple : Colors.black54,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

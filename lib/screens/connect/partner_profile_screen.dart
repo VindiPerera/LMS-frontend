@@ -5,18 +5,22 @@ import 'package:flutter/services.dart';
 import '../../models/moment.dart';
 import '../../models/user.dart';
 import '../../models/voiceroom.dart';
+import '../../services/block_service.dart';
+import '../../services/chat_service.dart';
 import '../../services/follow_service.dart';
 import '../../services/moment_service.dart';
 import '../../services/partner_service.dart';
-import '../../services/profile_like_service.dart';
 import '../../services/room_participant_service.dart';
 import '../../services/teacher_service.dart';
+import '../../services/visitor_service.dart';
 import '../../theme/app_colors.dart';
 import '../../utils/location_helper.dart';
+import '../../widgets/achievements_card.dart';
 import '../../widgets/app_avatar.dart';
 import '../../widgets/moment_card.dart';
 import '../../widgets/vip_badge.dart';
 import '../../widgets/profile_map_header.dart';
+import '../../widgets/share_profile_sheet.dart';
 import '../hellotalk/chat_detail_screen.dart';
 import '../me/follow_list_screen.dart';
 import '../voiceroom/open_voice_room.dart';
@@ -42,17 +46,27 @@ class PartnerProfileScreen extends StatefulWidget {
 
 class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
   late AppUser _user;
-  int _likesCount = 0;
-  bool _isLiked = false;
-  StreamSubscription<bool>? _likeSub;
-  StreamSubscription<int>? _likeCountSub;
   bool _isFollowing = false;
   StreamSubscription<bool>? _followSub;
+  bool _isBlocked = false;
+  StreamSubscription<bool>? _blockSub;
+  // Unlike widget.initial.isOnline (a snapshot from wherever this screen was
+  // opened from — a chat row, a search result, ...), this stays live for as
+  // long as the profile is open, same reasoning as chat_detail_screen.dart's
+  // own header.
+  bool _isOnline = false;
+  StreamSubscription<bool>? _onlineSub;
   int _selectedTab = 0; // 0: About Me, 1: Moments, 2: Achievements
   // Created once (not in build) so the live room listeners aren't torn down
   // and re-attached on every rebuild.
   late final Stream<VoiceRoom?> _userRoomStream =
       RoomParticipantService.streamRoomUserIsIn(widget.initial.id);
+  // Shared by the "Moments N" tab label and the Moments tab's own content —
+  // one live listener instead of each independently re-querying the same
+  // thing.
+  late final Stream<List<Moment>> _momentsStream = widget.initial.id.isNotEmpty
+      ? MomentService.streamUserMoments(userId: widget.initial.id)
+      : const Stream.empty();
 
   @override
   void initState() {
@@ -62,19 +76,21 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
     _followSub = FollowService.streamIsFollowing(_user.id).listen((following) {
       if (mounted) setState(() => _isFollowing = following);
     });
-    _likeSub = ProfileLikeService.streamIsLiked(_user.id).listen((liked) {
-      if (mounted) setState(() => _isLiked = liked);
+    _blockSub = BlockService.streamIsBlocked(_user.id).listen((blocked) {
+      if (mounted) setState(() => _isBlocked = blocked);
     });
-    _likeCountSub = ProfileLikeService.streamLikeCount(_user.id).listen((count) {
-      if (mounted) setState(() => _likesCount = count);
+    _onlineSub = PartnerService.streamIsOnline(_user.id).listen((online) {
+      if (mounted) setState(() => _isOnline = online);
     });
+    // ignore: discarded_futures
+    VisitorService.recordVisit(_user.id);
   }
 
   @override
   void dispose() {
     _followSub?.cancel();
-    _likeSub?.cancel();
-    _likeCountSub?.cancel();
+    _blockSub?.cancel();
+    _onlineSub?.cancel();
     super.dispose();
   }
 
@@ -84,32 +100,6 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
       final fresh = await PartnerService.fetchPartner(_user.id);
       if (mounted) setState(() => _user = fresh);
     } catch (_) {}
-  }
-
-  Future<void> _toggleLike() async {
-    HapticFeedback.lightImpact();
-    final wasLiked = _isLiked;
-    setState(() {
-      _isLiked = !wasLiked;
-      _likesCount += _isLiked ? 1 : -1; // optimistic
-    });
-
-    try {
-      if (wasLiked) {
-        await ProfileLikeService.unlike(_user.id);
-      } else {
-        await ProfileLikeService.like(_user.id);
-      }
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _isLiked = wasLiked; // revert
-        _likesCount += wasLiked ? 1 : -1;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not update like. Try again.')),
-      );
-    }
   }
 
   Future<void> _toggleFollow() async {
@@ -140,6 +130,59 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
         duration: const Duration(seconds: 1),
       ),
     );
+  }
+
+  Future<void> _toggleBlock() async {
+    final willBlock = !_isBlocked;
+    if (willBlock) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('Block ${_user.name}?'),
+          content: Text(
+            "You won't see each other's Moments anymore, and you'll stop following each other. You can unblock them anytime.",
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Block', style: TextStyle(color: AppColors.badgeRed)),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+    }
+
+    try {
+      if (willBlock) {
+        await BlockService.blockUser(_user.id);
+      } else {
+        await BlockService.unblockUser(_user.id);
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(willBlock ? 'Blocked ${_user.name}' : 'Unblocked ${_user.name}')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Couldn't ${willBlock ? 'block' : 'unblock'} ${_user.name}: $e")),
+      );
+    }
+  }
+
+  /// "Joined Xd" — computed fresh from the real createdAt every time this
+  /// renders (not cached/stored anywhere), so it keeps advancing day by day
+  /// on its own rather than being frozen at whatever it showed when first
+  /// built. Null createdAt (an account from before this field existed, or a
+  /// still-unrefreshed widget.initial snapshot) reads as "New" rather than
+  /// a wrong/fabricated day count.
+  String _joinedLabel() {
+    final createdAt = _user.createdAt;
+    if (createdAt == null) return 'New';
+    final days = DateTime.now().difference(createdAt).inDays;
+    return days <= 0 ? 'Today' : '${days}d';
   }
 
   void _copyHandle() {
@@ -179,84 +222,44 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
                   onMore: _showMoreOptions,
                 ),
 
-                // 2. Avatar & Thumbs-Up Like Row
+                // 2. Avatar overlapping the map banner, with its country
+                // flag badge.
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 18),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      // Avatar overlapping map border with Country Flag Badge
-                      Transform.translate(
-                        offset: const Offset(0, -32),
-                        child: Stack(
-                          clipBehavior: Clip.none,
-                          children: [
-                            Container(
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                border: Border.all(color: Colors.white, width: 3.5),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.12),
-                                    blurRadius: 10,
-                                    offset: const Offset(0, 4),
-                                  ),
-                                ],
+                  child: Transform.translate(
+                    offset: const Offset(0, -32),
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Container(
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 3.5),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.12),
+                                blurRadius: 10,
+                                offset: const Offset(0, 4),
                               ),
-                              child: AppAvatar.forUser(
-                                user,
-                                size: 84,
-                                showFlag: false,
-                                showOnlineDot: false,
-                              ),
-                            ),
-                            // Flag badge at bottom-left of avatar
-                            Positioned(
-                              bottom: 2,
-                              left: 2,
-                              child: CountryFlagBadge(
-                                flag: user.countryFlag.isNotEmpty ? user.countryFlag : location.flag,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      // Thumbs-up / Like Button
-                      Transform.translate(
-                        offset: const Offset(0, -12),
-                        child: GestureDetector(
-                          onTap: _toggleLike,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-                            decoration: BoxDecoration(
-                              color: _isLiked ? const Color(0xFFFFE8E8) : const Color(0xFFF3F4F6),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  _isLiked ? Icons.thumb_up_rounded : Icons.thumb_up_outlined,
-                                  size: 16,
-                                  color: _isLiked ? const Color(0xFFE53935) : AppColors.textSecondary,
-                                ),
-                                const SizedBox(width: 6),
-                                Text(
-                                  '$_likesCount',
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w700,
-                                    color: _isLiked ? const Color(0xFFE53935) : AppColors.textSecondary,
-                                  ),
-                                ),
-                              ],
-                            ),
+                            ],
+                          ),
+                          child: AppAvatar.forUser(
+                            user,
+                            size: 84,
+                            showFlag: false,
+                            showOnlineDot: false,
                           ),
                         ),
-                      ),
-                    ],
+                        // Flag badge at bottom-left of avatar
+                        Positioned(
+                          bottom: 2,
+                          left: 2,
+                          child: CountryFlagBadge(
+                            flag: user.countryFlag.isNotEmpty ? user.countryFlag : location.flag,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
 
@@ -291,29 +294,35 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
                               const VipBadge(),
                             ],
                             const Spacer(),
-                            // Active status dot & label
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Container(
-                                  width: 7,
-                                  height: 7,
-                                  decoration: const BoxDecoration(
-                                    color: AppColors.online,
-                                    shape: BoxShape.circle,
+                            // Active status dot & label — only while
+                            // actually online right now (see _onlineSub);
+                            // this used to render unconditionally,
+                            // regardless of real status.
+                            if (_isOnline)
+                              const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  SizedBox(
+                                    width: 7,
+                                    height: 7,
+                                    child: DecoratedBox(
+                                      decoration: BoxDecoration(
+                                        color: AppColors.online,
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(width: 5),
-                                Text(
-                                  user.activeLabel.isNotEmpty ? user.activeLabel : 'Active now',
-                                  style: const TextStyle(
-                                    fontSize: 12.5,
-                                    color: AppColors.textSecondary,
-                                    fontWeight: FontWeight.w500,
+                                  SizedBox(width: 5),
+                                  Text(
+                                    'Active now',
+                                    style: TextStyle(
+                                      fontSize: 12.5,
+                                      color: AppColors.textSecondary,
+                                      fontWeight: FontWeight.w500,
+                                    ),
                                   ),
-                                ),
-                              ],
-                            ),
+                                ],
+                              ),
                           ],
                         ),
 
@@ -539,7 +548,7 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
           ),
         ),
         const SizedBox(width: 18),
-        _statItem('10d', 'Joined'),
+        _statItem(_joinedLabel(), 'Joined'),
       ],
     );
   }
@@ -720,7 +729,13 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
       children: [
         _pillTab(0, 'About Me'),
         const SizedBox(width: 10),
-        _pillTab(1, 'Moments 0'),
+        StreamBuilder<List<Moment>>(
+          stream: _momentsStream,
+          builder: (context, snapshot) {
+            final count = snapshot.data?.length;
+            return _pillTab(1, count == null ? 'Moments' : 'Moments $count');
+          },
+        ),
         const SizedBox(width: 10),
         _pillTab(2, 'Achievements'),
       ],
@@ -751,11 +766,10 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
 
   Widget _buildTabContent(AppUser user, LocationInfo location) {
     if (_selectedTab == 1) {
-      // Moments tab
+      // Moments tab — same stream the "Moments N" tab label above counts
+      // from, not a second independent query for the same data.
       return StreamBuilder<List<Moment>>(
-        stream: user.id.isNotEmpty
-            ? MomentService.streamUserMoments(userId: user.id)
-            : const Stream.empty(),
+        stream: _momentsStream,
         builder: (context, snapshot) {
           final moments = snapshot.data ?? const [];
           if (moments.isEmpty) {
@@ -782,23 +796,7 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
     }
 
     if (_selectedTab == 2) {
-      // Achievements tab
-      return Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.surfaceLight,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Column(
-          children: [
-            _achievementTile(Icons.emoji_events_rounded, 'First Conversation', 'Completed first language exchange', true),
-            const Divider(height: 16),
-            _achievementTile(Icons.local_fire_department_rounded, '7-Day Streak', 'Practiced daily language learning', true),
-            const Divider(height: 16),
-            _achievementTile(Icons.school_rounded, 'Fluent Explorer', 'Joined 10+ voice study rooms', true),
-          ],
-        ),
-      );
+      return AchievementsCard(user: user);
     }
 
     // Default "About Me" tab
@@ -815,9 +813,9 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
             children: [
               const Icon(Icons.calendar_today_rounded, size: 16, color: AppColors.textSecondary),
               const SizedBox(width: 8),
-              const Text(
-                '10d Joined',
-                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
+              Text(
+                '${_joinedLabel()} Joined',
+                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
               ),
               const SizedBox(width: 24),
               const Icon(Icons.menu_book_rounded, size: 16, color: AppColors.textSecondary),
@@ -878,32 +876,6 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
           ],
         ],
       ),
-    );
-  }
-
-  Widget _achievementTile(IconData icon, String title, String subtitle, bool unlocked) {
-    return Row(
-      children: [
-        Container(
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            color: unlocked ? const Color(0xFFFFD54F).withValues(alpha: 0.2) : Colors.grey[200],
-            shape: BoxShape.circle,
-          ),
-          child: Icon(icon, color: unlocked ? const Color(0xFFF57F17) : Colors.grey, size: 20),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5)),
-              Text(subtitle, style: const TextStyle(fontSize: 11.5, color: AppColors.textTertiary)),
-            ],
-          ),
-        ),
-      ],
     );
   }
 
@@ -1013,6 +985,28 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
     );
   }
 
+  /// "Send Quick Greeting 👋" — this used to just open the chat with
+  /// nothing actually sent, despite the label. Now sends the real "👋 Wave"
+  /// (the same message connect_screen.dart's own wave button sends — see
+  /// ChatService.sendWave) before taking them into the thread, so the
+  /// greeting is real by the time they land there, not just a blank chat
+  /// they'd have to type into themselves.
+  Future<void> _sendQuickGreeting(AppUser user) async {
+    try {
+      await ChatService.sendWave(other: user);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Couldn't send a greeting: $e")),
+      );
+      return;
+    }
+    if (!mounted) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => ChatDetailScreen(user: user)),
+    );
+  }
+
   void _showBookOrGiftSheet(AppUser user) {
     showModalBottomSheet(
       context: context,
@@ -1044,9 +1038,7 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
                 title: const Text('Send Quick Greeting 👋'),
                 onTap: () {
                   Navigator.of(ctx).pop();
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => ChatDetailScreen(user: user)),
-                  );
+                  _sendQuickGreeting(user);
                 },
               ),
             ],
@@ -1071,19 +1063,21 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
               title: const Text('Share Profile'),
               onTap: () {
                 Navigator.of(ctx).pop();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Profile link copied!')),
-                );
+                showShareProfileSheet(context, user: _user);
               },
             ),
             ListTile(
-              leading: const Icon(Icons.block_rounded, color: AppColors.badgeRed),
-              title: const Text('Block User', style: TextStyle(color: AppColors.badgeRed)),
+              leading: Icon(
+                _isBlocked ? Icons.block_flipped : Icons.block_rounded,
+                color: AppColors.badgeRed,
+              ),
+              title: Text(
+                _isBlocked ? 'Unblock User' : 'Block User',
+                style: const TextStyle(color: AppColors.badgeRed),
+              ),
               onTap: () {
                 Navigator.of(ctx).pop();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Blocked ${_user.name}')),
-                );
+                _toggleBlock();
               },
             ),
           ],

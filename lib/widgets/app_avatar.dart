@@ -16,6 +16,15 @@ class AppAvatar extends StatefulWidget {
   // single letter for this field instead of a URL, so this is only treated
   // as an image when it actually looks like one.
   final String? imageUrl;
+  // A bundled local asset (e.g. assets/images/facetalk_app_icon.png) to show
+  // instead of [imageUrl] — used for the FaceTalk system chat's avatar
+  // (chat_list_screen.dart/chat_detail_screen.dart), which used to point at
+  // a remote URL on facetalkenglish.com. That domain isn't reliably
+  // reachable (registrar-side DNS/SSL issue, unrelated to this app), so a
+  // bundled asset is used instead for this one, permanently-fixed, this-app-
+  // owns-it image — no network dependency, can't go stale or 404. Takes
+  // priority over [imageUrl] when both are set.
+  final String? assetImage;
   // True while this person currently has a live voice-room participant doc
   // (see RoomParticipantService.join/leave and AppUser.activeRoomId) —
   // shows a small purple mic badge in the same bottom-right corner
@@ -36,6 +45,7 @@ class AppAvatar extends StatefulWidget {
     this.borderWidth = 0,
     this.borderColor,
     this.imageUrl,
+    this.assetImage,
     this.inVoiceRoom = false,
   });
 
@@ -86,7 +96,10 @@ class _AppAvatarState extends State<AppAvatar> {
     if (oldWidget.imageUrl != widget.imageUrl) _imageFailed = false;
   }
 
-  bool get _hasImage => widget.imageUrl != null && widget.imageUrl!.startsWith('http') && !_imageFailed;
+  bool get _hasAssetImage => widget.assetImage != null && widget.assetImage!.isNotEmpty;
+  bool get _hasImage =>
+      !_hasAssetImage && widget.imageUrl != null && widget.imageUrl!.startsWith('http') && !_imageFailed;
+  bool get _showsPhoto => _hasAssetImage || _hasImage;
 
   @override
   Widget build(BuildContext context) {
@@ -101,28 +114,30 @@ class _AppAvatarState extends State<AppAvatar> {
       height: photoSize,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        gradient: _hasImage
+        gradient: _showsPhoto
             ? null
             : LinearGradient(
                 colors: [color, color.withValues(alpha: 0.6)],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
-        image: _hasImage
-            ? DecorationImage(
-                image: NetworkImage(widget.imageUrl!),
-                fit: BoxFit.cover,
-                onError: (exception, stackTrace) {
-                  if (mounted) setState(() => _imageFailed = true);
-                },
-              )
-            : null,
+        image: _hasAssetImage
+            ? DecorationImage(image: AssetImage(widget.assetImage!), fit: BoxFit.cover)
+            : _hasImage
+                ? DecorationImage(
+                    image: NetworkImage(widget.imageUrl!),
+                    fit: BoxFit.cover,
+                    onError: (exception, stackTrace) {
+                      if (mounted) setState(() => _imageFailed = true);
+                    },
+                  )
+                : null,
         border: widget.borderWidth > 0
             ? Border.all(color: widget.borderColor ?? color, width: widget.borderWidth)
             : null,
       ),
       alignment: Alignment.center,
-      child: _hasImage
+      child: _showsPhoto
           ? null
           : Text(
               initial,

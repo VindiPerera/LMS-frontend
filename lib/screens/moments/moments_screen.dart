@@ -5,7 +5,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../../models/moment.dart';
+import '../../models/user.dart';
 import '../../services/auth_service.dart';
+import '../../services/follow_service.dart';
 import '../../services/moment_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
@@ -33,6 +35,9 @@ class _MomentsScreenState extends State<MomentsScreen> {
 
   final Set<String> _hiddenPostIds = {}; // reported this session
 
+  final _searchController = TextEditingController();
+  String _searchQuery = '';
+
   // Set on any failure loading/streaming the feed (e.g. a missing Firestore
   // index or a permission-denied) so the UI can show a retry state instead
   // of spinning forever or silently staying empty.
@@ -41,13 +46,57 @@ class _MomentsScreenState extends State<MomentsScreen> {
   final _scrollController = ScrollController();
   StreamSubscription<List<Moment>>? _liveSub;
 
+  // Following tab: who the signed-in user follows, kept live so a
+  // follow/unfollow elsewhere in the app is reflected here without a
+  // restart. Filters the *same* `_posts` the Recent tab already loads
+  // (see _followingPosts) rather than running a second feed query — a
+  // combined `user.id whereIn ids` + `audience arrayContainsAny` Firestore
+  // query isn't reliably supported together, and this reuses exactly the
+  // data/pagination the Recent tab already maintains.
+  Set<String> _followingIds = {};
+  bool _followingLoaded = false;
+  StreamSubscription<List<AppUser>>? _followingSub;
+  final _followingScrollController = ScrollController();
+
   @override
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
+    _followingScrollController.addListener(_onFollowingScroll);
     _loadFirstPage();
     _subscribeLiveWindow();
+    _subscribeFollowing();
     _checkUserMoments();
+  }
+
+  void _subscribeFollowing() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || uid.isEmpty) {
+      setState(() => _followingLoaded = true);
+      return;
+    }
+    _followingSub = FollowService.streamFollowing(uid).listen(
+      (users) {
+        if (!mounted) return;
+        setState(() {
+          _followingIds = users.map((u) => u.id).toSet();
+          _followingLoaded = true;
+        });
+      },
+      onError: (Object e, StackTrace st) {
+        debugPrint('MomentsScreen: following stream error: $e\n$st');
+        if (!mounted) return;
+        setState(() => _followingLoaded = true);
+      },
+    );
+  }
+
+  void _onFollowingScroll() {
+    if (!_followingScrollController.hasClients) return;
+    final threshold = _followingScrollController.position.maxScrollExtent - 600;
+    if (_followingScrollController.position.pixels >= threshold) {
+      _loadMore();
+    }
   }
 
   Future<void> _checkUserMoments() async {
@@ -68,7 +117,10 @@ class _MomentsScreenState extends State<MomentsScreen> {
   @override
   void dispose() {
     _scrollController.dispose();
+    _followingScrollController.dispose();
+    _searchController.dispose();
     _liveSub?.cancel();
+    _followingSub?.cancel();
     super.dispose();
   }
 
@@ -180,8 +232,28 @@ class _MomentsScreenState extends State<MomentsScreen> {
   // instantly-toggleable concern (blocking isn't implemented anywhere in
   // the app yet, so there's nothing else to filter here).
   List<Moment> get _visiblePosts {
-    return _posts.where((moment) => !_hiddenPostIds.contains(moment.id)).toList();
+    return _posts
+        .where((moment) => !_hiddenPostIds.contains(moment.id) && _matchesSearch(moment))
+        .toList();
   }
+
+  // Client-side, against whatever's already loaded in `_posts` — same
+  // approach chat_list_screen.dart's search uses, since there's no backend
+  // full-text search service wired into this app (Firestore itself can't do
+  // substring matching). Scrolling to load more pages naturally surfaces
+  // more candidates for the current query as they come in.
+  bool _matchesSearch(Moment moment) {
+    if (_searchQuery.isEmpty) return true;
+    final q = _searchQuery.toLowerCase();
+    return moment.text.toLowerCase().contains(q) ||
+        moment.user.name.toLowerCase().contains(q) ||
+        moment.user.handle.toLowerCase().contains(q);
+  }
+
+  /// Visible posts (same reported/search filtering as Recent) narrowed to
+  /// authors the signed-in user follows.
+  List<Moment> get _followingPosts =>
+      _visiblePosts.where((moment) => _followingIds.contains(moment.user.id)).toList();
 
   Future<void> _openCreateMoment({String? initialText, String? initialPicker}) async {
     final posted = await Navigator.of(context).push<bool>(
@@ -245,7 +317,9 @@ class _MomentsScreenState extends State<MomentsScreen> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: TextField(
+                    controller: _searchController,
                     textAlignVertical: TextAlignVertical.center,
+                    onChanged: (val) => setState(() => _searchQuery = val.trim()),
                     decoration: const InputDecoration(
                       border: InputBorder.none,
                       isDense: true,
@@ -259,16 +333,28 @@ class _MomentsScreenState extends State<MomentsScreen> {
                     style: const TextStyle(fontSize: 13.5),
                   ),
                 ),
+                if (_searchQuery.isNotEmpty)
+                  GestureDetector(
+                    onTap: () {
+                      _searchController.clear();
+                      setState(() => _searchQuery = '');
+                    },
+                    child: const Icon(
+                      Icons.cancel_rounded,
+                      size: 17,
+                      color: AppColors.textTertiary,
+                    ),
+                  ),
               ],
             ),
           ),
           actions: [
-            NotificationBadge(
-              child: IconButton(
-                icon: const Icon(Icons.notifications_none_rounded),
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const NotificationScreen()),
-                ),
+            IconButton(
+              icon: const NotificationBadge(
+                child: Icon(Icons.notifications_none_rounded),
+              ),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const NotificationScreen()),
               ),
             ),
             IconButton(
@@ -295,9 +381,7 @@ class _MomentsScreenState extends State<MomentsScreen> {
               child: TabBarView(
                 children: [
                   _buildRecentTab(),
-                  const Center(
-                    child: Text('Following posts', style: TextStyle(color: AppColors.textTertiary)),
-                  ),
+                  _buildFollowingTab(),
                 ],
               ),
             ),
@@ -364,6 +448,34 @@ class _MomentsScreenState extends State<MomentsScreen> {
       );
     }
 
+    if (posts.isEmpty && _searchQuery.isNotEmpty) {
+      return RefreshIndicator(
+        onRefresh: _refresh,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            const SizedBox(height: 60),
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32),
+                child: Column(
+                  children: [
+                    const Icon(Icons.search_off_rounded, size: 48, color: AppColors.textTertiary),
+                    const SizedBox(height: 14),
+                    Text(
+                      'No moments matching "$_searchQuery"',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: AppColors.textPrimary),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     if (posts.isEmpty) {
       return RefreshIndicator(
         onRefresh: _refresh,
@@ -394,26 +506,131 @@ class _MomentsScreenState extends State<MomentsScreen> {
       );
     }
 
+    // No composer header while a search is active — a blank "share what's
+    // on your mind" box above filtered results reads oddly mid-search.
+    final headerCount = _searchQuery.isEmpty ? 1 : 0;
+
     return RefreshIndicator(
       onRefresh: _refresh,
       child: ListView.builder(
         controller: _scrollController,
         padding: const EdgeInsets.only(bottom: 20),
-        itemCount: posts.length + 2,
+        itemCount: posts.length + headerCount + 1,
         itemBuilder: (context, index) {
-          if (index == 0) {
+          if (headerCount == 1 && index == 0) {
             return _buildComposerHeader();
           }
-          if (index == posts.length + 1) {
+          if (index == posts.length + headerCount) {
             if (!_hasMore) return const SizedBox.shrink();
             return const Padding(
               padding: EdgeInsets.symmetric(vertical: 20),
               child: Center(child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primaryPurple)),
             );
           }
-          final post = posts[index - 1];
+          final post = posts[index - headerCount];
           return MomentCard(
             key: ValueKey(post.id),
+            moment: post,
+            onDeleted: () => setState(() => _posts.removeWhere((p) => p.id == post.id)),
+            onReported: () => setState(() => _hiddenPostIds.add(post.id)),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildFollowingTab() {
+    if (_initialLoading || !_followingLoaded) {
+      return ListView.builder(
+        padding: const EdgeInsets.only(bottom: 20),
+        itemCount: 3,
+        itemBuilder: (context, index) => const MomentCardShimmer(),
+      );
+    }
+
+    if (_followingIds.isEmpty) {
+      return RefreshIndicator(
+        onRefresh: _refresh,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            const SizedBox(height: 70),
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32),
+                child: Column(
+                  children: [
+                    const Icon(Icons.people_outline_rounded, size: 52, color: AppColors.textTertiary),
+                    const SizedBox(height: 14),
+                    const Text(
+                      "You're not following anyone yet",
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: AppColors.textPrimary),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Follow partners from Connect to see their moments here.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 12.5, color: AppColors.textTertiary),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final posts = _followingPosts;
+
+    if (posts.isEmpty) {
+      return RefreshIndicator(
+        onRefresh: _refresh,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            const SizedBox(height: 70),
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32),
+                child: Column(
+                  children: [
+                    const Icon(Icons.inbox_outlined, size: 52, color: AppColors.textTertiary),
+                    const SizedBox(height: 14),
+                    Text(
+                      _searchQuery.isNotEmpty
+                          ? 'No moments matching "$_searchQuery"'
+                          : 'No moments yet from people you follow',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: AppColors.textPrimary),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _refresh,
+      child: ListView.builder(
+        controller: _followingScrollController,
+        padding: const EdgeInsets.only(bottom: 20),
+        itemCount: posts.length + 1,
+        itemBuilder: (context, index) {
+          if (index == posts.length) {
+            if (!_hasMore) return const SizedBox.shrink();
+            return const Padding(
+              padding: EdgeInsets.symmetric(vertical: 20),
+              child: Center(child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primaryPurple)),
+            );
+          }
+          final post = posts[index];
+          return MomentCard(
+            key: ValueKey('following_${post.id}'),
             moment: post,
             onDeleted: () => setState(() => _posts.removeWhere((p) => p.id == post.id)),
             onReported: () => setState(() => _hiddenPostIds.add(post.id)),

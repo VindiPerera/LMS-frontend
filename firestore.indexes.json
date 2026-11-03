@@ -68,6 +68,14 @@
         { "fieldPath": "handRaised", "order": "ASCENDING" },
         { "fieldPath": "handRaisedAt", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "friendships",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "userIds", "arrayConfig": "CONTAINS" }
+      ]
     }
   ],
   "fieldOverrides": []

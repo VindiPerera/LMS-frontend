@@ -77,4 +77,21 @@ class PartnerService {
         })
         .withFallback(() => null);
   }
+
+  /// Live `users/{uid}.countryFlag` — same staleness reasoning as
+  /// [streamAvatarUrl], for group_info_screen.dart's member rows: a
+  /// group's own participantInfo snapshot only carries whatever flag that
+  /// member had the moment they joined, which silently drops a flag they
+  /// hadn't set yet back then.
+  static Stream<String?> streamCountryFlag(String uid) {
+    if (uid.isEmpty) return Stream.value(null);
+    return _users
+        .doc(uid)
+        .snapshots()
+        .map((doc) {
+          final flag = doc.data()?['countryFlag']?.toString();
+          return (flag == null || flag.isEmpty) ? null : flag;
+        })
+        .withFallback(() => null);
+  }
 }

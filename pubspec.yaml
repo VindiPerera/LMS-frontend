@@ -111,6 +111,9 @@ dependencies:
   # temp/cache dir, not Firebase Storage (that's only where it ends up
   # after MediaService.uploadVoiceBytes).
   path_provider: ^2.1.6
+  # Blocks screenshots/recording of licensed whiteboard Library content —
+  # see lib/services/screenshot_guard.dart.
+  screen_protector: ^1.5.3
 
 dev_dependencies:
   flutter_test:

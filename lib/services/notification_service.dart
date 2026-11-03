@@ -99,7 +99,12 @@ class NotificationService {
       recipientUid: recipientId,
       title: host.name,
       body: 'invited you to a Voice Room',
-      data: {'type': 'voiceroom', 'roomId': roomId, 'actorId': hostId},
+      data: {
+        'type': 'voiceroom',
+        'roomId': roomId,
+        'actorId': hostId,
+        'actorAvatar': host.avatarUrl,
+      },
     );
   }
 

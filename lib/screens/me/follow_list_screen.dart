@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../models/user.dart';
 import '../../services/follow_service.dart';
+import '../../services/partner_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
 import '../../widgets/follow_button.dart';
@@ -128,7 +129,17 @@ class _FollowRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      leading: AppAvatar.forUser(user, size: 48, showFlag: true),
+      // user.avatarUrl here is FollowService's own denormalized snapshot —
+      // only as fresh as whenever this follow edge was last written, so it
+      // often lags a later-uploaded avatar. Live lookup instead, same as
+      // chat_list_screen.dart's row.
+      leading: StreamBuilder<String?>(
+        stream: PartnerService.streamAvatarUrl(user.id),
+        initialData: user.avatarUrl.isEmpty ? null : user.avatarUrl,
+        builder: (context, snapshot) {
+          return AppAvatar(seed: user.name, imageUrl: snapshot.data, size: 48, showFlag: true, flag: user.countryFlag);
+        },
+      ),
       title: Text(
         user.name,
         style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),

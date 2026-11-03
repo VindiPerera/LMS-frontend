@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../models/whiteboard_item.dart';
+import '../../services/screenshot_guard.dart';
 import '../../services/whiteboard_service.dart';
 import '../../widgets/whiteboard_canvas.dart';
 
@@ -55,6 +56,18 @@ class _ExpandedWhiteboardScreenState extends State<ExpandedWhiteboardScreen> {
     } else {
       _isLandscape = true;
     }
+    // A board item can be a licensed exam-prep image from the Library (see
+    // whiteboard_library_sheet.dart, guarded the same way) just as easily
+    // as a user-uploaded photo, and there's no cheap way to tell which from
+    // here — so the whole expanded view is guarded, not just Library items
+    // specifically.
+    ScreenshotGuard.enable(context);
+  }
+
+  @override
+  void dispose() {
+    ScreenshotGuard.disable();
+    super.dispose();
   }
 
   @override

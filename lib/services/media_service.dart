@@ -66,6 +66,25 @@ class MediaService {
     );
   }
 
+  /// A group's display photo (group_info_screen.dart, admin-only — see
+  /// ChatService.updateGroupAvatar, which writes the URL this returns onto
+  /// the group's chat doc).
+  static Future<String> uploadGroupAvatarBytes({
+    required Uint8List bytes,
+    required String uid,
+    required String chatId,
+  }) {
+    return _uploadToBackend(
+      bytes: bytes,
+      filename: '${_uuid.v4()}.jpg',
+      extension: 'jpg',
+      contentType: MediaType('image', 'jpeg'),
+      uid: uid,
+      postId: chatId,
+      type: 'groupAvatar',
+    );
+  }
+
   /// A recorded voice message (chat_detail_screen.dart's mic button) —
   /// [extension] matches whatever format `record` actually wrote (see
   /// _Composer._stopAndSend; AAC/.m4a on every platform this app ships).

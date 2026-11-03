@@ -8,18 +8,22 @@ import '../../services/exchange_rate_service.dart';
 import '../../services/follow_service.dart';
 import '../../services/moment_service.dart';
 import '../../services/payment_api_service.dart';
+import '../../services/visitor_service.dart';
 import '../../services/voice_room_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
+import '../../widgets/feedback_sheet.dart';
 import '../../widgets/payment_method_sheet.dart';
 import '../../widgets/vip_badge.dart';
 import '../auth/splash_screen.dart';
 import '../friends/my_qr_code_screen.dart';
 import '../moments/user_moments_screen.dart';
 import '../voiceroom/open_voice_room.dart';
+import 'blocked_users_screen.dart';
 import 'course_detail_sheet.dart';
 import 'edit_profile_screen.dart';
 import 'follow_list_screen.dart';
+import 'my_achievements_screen.dart';
 import 'notification_settings_screen.dart';
 import 'vip_calendar_screen.dart';
 
@@ -95,14 +99,18 @@ class _MeScreenState extends State<MeScreen> {
                 Expanded(
                   child: _StatCard(
                     icon: '🔥',
-                    value: '1',
+                    value: '${user.dayStreak}',
                     label: 'Day Streak',
-                    trailing: '🎁',
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: _StatCard(icon: null, value: '0', label: 'Visitors'),
+                  child: StreamBuilder<int>(
+                    stream: VisitorService.streamVisitorCount(user.id),
+                    initialData: 0,
+                    builder: (context, snapshot) =>
+                        _StatCard(icon: null, value: '${snapshot.data ?? 0}', label: 'Visitors'),
+                  ),
                 ),
               ],
             ),
@@ -122,7 +130,7 @@ class _MeScreenState extends State<MeScreen> {
             const SizedBox(height: 12),
             _CoursesGrid(),
             const SizedBox(height: 20),
-            _SettingsList(),
+            _SettingsList(user: user),
           ],
         ),
       ),
@@ -621,12 +629,10 @@ class _StatCard extends StatelessWidget {
   final String? icon;
   final String value;
   final String label;
-  final String? trailing;
   const _StatCard({
     this.icon,
     required this.value,
     required this.label,
-    this.trailing,
   });
 
   @override
@@ -641,24 +647,17 @@ class _StatCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
-                children: [
-                  if (icon != null)
-                    Text(icon!, style: const TextStyle(fontSize: 18)),
-                  if (icon != null) const SizedBox(width: 6),
-                  Text(
-                    value,
-                    style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ],
+              if (icon != null)
+                Text(icon!, style: const TextStyle(fontSize: 18)),
+              if (icon != null) const SizedBox(width: 6),
+              Text(
+                value,
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
-              if (trailing != null)
-                Text(trailing!, style: const TextStyle(fontSize: 20)),
             ],
           ),
           const SizedBox(height: 6),
@@ -1041,14 +1040,9 @@ class _CoursesGrid extends StatelessWidget {
       itemBuilder: (context, i) {
         final course = mock.languageCourses[i];
         final name = course['name'] as String;
-        // Only these 4 have a detail sheet behind them so far; the rest
-        // (HelloWords/HelloEnglish/Podcast/Grammar) are untouched.
-        const wired = {'Teachers', 'LiveClass', 'Idioms', 'Flashcards'};
 
         return GestureDetector(
-          onTap: wired.contains(name)
-              ? () => CourseDetailSheet.show(context, name)
-              : null,
+          onTap: () => CourseDetailSheet.show(context, name),
           child: Column(
             children: [
               Stack(
@@ -1102,6 +1096,9 @@ class _CoursesGrid extends StatelessWidget {
 }
 
 class _SettingsList extends StatelessWidget {
+  final AppUser user;
+  const _SettingsList({required this.user});
+
   static const _items = [
     ('My Progress', Icons.bar_chart_rounded),
     ('Achievements', Icons.emoji_events_outlined),
@@ -1113,27 +1110,44 @@ class _SettingsList extends StatelessWidget {
   ];
 
   Future<void> _handleTap(BuildContext context, String label) async {
-    if (label == 'Invite Friends') {
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const MyQRCodeScreen()),
-      );
-      return;
+    switch (label) {
+      case 'Invite Friends':
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const MyQRCodeScreen()),
+        );
+        return;
+      case 'Log Out':
+        await AuthService.instance.logout();
+        if (!context.mounted) return;
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const SplashScreen()),
+          (route) => false,
+        );
+        return;
+      case 'Achievements':
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => MyAchievementsScreen(user: user)),
+        );
+        return;
+      case 'Blocked Users':
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const BlockedUsersScreen()),
+        );
+        return;
+      case 'Help & Feedback':
+        showFeedbackSheet(context);
+        return;
+      default:
+        // 'My Progress' / 'Saved Words & Sentences' — nothing in the app
+        // tracks lesson progress or lets anyone bookmark a word/sentence
+        // yet, so there's no real data to show here.
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$label is coming soon'),
+            duration: const Duration(seconds: 1),
+          ),
+        );
     }
-    if (label == 'Log Out') {
-      await AuthService.instance.logout();
-      if (!context.mounted) return;
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const SplashScreen()),
-        (route) => false,
-      );
-      return;
-    }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Opening $label...'),
-        duration: const Duration(seconds: 1),
-      ),
-    );
   }
 
   @override

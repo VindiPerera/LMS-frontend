@@ -38,11 +38,9 @@ service cloud.firestore {
     // The app's own friend-request feature (send/accept/decline/unfriend)
     // has been retired in favor of Follow (see FollowService) — nothing
     // client-side writes a 'friends' status into friendships/{docId}
-    // anymore. This, the friendships/{docId} match block below, and
-    // isBlockedBy() stay only because nothing ever implemented blocking
-    // either (no UI ever wrote 'blocked' status), so there's no live
-    // 'blocked' behavior to actually migrate — just unused-but-harmless
-    // scaffolding for if that's ever built.
+    // anymore. 'blocked' is real and live, though — see BlockService,
+    // which (re)uses this same collection and the friendships/{docId}
+    // match block below exactly as originally scaffolded for it.
     function friendshipStatus(uidA, uidB) {
       let path = /databases/$(database)/documents/friendships/$(friendshipId(uidA, uidB));
       return exists(path) ? get(path).data.status : 'none';
@@ -129,6 +127,22 @@ service cloud.firestore {
       }
 
       // ------------------------------------------------------------------
+      // users/{uid}/visitors/{visitorUid} — me_screen.dart's "Visitors"
+      // stat (and, per the VIP benefits list, a future "Visitors page").
+      // Unlike followers/profileLikes above, this is private to the
+      // profile owner (`isOwner(uid)`, not `isSignedIn()`) — nobody wants
+      // other users seeing who looked at their profile. Written under the
+      // viewed profile (`uid`) by the viewer (`visitorUid`) on every visit
+      // — `allow update` too so a repeat visit just bumps `visitedAt`
+      // instead of being rejected as an illegal re-create.
+      // ------------------------------------------------------------------
+      match /visitors/{visitorUid} {
+        allow read: if isOwner(uid);
+        allow create, update: if isSignedIn() && request.auth.uid == visitorUid && visitorUid != uid;
+        allow delete: if false;
+      }
+
+      // ------------------------------------------------------------------
       // users/{uid}/mediaLibrary/{itemId} — a user's own personal folder
       // tree of whiteboard images (MediaLibraryService), used from the
       // voice room "Add Images" sheet. Entirely private — unlike the
@@ -144,6 +158,9 @@ service cloud.firestore {
     // friendships/{docId} — only the two participants involved may read
     // or write. Doc id is always friendshipId(uidA, uidB); we don't have
     // the two uids split out here so we check membership via `userIds`.
+    // Today this only ever holds status: 'blocked' (BlockService) — the
+    // old friend-request states are retired (see this match's sibling
+    // comment above, under friendshipStatus()).
     // ------------------------------------------------------------------
     match /friendships/{docId} {
       allow read, write: if isSignedIn() && request.auth.uid in resource.data.userIds;
@@ -266,6 +283,22 @@ service cloud.firestore {
     }
 
     // ------------------------------------------------------------------
+    // feedback/{feedbackId} — me_screen.dart's "Help & Feedback". Same
+    // write-only-from-the-client, admin-only-read shape as reports/
+    // {reportId} above (no admin UI reads this yet, but the access model
+    // should already be correct for when one exists).
+    // ------------------------------------------------------------------
+    match /feedback/{feedbackId} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn() &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.message is string &&
+        request.resource.data.message.size() > 0 &&
+        request.resource.data.message.size() <= 2000;
+      allow update, delete: if false;
+    }
+
+    // ------------------------------------------------------------------
     // chats/{chatId} and chats/{chatId}/messages/{messageId}
     //
     // Previously `allow create, update: if isSignedIn()` with no ownership
@@ -277,6 +310,12 @@ service cloud.firestore {
     // tie chatId itself to those participants so a doc can't be written
     // under someone else's chatId by supplying a fake `participants` list
     // client-side (which client code otherwise fully controls).
+    //
+    // Group threads (isGroup: true — see ChatService.createGroup) don't
+    // have a deterministic id the way a 1:1 thread does (a group's id is a
+    // plain Firestore auto-id), so every function/branch below that leans
+    // on idMatchesParticipants for 1:1 is paired with a separate isGroup
+    // branch instead.
     // ------------------------------------------------------------------
     match /chats/{chatId} {
       function idMatchesParticipants(participants) {
@@ -288,33 +327,104 @@ service cloud.firestore {
 
       allow read: if isSignedIn() && request.auth.uid in resource.data.participants;
 
+      // 8 is ChatService.maxGroupMembers — kept in sync by hand, since
+      // rules can't reference a Dart constant.
+      function withinGroupSizeLimit(participants) {
+        return participants.size() <= 8;
+      }
+
       allow create: if isSignedIn() &&
         request.auth.uid in request.resource.data.participants &&
-        idMatchesParticipants(request.resource.data.participants);
+        (
+          (request.resource.data.get('isGroup', false) == false &&
+            idMatchesParticipants(request.resource.data.participants)) ||
+          // A group's creator becomes its admin at creation time — only
+          // they may ever add/remove members afterward (see the update
+          // branches below), so this is the one place that assignment is
+          // ever made.
+          (request.resource.data.get('isGroup', false) == true &&
+            request.resource.data.adminId == request.auth.uid &&
+            withinGroupSizeLimit(request.resource.data.participants))
+        );
 
-      // Participants never change after creation — only per-message fields
-      // (lastMessage, unread.*, participantInfo, hiddenFor) do — see
-      // ChatService. hiddenFor backs the chat list's swipe-to-delete
-      // (ChatService.hideChat): since a real delete below is blocked (the
-      // doc is shared with the other participant, who'd lose their own
-      // copy), "deleting" a chat is just adding your own uid to this array,
-      // which streamChatPreviews filters on and _send clears again the
-      // moment either side next messages.
-      allow update: if isSignedIn() &&
-        request.auth.uid in resource.data.participants &&
-        request.resource.data.participants == resource.data.participants;
+      // Four shapes of update, all requiring the caller already be a
+      // participant:
+      //  1. A normal per-message update (lastMessage/unread.*/
+      //     participantInfo/hiddenFor) — participants never change here.
+      //     Covers every 1:1 update and a group member's own message
+      //     sends/hideChat alike. groupAvatar is the one field even this
+      //     "everyday" branch still restricts to the admin (see
+      //     ChatService.updateGroupAvatar) — a plain member keeps every
+      //     other everyday write this branch covers.
+      //  2. A group's admin adding/removing members — participants (and
+      //     participantInfo/unread) may change, capped at
+      //     withinGroupSizeLimit; isGroup/adminId/groupName stay fixed
+      //     through this branch (renaming or handing off admin isn't
+      //     offered by the app, so the rules don't allow it either).
+      //  3. A group member leaving on their own — removes exactly
+      //     themself from participants (see ChatService.leaveGroup); if
+      //     they were the admin, adminId must hand off to one of the
+      //     members who's still left afterward, never to themself or to
+      //     nobody.
+      //  4. The admin deleting the group (see ChatService.deleteGroup) —
+      //     not a real Firestore delete (see `allow delete: if false`
+      //     below); empties participants instead, which removes the
+      //     thread from every member's chat list at once.
+      allow update: if isSignedIn() && request.auth.uid in resource.data.participants && (
+        (
+          request.resource.data.participants == resource.data.participants &&
+          (
+            resource.data.get('isGroup', false) == false ||
+            request.resource.data.get('groupAvatar', '') == resource.data.get('groupAvatar', '') ||
+            request.auth.uid == resource.data.adminId
+          )
+        ) ||
+        (
+          resource.data.get('isGroup', false) == true &&
+          request.auth.uid == resource.data.adminId &&
+          request.auth.uid in request.resource.data.participants &&
+          withinGroupSizeLimit(request.resource.data.participants) &&
+          request.resource.data.isGroup == true &&
+          request.resource.data.adminId == resource.data.adminId &&
+          request.resource.data.groupName == resource.data.groupName
+        ) ||
+        (
+          resource.data.get('isGroup', false) == true &&
+          !(request.auth.uid in request.resource.data.participants) &&
+          resource.data.participants.removeAll([request.auth.uid]).toSet() ==
+            request.resource.data.participants.toSet() &&
+          request.resource.data.isGroup == true &&
+          request.resource.data.groupName == resource.data.groupName &&
+          (
+            request.resource.data.adminId == resource.data.adminId ||
+            (resource.data.adminId == request.auth.uid &&
+              request.resource.data.adminId in request.resource.data.participants)
+          )
+        ) ||
+        (
+          resource.data.get('isGroup', false) == true &&
+          request.auth.uid == resource.data.adminId &&
+          request.resource.data.participants.size() == 0 &&
+          request.resource.data.isGroup == true &&
+          request.resource.data.adminId == resource.data.adminId &&
+          request.resource.data.groupName == resource.data.groupName
+        )
+      );
 
       allow delete: if false;
 
       match /messages/{messageId} {
         // Each message also carries its own `participants` snapshot (see
-        // ChatService.sendMessage) so this rule never needs a get() on the
-        // parent doc for participant checks — which would silently fail
-        // closed for the very first message of a brand-new thread, since
-        // get() inside a batched write only ever sees the pre-commit state,
-        // not sibling writes in the same batch. `idMatchesParticipants`
-        // still ties that snapshot back to the real chatId, so it can't be
-        // spoofed.
+        // ChatService.sendMessage/_sendToGroup) so a 1:1 message never
+        // needs a get() on the parent doc for its participant check —
+        // which would silently fail closed for the very first message of a
+        // brand-new 1:1 thread, since get() inside a batched write only
+        // ever sees the pre-commit state, not sibling writes in the same
+        // batch. `idMatchesParticipants` still ties that snapshot back to
+        // the real chatId, so it can't be spoofed. A group message has no
+        // such deterministic-id trick available, so it falls back to an
+        // actual membership get() on the (already-existing, by the time
+        // anyone can send into it) parent group doc instead.
         allow read: if isSignedIn() && request.auth.uid in resource.data.participants;
 
         // Blocks a reply into a broadcast/announcement thread (admin panel
@@ -324,7 +434,7 @@ service cloud.firestore {
         // same reason but doesn't stop a hand-crafted write without this).
         //
         // `!exists(...)` short-circuits the isReadOnly get() for a
-        // brand-new thread (no chat doc yet — ChatService.sendMessage
+        // brand-new 1:1 thread (no chat doc yet — ChatService.sendMessage
         // creates the chat doc and the first message in the same batch, so
         // that sibling write isn't visible here). Without it, get() on a
         // not-yet-existing chat doc throws and the whole rule evaluates to
@@ -332,11 +442,28 @@ service cloud.firestore {
         // the "Wave" a user sends the first time they contact someone —
         // with permission-denied. A brand-new thread was never created
         // read-only to begin with (only the admin broadcast flow does
-        // that), so treating "doesn't exist yet" as "not read-only" is safe.
+        // that), so treating "doesn't exist yet" as "not read-only" is
+        // safe. A group thread always already exists by the time a member
+        // can send into it (ChatService.createGroup creates it up front),
+        // so this same short-circuit never actually applies there.
         allow create: if isSignedIn() &&
           request.resource.data.senderId == request.auth.uid &&
           request.auth.uid in request.resource.data.participants &&
-          idMatchesParticipants(request.resource.data.participants) &&
+          (
+            (request.resource.data.participants.size() == 2 &&
+              idMatchesParticipants(request.resource.data.participants)) ||
+            // Not gated on participants.size() != 2 — a group can shrink to
+            // exactly 2 members (one left/was removed) and still be a
+            // group, not a 1:1 thread, so size alone can't tell the two
+            // apart. This checks real, current membership on the PARENT
+            // doc instead of trusting the message's own `participants`
+            // snapshot, since a group's chatId (a plain auto-id) carries
+            // none of idMatchesParticipants' built-in proof the way a 1:1
+            // thread's id does.
+            (exists(/databases/$(database)/documents/chats/$(chatId)) &&
+              get(/databases/$(database)/documents/chats/$(chatId)).data.get('isGroup', false) == true &&
+              request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.get('participants', []))
+          ) &&
           (!exists(/databases/$(database)/documents/chats/$(chatId)) ||
             get(/databases/$(database)/documents/chats/$(chatId)).data.get('isReadOnly', false) == false);
 
@@ -620,18 +747,17 @@ service cloud.firestore {
       }
 
       // ------------------------------------------------------------------
-      // subtitles/{lineId} — live caption feed (RoomParticipantService.
-      // addSubtitleLine/streamSubtitles). Same shape and same rules as
-      // comments/{commentId} above: a caption is only ever produced by
-      // whoever is actually on stage, readable by anyone in the room's
-      // audience, and immutable once written. No writer exists yet (no
-      // speech-to-text pipeline is wired up) — this just reserves the
-      // access path a future one will use.
+      // reactions/{reactionId} — floating emoji bursts (RoomParticipantService
+      // .sendReaction/streamNewReactions), the replacement for the removed
+      // live-captions feature. Unlike comments/{commentId} above, any
+      // JOINED participant may send one (not just a stage one — reacting is
+      // audience feedback, not speaking) — enforced by requiring a
+      // participants/{uid} doc rather than a specific role.
       // ------------------------------------------------------------------
-      match /subtitles/{lineId} {
+      match /reactions/{reactionId} {
         allow read: if isSignedIn() && canAccessRoom(roomId);
         allow create: if isSignedIn() && request.resource.data.senderId == request.auth.uid &&
-          get(/databases/$(database)/documents/voiceRooms/$(roomId)/participants/$(request.auth.uid)).data.role in ['host', 'moderator', 'speaker'];
+          exists(/databases/$(database)/documents/voiceRooms/$(roomId)/participants/$(request.auth.uid));
         allow update, delete: if false;
       }
 

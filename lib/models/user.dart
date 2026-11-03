@@ -44,6 +44,16 @@ class AppUser {
   // .dart's "in a voice room" badge) can show this cheaply for many rows at
   // once — a single field read per row, not a per-room listener fan-out.
   final String activeRoomId;
+  // When this account was created — connect_screen.dart's "New Users"
+  // filter sorts/filters by this. Null for mock/local AppUsers and for any
+  // real account that predates this field being read (still fine: it just
+  // sorts after everyone with a known date rather than crashing).
+  final DateTime? createdAt;
+  // Consecutive days this user has opened the app — bumped at most once per
+  // calendar day by AuthService.recordDailyStreak (see main_shell.dart,
+  // where it's called on launch/resume). 0 for mock/local AppUsers and for
+  // any real account that predates this field.
+  final int dayStreak;
 
   const AppUser({
     this.id = '',
@@ -67,6 +77,8 @@ class AppUser {
     this.profileCompleted = false,
     this.voiceRoomNotificationsEnabled = true,
     this.activeRoomId = '',
+    this.createdAt,
+    this.dayStreak = 0,
   });
 
   /// Decodes a `users/{uid}` Firestore document into an AppUser. Callers
@@ -103,6 +115,8 @@ class AppUser {
       profileCompleted: json['profileCompleted'] == true,
       voiceRoomNotificationsEnabled: json['voiceRoomNotificationsEnabled'] != false,
       activeRoomId: json['activeRoomId']?.toString() ?? '',
+      createdAt: _asDateTime(json['createdAt']),
+      dayStreak: _asInt(json['dayStreak']),
     );
   }
 
