@@ -38,6 +38,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     // signed in and the app just launched" — AuthService's own
     // _afterSignIn() covers the moment of signing in itself.
     AuthService.instance.setOnlineStatus(true);
+    AuthService.instance.recordDailyStreak();
 
     // Covers a QR/link tap that arrived before login/signup finished (it
     // was stashed — see deep_link_service.dart) plus a fresh install's
@@ -64,6 +65,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     switch (state) {
       case AppLifecycleState.resumed:
         AuthService.instance.setOnlineStatus(true);
+        AuthService.instance.recordDailyStreak();
         break;
       case AppLifecycleState.paused:
       case AppLifecycleState.detached:

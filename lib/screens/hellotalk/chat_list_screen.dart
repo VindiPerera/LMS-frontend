@@ -9,6 +9,7 @@ import '../../services/room_participant_service.dart';
 import '../../services/voice_room_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_avatar.dart';
+import '../../widgets/group_avatar.dart';
 import 'add_contact_screen.dart';
 import '../connect/partner_profile_screen.dart';
 import 'chat_detail_screen.dart';
@@ -66,7 +67,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
   /// once it no longer does — so sorting always reflects current status
   /// without polling or re-subscribing on every rebuild.
   void _syncOnlineSubscriptions(List<ChatPreview> chats) {
-    final ids = chats.map((c) => c.user.id).where((id) => id.isNotEmpty).toSet();
+    // Online status only means anything for a 1:1 thread's other person —
+    // a group has no single person to be online/offline as.
+    final ids = chats.where((c) => !c.isGroup).map((c) => c.user!.id).where((id) => id.isNotEmpty).toSet();
     for (final gone in _onlineSubs.keys.where((id) => !ids.contains(id)).toList()) {
       _onlineSubs.remove(gone)?.cancel();
       _onlineByUid.remove(gone);
@@ -91,7 +94,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
     final online = <ChatPreview>[];
     final offline = <ChatPreview>[];
     for (final chat in chats) {
-      final isOnline = _onlineByUid[chat.user.id] ?? false;
+      // A group has no online status of its own — it just stays wherever
+      // its lastMessageAt ordering already put it, same as any offline 1:1
+      // thread.
+      final isOnline = !chat.isGroup && (_onlineByUid[chat.user!.id] ?? false);
       (isOnline ? online : offline).add(chat);
     }
     return [...online, ...offline];
@@ -106,7 +112,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete this chat?'),
-        content: Text("Your conversation with ${chat.user.name} will be removed from your chat list. They'll still see it on their side."),
+        content: Text(
+          chat.isGroup
+              ? '"${chat.groupName}" will be removed from your chat list. The rest of the group can still see it.'
+              : "Your conversation with ${chat.displayName} will be removed from your chat list. They'll still see it on their side.",
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
           TextButton(
@@ -126,9 +136,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
   /// lands) so the just-dismissed Dismissible doesn't reappear for a beat —
   /// see _locallyHidden's own doc comment.
   void _deleteChat(ChatPreview chat) {
-    setState(() => _locallyHidden.add(chat.user.id));
+    setState(() => _locallyHidden.add(chat.id));
     // ignore: discarded_futures
-    ChatService.hideChat(chat.user.id);
+    ChatService.hideChat(chat.id);
   }
 
   @override
@@ -185,11 +195,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
         builder: (context, snapshot) {
           final chats = snapshot.data ?? [];
           final filteredChats = _sortedChats(chats.where((chat) {
-            if (_locallyHidden.contains(chat.user.id)) return false;
+            if (_locallyHidden.contains(chat.id)) return false;
             if (_searchQuery.isEmpty) return true;
             final q = _searchQuery.toLowerCase();
-            return chat.user.name.toLowerCase().contains(q) ||
-                chat.user.handle.toLowerCase().contains(q) ||
+            return chat.displayName.toLowerCase().contains(q) ||
+                (!chat.isGroup && chat.user!.handle.toLowerCase().contains(q)) ||
                 chat.lastMessage.toLowerCase().contains(q);
           }).toList());
 
@@ -347,7 +357,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                       // _deleteChat's doc comment for what "delete" means
                       // here (hides it from this user's own list only).
                       return Dismissible(
-                        key: ValueKey(chat.user.id),
+                        key: ValueKey(chat.id),
                         direction: DismissDirection.startToEnd,
                         background: Container(
                           color: AppColors.badgeRed,
@@ -394,9 +404,11 @@ class _ChatListTile extends StatelessWidget {
     return InkWell(
       onTap: () => Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => openProfile
-              ? PartnerProfileScreen(initial: chat.user)
-              : ChatDetailScreen(user: chat.user),
+          // A group has no "profile" to open — openProfile (from a search
+          // result) only ever applies to a 1:1 result.
+          builder: (_) => (openProfile && !chat.isGroup)
+              ? PartnerProfileScreen(initial: chat.user!)
+              : (chat.isGroup ? ChatDetailScreen(groupChatId: chat.id) : ChatDetailScreen(user: chat.user)),
         ),
       ),
       child: Container(
@@ -408,6 +420,14 @@ class _ChatListTile extends StatelessWidget {
         ),
         child: Row(
           children: [
+            if (chat.isGroup)
+              GroupAvatar(
+                groupName: chat.groupName,
+                groupAvatar: chat.groupAvatar,
+                members: chat.members,
+                size: 54,
+              )
+            else
             // User Avatar with online/voice-room indicator and country flag.
             // The isOnline on chat.user itself is a denormalized snapshot
             // from whenever a message was last sent (see ChatService
@@ -415,8 +435,8 @@ class _ChatListTile extends StatelessWidget {
             // the AppUser default of false) — genuinely live status needs
             // its own listener, same as chat_detail_screen.dart's header.
             StreamBuilder<bool>(
-              stream: PartnerService.streamIsOnline(chat.user.id),
-              initialData: chat.user.isOnline,
+              stream: PartnerService.streamIsOnline(chat.user!.id),
+              initialData: chat.user!.isOnline,
               builder: (context, onlineSnapshot) {
                 return StreamBuilder<VoiceRoom?>(
                   // RoomParticipantService.streamRoomUserIsIn, not the raw
@@ -429,7 +449,7 @@ class _ChatListTile extends StatelessWidget {
                   // cross-checks their actual (non-stale) participant doc
                   // instead, same source of truth partner_profile_screen
                   // .dart's "Go Look" card already relies on.
-                  stream: RoomParticipantService.streamRoomUserIsIn(chat.user.id),
+                  stream: RoomParticipantService.streamRoomUserIsIn(chat.user!.id),
                   builder: (context, roomSnapshot) {
                     return StreamBuilder<String?>(
                       // chat.user.avatarUrl is that same denormalized
@@ -443,20 +463,23 @@ class _ChatListTile extends StatelessWidget {
                       // real user doc, so streamAvatarUrl would resolve to
                       // null and permanently blank out the logo this
                       // denormalized snapshot already carries.
-                      stream: ChatService.isSystemChat(chat.user.id)
+                      stream: ChatService.isSystemChat(chat.user!.id)
                           ? const Stream<String?>.empty()
-                          : PartnerService.streamAvatarUrl(chat.user.id),
-                      initialData: chat.user.avatarUrl.isEmpty ? null : chat.user.avatarUrl,
+                          : PartnerService.streamAvatarUrl(chat.user!.id),
+                      initialData: chat.user!.avatarUrl.isEmpty ? null : chat.user!.avatarUrl,
                       builder: (context, avatarSnapshot) {
                         return AppAvatar(
-                          seed: chat.user.name,
+                          seed: chat.user!.name,
                           size: 54,
                           showOnlineDot: true,
                           isOnline: onlineSnapshot.data ?? false,
                           inVoiceRoom: roomSnapshot.data != null,
                           showFlag: true,
-                          flag: chat.user.countryFlag,
+                          flag: chat.user!.countryFlag,
                           imageUrl: avatarSnapshot.data,
+                          assetImage: ChatService.isSystemChat(chat.user!.id)
+                              ? 'assets/images/facetalk_app_icon.png'
+                              : null,
                         );
                       },
                     );
@@ -476,7 +499,7 @@ class _ChatListTile extends StatelessWidget {
                     children: [
                       Expanded(
                         child: Text(
-                          chat.user.name,
+                          chat.displayName,
                           style: const TextStyle(
                             fontWeight: FontWeight.w700,
                             fontSize: 16,

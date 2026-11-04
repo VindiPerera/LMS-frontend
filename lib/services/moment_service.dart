@@ -273,7 +273,12 @@ class MomentService {
             recipientUid: originalOwnerId,
             title: currentUser.name,
             body: 'reshared your moment',
-            data: {'type': 'reshare', 'postId': originalPostId, 'actorId': uid},
+            data: {
+              'type': 'reshare',
+              'postId': originalPostId,
+              'actorId': uid,
+              'actorAvatar': currentUser.avatarUrl,
+            },
           );
         }
       } catch (_) {}
@@ -360,6 +365,9 @@ class MomentService {
   }) async {
     if (postId.isEmpty || uid.isEmpty) return;
     final ref = _moments.doc(postId);
+    var didLike = false;
+    String? ownerId;
+
     await FirebaseFirestore.instance.runTransaction((tx) async {
       final snap = await tx.get(ref);
       if (!snap.exists) return;
@@ -376,6 +384,8 @@ class MomentService {
         }
       } else {
         likes.add(uid);
+        didLike = true;
+        ownerId = (data['user'] as Map?)?['id']?.toString();
         final heart = reactions[defaultReactionEmoji] ?? <String>[];
         if (!heart.contains(uid)) heart.add(uid);
         reactions[defaultReactionEmoji] = heart;
@@ -388,6 +398,25 @@ class MomentService {
         'updatedAt': FieldValue.serverTimestamp(),
       });
     });
+
+    // Only on a fresh like (not an unlike), and never for liking your own
+    // post — same shape as the reshare notification above.
+    final owner = ownerId;
+    if (didLike && owner != null && owner.isNotEmpty && owner != uid) {
+      final currentUser = AuthService.instance.currentUser;
+      // ignore: discarded_futures
+      NotificationApiService.sendPush(
+        recipientUid: owner,
+        title: currentUser?.name ?? 'Someone',
+        body: 'liked your moment',
+        data: {
+          'type': 'like',
+          'postId': postId,
+          'actorId': uid,
+          'actorAvatar': currentUser?.avatarUrl ?? '',
+        },
+      );
+    }
   }
 
   /// Long-press → emoji picker: sets (or, if [emoji] was already the user's

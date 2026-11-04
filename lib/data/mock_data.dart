@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../models/user.dart';
-import '../models/live_stream.dart';
 import '../models/learn_item.dart';
 import '../models/room_participant.dart';
 
@@ -169,137 +168,6 @@ const languageCourses = [
   },
 ];
 
-final List<LiveStream> mockLiveStreams = [
-  LiveStream(
-    hostName: 'Bp',
-    hostFlag: '🇮🇳',
-    title: "Don't come or u will be kicked out",
-    tag: 'My Playlist',
-    viewers: 767,
-    badgeLabel: 'Hot',
-    coverSeed: 'live_a',
-  ),
-  LiveStream(
-    hostName: 'Elyyyy',
-    hostFlag: '🇨🇳',
-    title: 'Singing with piano',
-    tag: 'FIFA World Cup',
-    viewers: 899,
-    badgeLabel: 'Creator',
-    coverSeed: 'live_b',
-  ),
-  LiveStream(
-    hostName: 'monia',
-    hostFlag: '🇮🇹',
-    title: 'waiting for the rain to stop to continue walking to work',
-    tag: 'My Playlist',
-    viewers: 1066,
-    badgeLabel: '',
-    coverSeed: 'live_c',
-  ),
-  LiveStream(
-    hostName: 'Zidan 李泽安',
-    hostFlag: '🇺🇸',
-    title: '🧑‍🍳 Cooking after the gym 🏋️',
-    tag: 'Strange Stories',
-    viewers: 956,
-    badgeLabel: '',
-    coverSeed: 'live_d',
-  ),
-  LiveStream(
-    hostName: 'LOVELY',
-    hostFlag: '🇮🇩',
-    title: 'Is your life boring?',
-    tag: 'Reading Plan',
-    viewers: 421,
-    badgeLabel: '',
-    coverSeed: 'live_e',
-  ),
-  LiveStream(
-    hostName: 'Rizza',
-    hostFlag: '🇵🇭',
-    title: 'quick live 🤳',
-    tag: 'My Playlist',
-    viewers: 312,
-    badgeLabel: '',
-    coverSeed: 'live_f',
-  ),
-];
-
-const learnLanguageFlags = [
-  {'name': 'English', 'flag': '🇺🇸'},
-  {'name': 'Japanese', 'flag': '🇯🇵'},
-  {'name': 'Korean', 'flag': '🇰🇷'},
-  {'name': 'Spanish', 'flag': '🇪🇸'},
-  {'name': 'Chinese', 'flag': '🇨🇳'},
-  {'name': 'French', 'flag': '🇫🇷'},
-  {'name': 'German', 'flag': '🇩🇪'},
-  {'name': 'Italian', 'flag': '🇮🇹'},
-  {'name': 'Russian', 'flag': '🇷🇺'},
-  {'name': 'Arabic', 'flag': '🇸🇦'},
-];
-
-final List<LearnCard> learnCourseCards = [
-  const LearnCard(
-    title: 'Words',
-    subtitle: 'Unlock new words',
-    badge: 'AI Tech',
-    coverSeed: 'course_a',
-  ),
-  const LearnCard(
-    title: 'LiveClass',
-    subtitle: 'Tailored Courses For All Level',
-    coverSeed: 'course_b',
-  ),
-  const LearnCard(
-    title: 'English',
-    subtitle: 'Learn anywhere anytime',
-    coverSeed: 'course_c',
-  ),
-];
-
-final List<WordPack> latestWordPacks = [
-  const WordPack(title: 'AI Tech 2', progress: '0/10', badge: 'New'),
-  const WordPack(title: 'AI Creativity', progress: '0/12'),
-  const WordPack(title: 'Museum', progress: '0/12'),
-];
-
-final List<WordPack> recommendedWordPacks = [
-  const WordPack(title: 'Fun', progress: '0/13'),
-  const WordPack(title: 'Athletics', progress: 'Locked', locked: true),
-  const WordPack(title: 'Home Workout', progress: 'Locked', locked: true),
-];
-
-final List<WordPack> basicWordPacks = [
-  const WordPack(title: 'Question Words', progress: '0/8'),
-  const WordPack(title: 'Time', progress: 'Locked', locked: true),
-  const WordPack(title: 'Calendar', progress: 'Locked', locked: true),
-];
-
-const courseBanner = CourseBanner(
-  tagline: 'Hot Pick',
-  title: '1-on-1 English LiveClass',
-  subtitle: '',
-  ctaLabel: 'Buy Now!',
-  coverSeed: 'banner',
-);
-
-const liveClassBanner = CourseBanner(
-  tagline: '',
-  title: '1-on-1 English LiveClass',
-  subtitle: 'Learn with Structured Courses',
-  ctaLabel: 'Buy Now!',
-  coverSeed: 'liveclass',
-);
-
-const proPartnerBanner = CourseBanner(
-  tagline: '',
-  title: 'Teachers',
-  subtitle: 'Abundant topics to choose from\nChat freely with native teachers',
-  ctaLabel: 'Book now',
-  coverSeed: 'propartner',
-);
-
 const roomParticipants = [
   RoomParticipant(name: 'Peter', flag: '🇺🇸', role: 'host'),
   RoomParticipant(name: 'Lina', flag: '🇰🇷', isMuted: true),
@@ -448,33 +316,6 @@ AppUser tutorToAppUser(Tutor tutor) {
 final List<AppUser> fixedTeacherUsers =
     speakingTutors.map(tutorToAppUser).toList();
 
-
-const classCategories = [
-  {
-    'name': '1v1 LiveClass',
-    'icon': Icons.chat_bubble_rounded,
-    'color': Color(0xFF7B4FE0),
-    'badge': 'HOT',
-  },
-  {
-    'name': 'Speaking',
-    'icon': Icons.forum_rounded,
-    'color': Color(0xFFE8A23C),
-    'badge': '',
-  },
-  {
-    'name': 'Pro Partner',
-    'icon': Icons.people_alt_rounded,
-    'color': Color(0xFFFF4D8D),
-    'badge': '',
-  },
-  {
-    'name': 'Popular Host Class',
-    'icon': Icons.ondemand_video_rounded,
-    'color': Color(0xFF2CB5C0),
-    'badge': '',
-  },
-];
 
 const roomChatLog = [
   RoomChatMessage(sender: 'Jeffrey', text: 'Long time no see Leo!'),

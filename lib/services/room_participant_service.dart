@@ -92,9 +92,6 @@ class RoomParticipantService {
   static CollectionReference<Map<String, dynamic>> _comments(String roomId) =>
       FirebaseFirestore.instance.collection('voiceRooms').doc(roomId).collection('comments');
 
-  static CollectionReference<Map<String, dynamic>> _subtitles(String roomId) =>
-      FirebaseFirestore.instance.collection('voiceRooms').doc(roomId).collection('subtitles');
-
   static DocumentReference<Map<String, dynamic>> _room(String roomId) =>
       FirebaseFirestore.instance.collection('voiceRooms').doc(roomId);
 
@@ -1006,56 +1003,45 @@ class RoomParticipantService {
         });
   }
 
-  /// Writes one live caption line for the signed-in user — same shape and
-  /// same "must actually be on stage" restriction as [sendComment], since a
-  /// caption only ever comes from whoever is currently speaking. No caller
-  /// exists yet (there's no speech-to-text/translation pipeline wired up),
-  /// but this is the exact write path one will call once it exists: feed it
-  /// the already-English-translated text for each recognized utterance and
-  /// every client in the room picks it up via [streamSubtitles], no other
-  /// change required.
-  static Future<void> addSubtitleLine({required String roomId, required String text}) async {
+  static CollectionReference<Map<String, dynamic>> _reactions(String roomId) =>
+      FirebaseFirestore.instance.collection('voiceRooms').doc(roomId).collection('reactions');
+
+  /// Sends one emoji reaction burst (see kReactionEmojis) to everyone
+  /// currently in the room. Unlike [sendComment], any joined participant —
+  /// not just a stage one — may send one: a reaction is audience feedback,
+  /// not something that needs a seat.
+  static Future<void> sendReaction({required String roomId, required String emoji}) async {
     final uid = _uid;
-    final user = AuthService.instance.currentUser;
-    final trimmed = text.trim();
-    if (uid == null || user == null || roomId.isEmpty || trimmed.isEmpty) return;
-
-    final me = await _participants(roomId).doc(uid).get();
-    final role = me.data()?['role']?.toString() ?? 'listener';
-    if (!['host', 'moderator', 'speaker'].contains(role)) {
-      throw Exception('Only stage participants can generate captions.');
-    }
-
-    await _subtitles(roomId).add({
+    if (uid == null || roomId.isEmpty || emoji.isEmpty) return;
+    await _reactions(roomId).add({
       'senderId': uid,
-      'senderName': user.name,
-      'text': trimmed,
+      'emoji': emoji,
       'createdAt': FieldValue.serverTimestamp(),
     });
   }
 
-  /// Live caption feed for a room, oldest-first — same pagination semantics
-  /// as [streamComments]. Backs VoiceRoomDetailScreen's captions panel.
-  static Stream<List<SubtitleLine>> streamSubtitles(String roomId, {int limit = 50}) {
-    if (roomId.isEmpty) return Stream.value(const []);
-    return _subtitles(roomId)
+  /// Live stream of reactions sent AFTER this is first subscribed to — each
+  /// emission is one new burst to animate. Deliberately not the room's full
+  /// reaction history (there's nothing to show for a burst that already
+  /// finished floating up someone else's screen before this device joined).
+  /// Range-filtering and ordering on the same field (`createdAt`) needs no
+  /// composite index, unlike the arrayContains-based queries elsewhere in
+  /// this app.
+  static Stream<String> streamNewReactions(String roomId) {
+    if (roomId.isEmpty) return const Stream.empty();
+    final since = Timestamp.now();
+    return _reactions(roomId)
+        .where('createdAt', isGreaterThan: since)
         .orderBy('createdAt')
-        .limitToLast(limit)
         .snapshots()
-        .map(
-          (snap) => snap.docs
-              .map(
-                (d) => SubtitleLine(
-                  speakerId: d.data()['senderId']?.toString() ?? '',
-                  speakerName: d.data()['senderName']?.toString() ?? 'Someone',
-                  text: d.data()['text']?.toString() ?? '',
-                ),
-              )
-              .toList(),
+        .expand(
+          (snap) => snap.docChanges
+              .where((c) => c.type == DocumentChangeType.added)
+              .map((c) => c.doc.data()?['emoji']?.toString() ?? '')
+              .where((e) => e.isNotEmpty),
         )
         .handleError((e) {
-          debugPrint('RoomParticipantService.streamSubtitles failed (showing none): $e');
-          return <SubtitleLine>[];
+          debugPrint('RoomParticipantService.streamNewReactions failed (non-fatal): $e');
         });
   }
 }

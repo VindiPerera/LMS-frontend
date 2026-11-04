@@ -318,6 +318,46 @@ class AuthService {
         : null;
   }
 
+  /// Bumps `users/{uid}.dayStreak` at most once per calendar day — called
+  /// from main_shell.dart on launch/resume (the "app was actually opened
+  /// today" signal), same spirit as setOnlineStatus's heartbeat above but
+  /// using the device's local calendar day rather than a rolling time
+  /// window. A transaction (not a plain read-then-write) so two rapid
+  /// resumes can't both read the same `lastStreakDate` and double-count.
+  Future<void> recordDailyStreak() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    final today = DateTime.now();
+    final todayKey = _dayKey(today);
+    final ref = _users.doc(uid);
+
+    try {
+      await FirebaseFirestore.instance.runTransaction((tx) async {
+        final snap = await tx.get(ref);
+        if (!snap.exists) return;
+        final data = snap.data()!;
+        final lastKey = data['lastStreakDate']?.toString();
+        if (lastKey == todayKey) return; // already counted today
+
+        final currentStreak = (data['dayStreak'] as num?)?.toInt() ?? 0;
+        final isConsecutive = lastKey != null && lastKey == _dayKey(today.subtract(const Duration(days: 1)));
+        tx.update(ref, {
+          'dayStreak': isConsecutive ? currentStreak + 1 : 1,
+          'lastStreakDate': todayKey,
+        });
+      });
+      // Keep the in-memory profile (me_screen.dart's "Day Streak" card) in
+      // sync without a full refreshCurrentUser() round-trip.
+      await refreshCurrentUser();
+    } catch (_) {
+      // Offline, or the profile doc doesn't exist yet — non-critical, the
+      // next successful app open catches up.
+    }
+  }
+
+  static String _dayKey(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
   /// Build a unique @handle from a display name, e.g. "Vinuk Lakvindu" ->
   /// "vinuk_lakvindu" (mirrors the old backend's AuthController logic).
   Future<String> _generateUniqueHandle(String name) async {

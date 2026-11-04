@@ -114,6 +114,7 @@ class CommentService {
       postRef: postRef,
       commenterId: uid,
       commenterName: userName,
+      commenterAvatar: userAvatar,
       text: cleanText,
       mentionedUserIds: mentionedUserIds,
     ));
@@ -123,6 +124,7 @@ class CommentService {
     required DocumentReference<Map<String, dynamic>> postRef,
     required String commenterId,
     required String commenterName,
+    required String commenterAvatar,
     required String text,
     required List<String> mentionedUserIds,
   }) async {
@@ -144,7 +146,12 @@ class CommentService {
         recipientUid: ownerId,
         title: commenterName,
         body: 'commented: $preview',
-        data: {'type': 'comment', 'postId': postRef.id, 'actorId': commenterId},
+        data: {
+          'type': 'comment',
+          'postId': postRef.id,
+          'actorId': commenterId,
+          'actorAvatar': commenterAvatar,
+        },
       );
     }
 
@@ -155,7 +162,12 @@ class CommentService {
         recipientUid: mentionedUid,
         title: commenterName,
         body: 'mentioned you: $preview',
-        data: {'type': 'mention', 'postId': postRef.id, 'actorId': commenterId},
+        data: {
+          'type': 'mention',
+          'postId': postRef.id,
+          'actorId': commenterId,
+          'actorAvatar': commenterAvatar,
+        },
       );
     }
   }

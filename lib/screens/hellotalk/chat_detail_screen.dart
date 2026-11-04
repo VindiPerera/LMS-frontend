@@ -6,6 +6,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_linkify/flutter_linkify.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
@@ -14,6 +15,7 @@ import '../../models/chat_message.dart';
 import '../../models/user.dart';
 import '../../models/voiceroom.dart';
 import '../../services/chat_service.dart';
+import '../../services/friend_link_service.dart';
 import '../../services/media_service.dart';
 import '../../services/partner_service.dart';
 import '../../services/push_notification_service.dart';
@@ -21,14 +23,26 @@ import '../../services/room_participant_service.dart';
 import '../../theme/app_colors.dart';
 import '../../utils/chat_time.dart';
 import '../../widgets/app_avatar.dart';
+import '../../widgets/group_avatar.dart';
 import '../../widgets/voice_room_invite_card.dart';
 import '../connect/partner_profile_screen.dart';
 import '../moments/image_viewer_screen.dart';
 import '../voiceroom/open_voice_room.dart';
+import 'group_info_screen.dart';
 
 class ChatDetailScreen extends StatefulWidget {
-  final AppUser user;
-  const ChatDetailScreen({super.key, required this.user});
+  // Exactly one of these is set — [user] for a 1:1 thread, [groupChatId]
+  // for a group (see ChatService.createGroup/streamGroupThread). Kept as
+  // two optional fields on one screen, rather than a separate
+  // GroupChatDetailScreen, so the composer/message list/voice-file-image
+  // handling below is written and maintained exactly once for both shapes.
+  final AppUser? user;
+  final String? groupChatId;
+  const ChatDetailScreen({super.key, this.user, this.groupChatId})
+      : assert(
+          user != null || groupChatId != null,
+          'ChatDetailScreen needs either a user (1:1) or a groupChatId (group).',
+        );
 
   @override
   State<ChatDetailScreen> createState() => _ChatDetailScreenState();
@@ -37,24 +51,27 @@ class ChatDetailScreen extends StatefulWidget {
 class _ChatDetailScreenState extends State<ChatDetailScreen> {
   final _controller = TextEditingController();
   final _scrollController = ScrollController();
-  late final String _chatId = ChatService.chatIdFor(widget.user.id);
+  bool get _isGroup => widget.groupChatId != null;
+  late final String _chatId = widget.groupChatId ?? ChatService.chatIdFor(widget.user!.id);
   late final Stream<List<ChatMessage>> _messagesStream =
       ChatService.streamMessages(_chatId);
   // Live online/offline for the header — widget.user.isOnline alone would
   // just be whatever was true the moment this screen opened, never
   // updating while the chat stays open. Skipped for the FaceTalk system
-  // account: it isn't a real user doc, so there's nothing to listen to.
-  late final Stream<bool> _theirOnlineStream = _isSystemChat
+  // account (no real user doc to listen to) and for a group (no single
+  // "other person" to be online/offline at all — see the group header,
+  // which shows a member count instead).
+  late final Stream<bool> _theirOnlineStream = (_isSystemChat || _isGroup)
       ? const Stream.empty()
-      : PartnerService.streamIsOnline(widget.user.id);
+      : PartnerService.streamIsOnline(widget.user!.id);
   // widget.user.avatarUrl is a denormalized participantInfo snapshot —
   // only refreshed when either side next sends a message in this thread
   // (see ChatService's class doc) — so a newly-uploaded avatar needs its
   // own live listener to show up here right away instead of waiting for
   // that next message.
-  late final Stream<String?> _theirAvatarStream = _isSystemChat
+  late final Stream<String?> _theirAvatarStream = (_isSystemChat || _isGroup)
       ? const Stream.empty()
-      : PartnerService.streamAvatarUrl(widget.user.id);
+      : PartnerService.streamAvatarUrl(widget.user!.id);
   // The voice room they're actually, currently present in — NOT
   // PartnerService.streamActiveRoomId's raw users/{uid}.activeRoomId, which
   // only self-clears via RoomParticipantService.leave and so can stay
@@ -63,11 +80,21 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   // stale-participant sweep deliberately not touching this field). This
   // cross-checks their actual non-stale participant doc instead, the same
   // source of truth partner_profile_screen.dart's "Go Look" card uses.
-  late final Stream<VoiceRoom?> _theirActiveRoomStream = _isSystemChat
+  late final Stream<VoiceRoom?> _theirActiveRoomStream = (_isSystemChat || _isGroup)
       ? const Stream.empty()
-      : RoomParticipantService.streamRoomUserIsIn(widget.user.id);
+      : RoomParticipantService.streamRoomUserIsIn(widget.user!.id);
 
-  bool get _isSystemChat => ChatService.isSystemChat(widget.user.id);
+  bool get _isSystemChat => !_isGroup && ChatService.isSystemChat(widget.user!.id);
+
+  String get _myUid => FirebaseAuth.instance.currentUser?.uid ?? '';
+
+  // Kept as a plain field (updated via the subscription below) rather than
+  // only a StreamBuilder in the header: _send/_sendPhoto/_sendVoice/
+  // _sendFile all need the current member list outside of build() too, to
+  // know who else to fan the unread count/push out to (see
+  // ChatService.sendGroupMessage's recipientUids).
+  ChatThread? _groupThread;
+  StreamSubscription<ChatThread?>? _groupThreadSub;
 
   @override
   void initState() {
@@ -79,6 +106,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     // a redundant banner on top of the message already appearing live in
     // the list below — see push_notification_service.dart.
     PushNotificationService.instance.setActiveChat(_chatId);
+    if (_isGroup) {
+      _groupThreadSub = ChatService.streamGroupThread(_chatId).listen((thread) {
+        if (mounted) setState(() => _groupThread = thread);
+      });
+    }
   }
 
   @override
@@ -86,9 +118,24 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     if (PushNotificationService.instance.activeChatId == _chatId) {
       PushNotificationService.instance.setActiveChat(null);
     }
+    _groupThreadSub?.cancel();
     _controller.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  /// Every OTHER current group member — ChatService.sendGroupMessage's
+  /// recipientUids. Empty (rather than throwing) if the live thread hasn't
+  /// loaded yet; a message sent in that split second still goes out, it
+  /// just won't bump anyone's unread count or push until the next one does.
+  List<String> get _groupRecipientUids =>
+      _groupThread?.memberIds.where((id) => id != _myUid).toList() ?? const [];
+
+  GroupMember? _memberFor(String uid) {
+    for (final m in _groupThread?.members ?? const <GroupMember>[]) {
+      if (m.uid == uid) return m;
+    }
+    return null;
   }
 
   void _scrollToBottom() {
@@ -104,7 +151,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
     _controller.clear();
     try {
-      await ChatService.sendMessage(other: widget.user, text: text);
+      if (_isGroup) {
+        await ChatService.sendGroupMessage(chatId: _chatId, recipientUids: _groupRecipientUids, text: text);
+      } else {
+        await ChatService.sendMessage(other: widget.user!, text: text);
+      }
       _scrollToBottom();
     } on FirebaseException catch (e) {
       if (!mounted) return;
@@ -156,7 +207,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         uid: FirebaseAuth.instance.currentUser?.uid ?? '',
         postId: _chatId,
       );
-      await ChatService.sendImageMessage(other: widget.user, imageUrl: url);
+      if (_isGroup) {
+        await ChatService.sendGroupImageMessage(chatId: _chatId, recipientUids: _groupRecipientUids, imageUrl: url);
+      } else {
+        await ChatService.sendImageMessage(other: widget.user!, imageUrl: url);
+      }
       _scrollToBottom();
     } catch (e) {
       _showError("Photo didn't send: $e");
@@ -187,12 +242,22 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         filename: picked.name,
         extension: picked.extension ?? 'bin',
       );
-      await ChatService.sendFileMessage(
-        other: widget.user,
-        fileUrl: url,
-        fileName: picked.name,
-        fileSize: bytes.length,
-      );
+      if (_isGroup) {
+        await ChatService.sendGroupFileMessage(
+          chatId: _chatId,
+          recipientUids: _groupRecipientUids,
+          fileUrl: url,
+          fileName: picked.name,
+          fileSize: bytes.length,
+        );
+      } else {
+        await ChatService.sendFileMessage(
+          other: widget.user!,
+          fileUrl: url,
+          fileName: picked.name,
+          fileSize: bytes.length,
+        );
+      }
       _scrollToBottom();
     } catch (e) {
       _showError("File didn't send: $e");
@@ -222,7 +287,16 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         uid: FirebaseAuth.instance.currentUser?.uid ?? '',
         chatId: _chatId,
       );
-      await ChatService.sendVoiceMessage(other: widget.user, audioUrl: url, seconds: seconds);
+      if (_isGroup) {
+        await ChatService.sendGroupVoiceMessage(
+          chatId: _chatId,
+          recipientUids: _groupRecipientUids,
+          audioUrl: url,
+          seconds: seconds,
+        );
+      } else {
+        await ChatService.sendVoiceMessage(other: widget.user!, audioUrl: url, seconds: seconds);
+      }
       _scrollToBottom();
     } catch (e) {
       _showError("Voice message didn't send: $e");
@@ -234,88 +308,126 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     }
   }
 
+  Widget _buildGroupTitle(BuildContext context) {
+    final thread = _groupThread;
+    final name = thread?.groupName ?? 'Group';
+    final count = thread?.members.length;
+    return InkWell(
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => GroupInfoScreen(chatId: _chatId)),
+      ),
+      child: Row(
+        children: [
+          GroupAvatar(
+            groupName: name,
+            groupAvatar: thread?.groupAvatar ?? '',
+            members: thread?.members.map((m) => (uid: m.uid, name: m.name)).toList() ?? const [],
+            size: 36,
+          ),
+          const SizedBox(width: 10),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(name, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+              Text(
+                count == null ? '…' : '$count members',
+                style: const TextStyle(fontSize: 11.5, color: AppColors.textTertiary),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildUserTitle(BuildContext context) {
+    final user = widget.user!;
+    return StreamBuilder<bool>(
+      stream: _theirOnlineStream,
+      initialData: user.isOnline,
+      builder: (context, snapshot) {
+        final isOnline = snapshot.data ?? false;
+        // The system/broadcast account has no real profile to open —
+        // tapping it is a no-op, same as its hidden online dot above.
+        return InkWell(
+          onTap: _isSystemChat
+              ? null
+              : () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => PartnerProfileScreen(initial: user),
+                  ),
+                ),
+          child: Row(
+            children: [
+              // Built directly (not via AppAvatar.forUser) so the dot
+              // uses the live `isOnline` above instead of the static
+              // widget.user.isOnline snapshot forUser would read.
+              StreamBuilder<String?>(
+                stream: _theirAvatarStream,
+                initialData: user.avatarUrl.isEmpty ? null : user.avatarUrl,
+                builder: (context, avatarSnapshot) {
+                  return AppAvatar(
+                    seed: user.name,
+                    imageUrl: avatarSnapshot.data,
+                    assetImage: _isSystemChat ? 'assets/images/facetalk_app_icon.png' : null,
+                    size: 36,
+                    showFlag: false,
+                    showOnlineDot: !_isSystemChat,
+                    isOnline: isOnline,
+                  );
+                },
+              ),
+              const SizedBox(width: 10),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        user.name,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      if (_isSystemChat) ...[
+                        const SizedBox(width: 4),
+                        const Icon(
+                          Icons.verified_rounded,
+                          size: 15,
+                          color: AppColors.primaryPurple,
+                        ),
+                      ],
+                    ],
+                  ),
+                  Text(
+                    _isSystemChat
+                        ? 'Official account'
+                        : (isOnline ? 'Active now' : 'Offline'),
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      color: _isSystemChat
+                          ? AppColors.textTertiary
+                          : (isOnline ? AppColors.online : AppColors.textTertiary),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final myUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    final myUid = _myUid;
 
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 0,
-        title: StreamBuilder<bool>(
-          stream: _theirOnlineStream,
-          initialData: widget.user.isOnline,
-          builder: (context, snapshot) {
-            final isOnline = snapshot.data ?? false;
-            // The system/broadcast account has no real profile to open —
-            // tapping it is a no-op, same as its hidden online dot above.
-            return InkWell(
-              onTap: _isSystemChat
-                  ? null
-                  : () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => PartnerProfileScreen(initial: widget.user),
-                      ),
-                    ),
-              child: Row(
-                children: [
-                  // Built directly (not via AppAvatar.forUser) so the dot
-                  // uses the live `isOnline` above instead of the static
-                  // widget.user.isOnline snapshot forUser would read.
-                  StreamBuilder<String?>(
-                    stream: _theirAvatarStream,
-                    initialData: widget.user.avatarUrl.isEmpty ? null : widget.user.avatarUrl,
-                    builder: (context, avatarSnapshot) {
-                      return AppAvatar(
-                        seed: widget.user.name,
-                        imageUrl: avatarSnapshot.data,
-                        size: 36,
-                        showFlag: false,
-                        showOnlineDot: !_isSystemChat,
-                        isOnline: isOnline,
-                      );
-                    },
-                  ),
-                  const SizedBox(width: 10),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Text(
-                            widget.user.name,
-                            style: const TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          if (_isSystemChat) ...[
-                            const SizedBox(width: 4),
-                            const Icon(
-                              Icons.verified_rounded,
-                              size: 15,
-                              color: AppColors.primaryPurple,
-                            ),
-                          ],
-                        ],
-                      ),
-                      Text(
-                        _isSystemChat
-                            ? 'Official account'
-                            : (isOnline ? 'Active now' : 'Offline'),
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          color: _isSystemChat
-                              ? AppColors.textTertiary
-                              : (isOnline ? AppColors.online : AppColors.textTertiary),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            );
-          },
-        ),
+        title: _isGroup ? _buildGroupTitle(context) : _buildUserTitle(context),
       ),
       body: Column(
         children: [
@@ -367,7 +479,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                           ),
                           const SizedBox(height: 12),
                           Text(
-                            'Say hi to ${widget.user.name} 👋',
+                            _isGroup ? 'Say hi to the group 👋' : 'Say hi to ${widget.user!.name} 👋',
                             style: const TextStyle(
                               color: AppColors.textPrimary,
                               fontWeight: FontWeight.w700,
@@ -397,11 +509,18 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                     vertical: 12,
                   ),
                   itemCount: messages.length,
-                  itemBuilder: (context, i) => _MessageBubble(
-                    message: messages[i],
-                    user: widget.user,
-                    myUid: myUid,
-                  ),
+                  itemBuilder: (context, i) {
+                    final msg = messages[i];
+                    final sender = _isGroup ? _memberFor(msg.senderId) : null;
+                    return _MessageBubble(
+                      message: msg,
+                      myUid: myUid,
+                      isGroup: _isGroup,
+                      senderName: _isGroup ? (sender?.name ?? 'Member') : widget.user!.name,
+                      senderAvatarUrl: _isGroup ? (sender?.avatarUrl ?? '') : widget.user!.avatarUrl,
+                      isSystemChat: _isSystemChat,
+                    );
+                  },
                 );
               },
             ),
@@ -497,16 +616,47 @@ class _PartnerVoiceRoomBanner extends StatelessWidget {
 
 class _MessageBubble extends StatelessWidget {
   final ChatMessage message;
-  final AppUser user;
   final String myUid;
+  final bool isGroup;
+  // The incoming message's sender — always the thread's one other person
+  // in a 1:1, or the specific member who sent THIS message in a group
+  // (resolved per-message by ChatDetailScreen's itemBuilder, since a group
+  // has more than one possible sender). Unused when [message.isMine] or the
+  // message is a system line.
+  final String senderName;
+  final String senderAvatarUrl;
+  final bool isSystemChat;
   const _MessageBubble({
     required this.message,
-    required this.user,
     required this.myUid,
+    required this.isGroup,
+    required this.senderName,
+    required this.senderAvatarUrl,
+    this.isSystemChat = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    if (message.type == MessageType.system) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Center(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceLight,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              message.text,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: AppColors.textTertiary, fontSize: 12),
+            ),
+          ),
+        ),
+      );
+    }
+
     final isMe = message.isMine(myUid);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
@@ -517,10 +667,34 @@ class _MessageBubble extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           if (!isMe) ...[
-            AppAvatar.forUser(user, size: 30),
+            AppAvatar(
+              seed: senderName,
+              imageUrl: senderAvatarUrl.isEmpty ? null : senderAvatarUrl,
+              assetImage: isSystemChat ? 'assets/images/facetalk_app_icon.png' : null,
+              size: 30,
+            ),
             const SizedBox(width: 8),
           ],
-          Flexible(child: _bubbleContent(context, isMe)),
+          Flexible(
+            child: Column(
+              crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+              children: [
+                // A group needs the sender's name on each incoming bubble
+                // (there's more than one possible "other" person); a 1:1
+                // thread doesn't — it's always the same person, already
+                // named in the header.
+                if (isGroup && !isMe)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4, bottom: 2),
+                    child: Text(
+                      senderName,
+                      style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: AppColors.textTertiary),
+                    ),
+                  ),
+                _bubbleContent(context, isMe),
+              ],
+            ),
+          ),
           if (isMe) const SizedBox(width: 4),
         ],
       ),
@@ -658,11 +832,19 @@ class _MessageBubble extends StatelessWidget {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(color: bg, borderRadius: radius),
-          child: Text(
-            message.text,
+          child: Linkify(
+            text: message.text,
+            onOpen: (link) => _openLink(context, link),
+            options: const LinkifyOptions(humanize: false),
             style: TextStyle(
               color: isMe ? Colors.white : AppColors.textPrimary,
               fontSize: 14.5,
+            ),
+            linkStyle: TextStyle(
+              color: isMe ? Colors.white : AppColors.textPrimary,
+              fontSize: 14.5,
+              decoration: TextDecoration.underline,
+              fontWeight: FontWeight.w700,
             ),
           ),
         ),
@@ -700,6 +882,35 @@ class _MessageBubble extends StatelessWidget {
         ],
       ],
     );
+  }
+
+  /// A tapped link inside a text message — e.g. the "Share Profile" link
+  /// (see share_profile_sheet.dart), which is this app's own `/u/{code}`
+  /// deep link. Resolved and opened IN-APP (straight to PartnerProfileScreen)
+  /// rather than handed to a browser, same as tapping that same link from
+  /// outside the app would eventually land via deep_link_service.dart — any
+  /// other URL (something the sender just pasted in) falls back to opening
+  /// externally, same as moment_card.dart's own link handling.
+  Future<void> _openLink(BuildContext context, LinkableElement link) async {
+    if (link is! UrlElement) return;
+    final resolved = await FriendLinkService.instance.resolveCode(link.url);
+    if (resolved != null && resolved.uid.isNotEmpty) {
+      try {
+        final user = await PartnerService.fetchPartner(resolved.uid);
+        if (!context.mounted) return;
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => PartnerProfileScreen(initial: user)),
+        );
+        return;
+      } catch (_) {
+        // Fall through — a dead/deleted-account link still opens externally
+        // below rather than silently doing nothing.
+      }
+    }
+    final uri = Uri.tryParse(link.url);
+    if (uri != null) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
   }
 
   static String _formatFileSize(int bytes) {

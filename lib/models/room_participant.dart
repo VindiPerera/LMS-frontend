@@ -135,22 +135,3 @@ class BoardComment {
     required this.text,
   });
 }
-
-/// One live caption line — backed by `voiceRooms/{roomId}/subtitles`
-/// (RoomParticipantService.addSubtitleLine/streamSubtitles). [text] is
-/// already the English translation of what [speakerName] said; no actual
-/// speech-to-text/translation pipeline writes these yet, but the model and
-/// its Firestore-backed read/write path exist so one can be plugged in later
-/// without any UI changes — mirrors [BoardComment]/the `comments`
-/// subcollection exactly.
-class SubtitleLine {
-  final String speakerId;
-  final String speakerName;
-  final String text;
-
-  const SubtitleLine({
-    required this.speakerId,
-    required this.speakerName,
-    required this.text,
-  });
-}

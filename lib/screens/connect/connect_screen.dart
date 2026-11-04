@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
+import '../../models/chat_message.dart';
 import '../../models/user.dart';
+import '../../services/auth_service.dart';
 import '../../services/chat_service.dart';
 import '../../services/partner_service.dart';
-import '../../services/teacher_service.dart';
 import '../../theme/app_colors.dart';
 
 import '../../widgets/app_avatar.dart';
+import '../../widgets/group_avatar.dart';
 import '../hellotalk/chat_detail_screen.dart';
 import 'partner_profile_screen.dart';
 
@@ -19,7 +21,7 @@ class ConnectScreen extends StatefulWidget {
 class _ConnectScreenState extends State<ConnectScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabController;
-  final _filters = const ['Recommended', 'Nearby', 'New Users', 'Same City'];
+  final _filters = const ['Recommended', 'New Users', 'Same Country'];
   int _filterIndex = 0;
 
   bool _searching = false;
@@ -32,7 +34,7 @@ class _ConnectScreenState extends State<ConnectScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 2, vsync: this);
     _loadPartners();
   }
 
@@ -118,7 +120,6 @@ class _ConnectScreenState extends State<ConnectScreen>
           tabs: const [
             Tab(text: 'Partners'),
             Tab(text: 'Groups'),
-            Tab(text: 'Teachers'),
           ],
         ),
       ),
@@ -134,8 +135,7 @@ class _ConnectScreenState extends State<ConnectScreen>
             onRetry: _loadPartners,
             searchQuery: _searchQuery,
           ),
-          const _EmptyTab(icon: Icons.groups_rounded, label: 'No groups yet'),
-          _TeachersTab(searchQuery: _searchQuery),
+          const _GroupsTab(),
         ],
       ),
     );
@@ -200,6 +200,40 @@ class _PartnersTab extends StatelessWidget {
     );
   }
 
+  // "Recommended" is just the unfiltered list — this app has no actual
+  // recommendation engine, so it's the sensible default/catch-all rather
+  // than an empty promise of one.
+  static const _newUserWindow = Duration(days: 30);
+
+  List<AppUser> _applyChipFilter(List<AppUser> users) {
+    switch (filters[filterIndex]) {
+      case 'New Users':
+        final cutoff = DateTime.now().subtract(_newUserWindow);
+        final recent = users.where((u) => u.createdAt != null && u.createdAt!.isAfter(cutoff)).toList()
+          ..sort((a, b) => b.createdAt!.compareTo(a.createdAt!));
+        return recent;
+      case 'Same Country':
+        final myFlag = AuthService.instance.currentUser?.countryFlag ?? '';
+        if (myFlag.isEmpty) return const [];
+        return users.where((u) => u.countryFlag == myFlag).toList();
+      default:
+        return users;
+    }
+  }
+
+  String _emptyMessageFor(String filter) {
+    switch (filter) {
+      case 'New Users':
+        return 'No one has joined in the last 30 days — check back soon!';
+      case 'Same Country':
+        return AuthService.instance.currentUser?.countryFlag.isEmpty ?? true
+            ? "Set your country on your profile to see partners from it."
+            : 'No partners from your country yet — check back soon!';
+      default:
+        return 'No partners yet — check back soon!';
+    }
+  }
+
   Widget _buildBody() {
     if (error != null) {
       return Center(
@@ -237,20 +271,25 @@ class _PartnersTab extends StatelessWidget {
       );
     }
 
+    final chipFiltered = _applyChipFilter(allUsers);
     final users = searchQuery.isEmpty
-        ? allUsers
-        : allUsers.where((u) {
+        ? chipFiltered
+        : chipFiltered.where((u) {
             return u.name.toLowerCase().contains(searchQuery) ||
                 u.handle.toLowerCase().contains(searchQuery);
           }).toList();
 
     if (users.isEmpty) {
       return Center(
-        child: Text(
-          searchQuery.isNotEmpty
-              ? 'No partners matching "$searchQuery"'
-              : 'No partners yet — check back soon!',
-          style: const TextStyle(color: AppColors.textTertiary),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Text(
+            searchQuery.isNotEmpty
+                ? 'No partners matching "$searchQuery"'
+                : _emptyMessageFor(filters[filterIndex]),
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: AppColors.textTertiary),
+          ),
         ),
       );
     }
@@ -542,6 +581,114 @@ class _WaveOrChatButton extends StatelessWidget {
   }
 }
 
+/// The groups the signed-in user is already a member of — the obvious
+/// content for this tab once group chats existed at all (see
+/// ChatService.createGroup/hellotalk/group_info_screen.dart). Reuses
+/// ChatService.streamChatPreviews() (the same live list the Message tab's
+/// chat_list_screen.dart already shows, mixing 1:1 and group threads
+/// together) rather than a second query, just filtered down to isGroup —
+/// so a group's unread state here is always exactly what Message would
+/// show for it too, never a second source of truth to drift out of sync.
+class _GroupsTab extends StatelessWidget {
+  const _GroupsTab();
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<ChatPreview>>(
+      stream: ChatService.streamChatPreviews(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
+          return const Center(
+            child: CircularProgressIndicator(strokeWidth: 2.4, color: AppColors.primaryPurple),
+          );
+        }
+        final groups = (snapshot.data ?? const []).where((c) => c.isGroup).toList();
+        if (groups.isEmpty) {
+          return const _EmptyTab(
+            icon: Icons.groups_rounded,
+            label: "No groups yet — create one from Message's \"Add People\".",
+          );
+        }
+        return ListView.separated(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          itemCount: groups.length,
+          separatorBuilder: (context, i) => const Divider(height: 1, color: AppColors.divider),
+          itemBuilder: (context, i) => _GroupTile(group: groups[i]),
+        );
+      },
+    );
+  }
+}
+
+class _GroupTile extends StatelessWidget {
+  final ChatPreview group;
+  const _GroupTile({required this.group});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => ChatDetailScreen(groupChatId: group.id)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Row(
+          children: [
+            GroupAvatar(
+              groupName: group.groupName,
+              groupAvatar: group.groupAvatar,
+              members: group.members,
+              size: 54,
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    group.groupName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.textPrimary),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${group.memberCount} members',
+                    style: const TextStyle(color: AppColors.textTertiary, fontSize: 12.5),
+                  ),
+                  if (group.lastMessage.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      group.lastMessage,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: group.unreadCount > 0 ? AppColors.textPrimary : AppColors.textSecondary,
+                        fontSize: 13.5,
+                        fontWeight: group.unreadCount > 0 ? FontWeight.w700 : FontWeight.w400,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            if (group.unreadCount > 0)
+              Container(
+                margin: const EdgeInsets.only(left: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                decoration: BoxDecoration(color: AppColors.primaryPurple, borderRadius: BorderRadius.circular(10)),
+                child: Text(
+                  '${group.unreadCount}',
+                  style: const TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.w800),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _EmptyTab extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -561,273 +708,3 @@ class _EmptyTab extends StatelessWidget {
     );
   }
 }
-
-class _TeachersTab extends StatefulWidget {
-  final String searchQuery;
-  const _TeachersTab({this.searchQuery = ''});
-
-  @override
-  State<_TeachersTab> createState() => _TeachersTabState();
-}
-
-class _TeachersTabState extends State<_TeachersTab> {
-  List<AppUser>? _teachers;
-  bool _loading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadTeachers();
-  }
-
-  Future<void> _loadTeachers() async {
-    final teachers = await TeacherService.fetchTeachers();
-    if (!mounted) return;
-    setState(() {
-      _teachers = teachers;
-      _loading = false;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_loading) {
-      return const Center(
-        child: CircularProgressIndicator(
-          strokeWidth: 2.4,
-          color: AppColors.primaryPurple,
-        ),
-      );
-    }
-
-    final allTeachers = _teachers ?? const [];
-    final query = widget.searchQuery;
-    final teachers = query.isEmpty
-        ? allTeachers
-        : allTeachers.where((t) {
-            return t.name.toLowerCase().contains(query) ||
-                t.handle.toLowerCase().contains(query);
-          }).toList();
-
-    if (teachers.isEmpty) {
-      return Center(
-        child: Text(
-          query.isNotEmpty
-              ? 'No teachers matching "$query"'
-              : 'No teachers available right now.',
-          style: const TextStyle(color: AppColors.textTertiary),
-        ),
-      );
-    }
-
-    return RefreshIndicator(
-      onRefresh: _loadTeachers,
-      child: ListView.separated(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 24),
-        itemCount: teachers.length,
-        separatorBuilder: (_, _) => const SizedBox(height: 12),
-
-        itemBuilder: (context, i) => _TeacherCard(teacher: teachers[i]),
-      ),
-    );
-  }
-}
-
-class _TeacherCard extends StatelessWidget {
-  final AppUser teacher;
-  const _TeacherCard({required this.teacher});
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(16),
-      onTap: () {
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => PartnerProfileScreen(initial: teacher)),
-        );
-      },
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.divider),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.03),
-              blurRadius: 6,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                AppAvatar.forUser(teacher, size: 54, showFlag: true),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Flexible(
-                            child: Text(
-                              teacher.name,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w800,
-                                fontSize: 16.5,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF6B47EB),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: const Text(
-                              'TEACHER',
-                              style: TextStyle(
-                                fontSize: 9,
-                                fontWeight: FontWeight.w800,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        teacher.detail.isNotEmpty ? teacher.detail : 'English Tutor',
-                        style: const TextStyle(
-                          fontSize: 12.5,
-                          color: AppColors.primaryPurple,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Row(
-                        children: [
-                          const Icon(Icons.star_rounded, size: 15, color: Color(0xFFFFB300)),
-                          const SizedBox(width: 3),
-                          const Text(
-                            '4.9 (120+ lessons)',
-                            style: TextStyle(
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.textSecondary,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            '• ${teacher.activeLabel.isNotEmpty ? teacher.activeLabel : "Active now"}',
-                            style: const TextStyle(
-                              fontSize: 11.5,
-                              color: AppColors.textTertiary,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            if (teacher.bio.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              Text(
-                teacher.bio,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 12.5,
-                  color: AppColors.textSecondary,
-                  height: 1.3,
-                ),
-              ),
-            ],
-            const SizedBox(height: 12),
-            const Divider(height: 1, color: AppColors.divider),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                // Say Hi Button with waving hand asset
-                GestureDetector(
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => ChatDetailScreen(user: teacher)),
-                    );
-                  },
-                  child: Container(
-                    height: 38,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF3EFFF),
-                      borderRadius: BorderRadius.circular(19),
-                      border: Border.all(
-                        color: AppColors.primaryPurple.withValues(alpha: 0.18),
-                        width: 1,
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Image.asset(
-                          'assets/images/say_hi_hand.png',
-                          width: 20,
-                          height: 20,
-                        ),
-                        const SizedBox(width: 6),
-                        const Text(
-                          'Say Hi',
-                          style: TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.primaryPurple,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-
-                const Spacer(),
-
-                // Book Tutor Button
-                ElevatedButton.icon(
-                  onPressed: () {
-                    TeacherService.bookTutor(context, teacher: teacher);
-                  },
-                  icon: const Icon(Icons.calendar_month_rounded, size: 16),
-                  label: const Text(
-                    'Book Tutor',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF6B47EB),
-                    foregroundColor: Colors.white,
-                    elevation: 0,
-                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-

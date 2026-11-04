@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'dart:ui' as ui;
 
 import 'package:firebase_auth/firebase_auth.dart';
@@ -19,6 +20,7 @@ import '../../services/voice_room_session_controller.dart';
 import '../../services/whiteboard_service.dart';
 import '../../widgets/app_avatar.dart';
 import '../../widgets/dark_action_sheet.dart';
+import '../../widgets/reaction_picker.dart';
 import '../../widgets/whiteboard_canvas.dart';
 import '../../widgets/whiteboard_library_sheet.dart';
 import 'expanded_whiteboard_screen.dart';
@@ -59,10 +61,6 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
   // and users can also freely scroll back up through history. Disposed in
   // dispose() alongside every other controller on this screen.
   final _commentScrollController = ScrollController();
-  // Same auto-scroll-to-newest role as _commentScrollController above, for
-  // the captions panel's own line list.
-  final _subtitlesScrollController = ScrollController();
-  bool _subtitlesOn = false;
   bool _ending = false;
   bool _addingImage = false;
   // Set right before popping from "Minimize the room" — tells dispose() the
@@ -93,8 +91,12 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
       ).asBroadcastStream();
   late final Stream<List<BoardComment>> _commentsStream =
       RoomParticipantService.streamComments(widget.room.id);
-  late final Stream<List<SubtitleLine>> _subtitlesStream =
-      RoomParticipantService.streamSubtitles(widget.room.id);
+  // Created once (not inline in build()) so its "only show reactions sent
+  // after this subscribes" cutoff (see streamNewReactions) doesn't keep
+  // resetting to "now" on every rebuild — _ReactionOverlay subscribes to
+  // this exact instance from its own initState.
+  late final Stream<String> _reactionsStream =
+      RoomParticipantService.streamNewReactions(widget.room.id);
   // asBroadcastStream() for the same reason as _participantsStream above:
   // both the stage card's StreamBuilder AND the expanded full-screen view
   // (and the plain _whiteboardSub cache below) need their own listener on
@@ -349,7 +351,6 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
     _controller.dispose();
     _toolbarScrollController.dispose();
     _commentScrollController.dispose();
-    _subtitlesScrollController.dispose();
     _roomSub?.cancel();
     _heartbeatTimer?.cancel();
     _sweepSub?.cancel();
@@ -1495,6 +1496,17 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
     }
   }
 
+  // Fire-and-forget, same as every other best-effort write on this screen
+  // (e.g. repairHostAvatar) — a dropped reaction isn't worth interrupting
+  // anyone over, and the sender sees it animate via the same live stream
+  // as everyone else once it round-trips through Firestore (no optimistic
+  // local animation, to avoid double-animating their own tap).
+  void _sendReaction(String emoji) {
+    HapticFeedback.selectionClick();
+    // ignore: discarded_futures
+    RoomParticipantService.sendReaction(roomId: widget.room.id, emoji: emoji);
+  }
+
   Future<void> _toggleMic(RoomParticipant? me) async {
     if (me == null || !me.isSeated) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1729,205 +1741,214 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
               final seats = _buildSeats(participants);
               final listeners = participants.where((p) => !p.isSeated).toList();
 
-              return Column(
+              return Stack(
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-                    child: Row(
-                      children: [
-                        // The chips below vary with role (board tools, Invite,
-                        // End Room, Leave) and easily outnumber what a narrow
-                        // phone width can fit on one line — a plain Row here
-                        // used to overflow, clipping "End Room" and pushing the
-                        // "..." menu off-screen entirely (with the classic
-                        // yellow/black overflow stripes in debug builds).
-                        // Scrolling this middle section instead of the whole
-                        // toolbar keeps "..." always reachable on every
-                        // device, with everything else reachable via an
-                        // always-visible scrollbar rather than requiring users
-                        // to discover an invisible swipe area. On desktop/web
-                        // this only actually works with AppScrollBehavior (see
-                        // main.dart) enabling mouse/trackpad drag — without it
-                        // a scrollable like this silently ignores mouse drags,
-                        // which is what made options look "missing" rather
-                        // than just off-screen on non-touch devices.
-                        Expanded(
-                          child: SizedBox(
-                            height: 44,
-                            child: Scrollbar(
-                              controller: _toolbarScrollController,
-                              thumbVisibility: true,
-                              trackVisibility: true,
-                              thickness: 3,
-                              radius: const Radius.circular(8),
-                              child: SingleChildScrollView(
-                                controller: _toolbarScrollController,
-                                scrollDirection: Axis.horizontal,
-                                physics: const BouncingScrollPhysics(),
-                                padding: const EdgeInsets.only(
-                                  right: 10,
-                                  bottom: 6,
+                  Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                        child: Row(
+                          children: [
+                            // The chips below vary with role (board tools, Invite,
+                            // End Room, Leave) and easily outnumber what a narrow
+                            // phone width can fit on one line — a plain Row here
+                            // used to overflow, clipping "End Room" and pushing the
+                            // "..." menu off-screen entirely (with the classic
+                            // yellow/black overflow stripes in debug builds).
+                            // Scrolling this middle section instead of the whole
+                            // toolbar keeps "..." always reachable on every
+                            // device, with everything else reachable via an
+                            // always-visible scrollbar rather than requiring users
+                            // to discover an invisible swipe area. On desktop/web
+                            // this only actually works with AppScrollBehavior (see
+                            // main.dart) enabling mouse/trackpad drag — without it
+                            // a scrollable like this silently ignores mouse drags,
+                            // which is what made options look "missing" rather
+                            // than just off-screen on non-touch devices.
+                            Expanded(
+                              child: SizedBox(
+                                height: 44,
+                                child: Scrollbar(
+                                  controller: _toolbarScrollController,
+                                  thumbVisibility: true,
+                                  trackVisibility: true,
+                                  thickness: 3,
+                                  radius: const Radius.circular(8),
+                                  child: SingleChildScrollView(
+                                    controller: _toolbarScrollController,
+                                    scrollDirection: Axis.horizontal,
+                                    physics: const BouncingScrollPhysics(),
+                                    padding: const EdgeInsets.only(
+                                      right: 10,
+                                      bottom: 6,
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        if (me?.canModerate ?? false) ...[
+                                          _addingImage
+                                              ? const SizedBox(
+                                                  width: 16,
+                                                  height: 16,
+                                                  child:
+                                                      CircularProgressIndicator(
+                                                        strokeWidth: 2,
+                                                        color: Colors.white70,
+                                                      ),
+                                                )
+                                              : _actionChip(
+                                                  'Add images',
+                                                  Icons
+                                                      .add_photo_alternate_outlined,
+                                                  onTap: _addWhiteboardImage,
+                                                ),
+                                          const SizedBox(width: 8),
+                                          _actionChip(
+                                            'Type topic',
+                                            Icons.text_fields_rounded,
+                                            onTap: _openTextComposerForNew,
+                                          ),
+                                        ],
+                                        // Invite / End Room / Leave used to live
+                                        // here too — all three moved into the "…"
+                                        // menu (see _openRoomOptions): Leave was
+                                        // already duplicated there, End Room is
+                                        // now that menu's "Close" row, and the
+                                        // standalone friend-invite flow is fully
+                                        // superseded by the Share sheet's "Share
+                                        // to a Chat" (a joinable room-invite card
+                                        // sent straight into a real conversation,
+                                        // versus a bare push notification) and by
+                                        // inviting an audience member onto the
+                                        // stage directly from their profile.
+                                      ],
+                                    ),
+                                  ),
                                 ),
-                                child: Row(
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            GestureDetector(
+                              onTap: () => _openRoomOptions(me, participants),
+                              child: Container(
+                                width: 30,
+                                height: 30,
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFF2ECC71),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.more_horiz_rounded,
+                                  color: Colors.white,
+                                  size: 16,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Expanded(
+                        child: ListView(
+                          padding: EdgeInsets.zero,
+                          children: [
+                            const SizedBox(height: 4),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                              ),
+                              child: AspectRatio(
+                                aspectRatio: WhiteboardGeometry.aspectRatio,
+                                child: Stack(
                                   children: [
-                                    if (me?.canModerate ?? false) ...[
-                                      _addingImage
-                                          ? const SizedBox(
-                                              width: 16,
-                                              height: 16,
-                                              child: CircularProgressIndicator(
-                                                strokeWidth: 2,
-                                                color: Colors.white70,
-                                              ),
-                                            )
-                                          : _actionChip(
-                                              'Add images',
-                                              Icons
-                                                  .add_photo_alternate_outlined,
-                                              onTap: _addWhiteboardImage,
-                                            ),
-                                      const SizedBox(width: 8),
-                                      _actionChip(
-                                        'Type topic',
-                                        Icons.text_fields_rounded,
-                                        onTap: _openTextComposerForNew,
+                                    Container(
+                                      width: double.infinity,
+                                      decoration: BoxDecoration(
+                                        color: Colors.white.withValues(
+                                          alpha: 0.08,
+                                        ),
+                                        borderRadius: BorderRadius.circular(14),
                                       ),
-                                    ],
-                                    // Invite / End Room / Leave used to live
-                                    // here too — all three moved into the "…"
-                                    // menu (see _openRoomOptions): Leave was
-                                    // already duplicated there, End Room is
-                                    // now that menu's "Close" row, and the
-                                    // standalone friend-invite flow is fully
-                                    // superseded by the Share sheet's "Share
-                                    // to a Chat" (a joinable room-invite card
-                                    // sent straight into a real conversation,
-                                    // versus a bare push notification) and by
-                                    // inviting an audience member onto the
-                                    // stage directly from their profile.
+                                    ),
+                                    // Whiteboard content — renders nothing (keeping
+                                    // today's plain empty look) until the host or a
+                                    // moderator adds an image or text note.
+                                    Positioned.fill(
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(14),
+                                        child: StreamBuilder<List<WhiteboardItem>>(
+                                          stream: _whiteboardStream,
+                                          // Seed the builder with the already-cached
+                                          // items so the canvas renders instantly when
+                                          // the widget is re-mounted after the user
+                                          // scrolls away and back. Without this,
+                                          // broadcast streams don't replay their last
+                                          // value to new subscribers, leaving the board
+                                          // blank until the next Firestore event fires.
+                                          initialData: _whiteboardItems,
+                                          builder: (context, wbSnapshot) {
+                                            final items =
+                                                wbSnapshot.data ??
+                                                const <WhiteboardItem>[];
+                                            final canEdit =
+                                                me?.canModerate ?? false;
+                                            return WhiteboardCanvas(
+                                              items: items,
+                                              canEdit: canEdit,
+                                              onTransformEnd:
+                                                  _commitWhiteboardTransform,
+                                              onOpenOptions:
+                                                  _openWhiteboardItemOptions,
+                                              onQuickDelete:
+                                                  _removeWhiteboardItem,
+                                            );
+                                          },
+                                        ),
+                                      ),
+                                    ),
+                                    // Opens the same board full-screen, for precise
+                                    // dragging/resizing on a small phone card — a
+                                    // decorative hint (not a hit target of its own)
+                                    // until there's actually a board worth expanding.
+                                    Positioned(
+                                      right: 10,
+                                      bottom: 10,
+                                      child: GestureDetector(
+                                        onTap: () => _openExpandedWhiteboard(
+                                          me?.canModerate ?? false,
+                                        ),
+                                        child: Container(
+                                          padding: const EdgeInsets.all(4),
+                                          decoration: const BoxDecoration(
+                                            color: Colors.black45,
+                                            shape: BoxShape.circle,
+                                          ),
+                                          child: const Icon(
+                                            Icons.open_in_full_rounded,
+                                            color: Colors.white70,
+                                            size: 16,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
                                   ],
                                 ),
                               ),
                             ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        GestureDetector(
-                          onTap: () => _openRoomOptions(me, participants),
-                          child: Container(
-                            width: 30,
-                            height: 30,
-                            decoration: const BoxDecoration(
-                              color: Color(0xFF2ECC71),
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(
-                              Icons.more_horiz_rounded,
-                              color: Colors.white,
-                              size: 16,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    child: ListView(
-                      padding: EdgeInsets.zero,
-                      children: [
-                        const SizedBox(height: 4),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          child: AspectRatio(
-                            aspectRatio: WhiteboardGeometry.aspectRatio,
-                            child: Stack(
-                              children: [
-                                Container(
-                                  width: double.infinity,
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withValues(alpha: 0.08),
-                                    borderRadius: BorderRadius.circular(14),
-                                  ),
-                                ),
-                                // Whiteboard content — renders nothing (keeping
-                                // today's plain empty look) until the host or a
-                                // moderator adds an image or text note.
-                                Positioned.fill(
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(14),
-                                    child: StreamBuilder<List<WhiteboardItem>>(
-                                      stream: _whiteboardStream,
-                                      // Seed the builder with the already-cached
-                                      // items so the canvas renders instantly when
-                                      // the widget is re-mounted after the user
-                                      // scrolls away and back. Without this,
-                                      // broadcast streams don't replay their last
-                                      // value to new subscribers, leaving the board
-                                      // blank until the next Firestore event fires.
-                                      initialData: _whiteboardItems,
-                                      builder: (context, wbSnapshot) {
-                                        final items =
-                                            wbSnapshot.data ??
-                                            const <WhiteboardItem>[];
-                                        final canEdit =
-                                            me?.canModerate ?? false;
-                                        return WhiteboardCanvas(
-                                          items: items,
-                                          canEdit: canEdit,
-                                          onTransformEnd:
-                                              _commitWhiteboardTransform,
-                                          onOpenOptions:
-                                              _openWhiteboardItemOptions,
-                                          onQuickDelete: _removeWhiteboardItem,
-                                        );
-                                      },
-                                    ),
-                                  ),
-                                ),
-                                // Opens the same board full-screen, for precise
-                                // dragging/resizing on a small phone card — a
-                                // decorative hint (not a hit target of its own)
-                                // until there's actually a board worth expanding.
-                                Positioned(
-                                  right: 10,
-                                  bottom: 10,
-                                  child: GestureDetector(
-                                    onTap: () => _openExpandedWhiteboard(
-                                      me?.canModerate ?? false,
-                                    ),
-                                    child: Container(
-                                      padding: const EdgeInsets.all(4),
-                                      decoration: const BoxDecoration(
-                                        color: Colors.black45,
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: const Icon(
-                                        Icons.open_in_full_rounded,
-                                        color: Colors.white70,
-                                        size: 16,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          // Rebuilds the grid on every LiveKit
-                          // ActiveSpeakersChangedEvent (see
-                          // VoiceRoomAudioService.speakingUids) so each
-                          // seat's speaking ring below tracks real voice
-                          // activity, not just mic-on/off state.
-                          child: ListenableBuilder(
-                            listenable: VoiceRoomAudioService.instance,
-                            builder: (context, _) => GridView.builder(
-                              shrinkWrap: true,
-                              physics: const NeverScrollableScrollPhysics(),
-                              gridDelegate:
-                                  const SliverGridDelegateWithFixedCrossAxisCount(
+                            const SizedBox(height: 8),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                              ),
+                              // Rebuilds the grid on every LiveKit
+                              // ActiveSpeakersChangedEvent (see
+                              // VoiceRoomAudioService.speakingUids) so each
+                              // seat's speaking ring below tracks real voice
+                              // activity, not just mic-on/off state.
+                              child: ListenableBuilder(
+                                listenable: VoiceRoomAudioService.instance,
+                                builder: (context, _) => GridView.builder(
+                                  shrinkWrap: true,
+                                  physics: const NeverScrollableScrollPhysics(),
+                                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                                     crossAxisCount: 4,
                                     mainAxisSpacing: 8,
                                     crossAxisSpacing: 4,
@@ -1940,423 +1961,449 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                                     // for the subtitles panel below.
                                     childAspectRatio: 1.05,
                                   ),
-                              itemCount: seats.length,
-                              itemBuilder: (context, i) {
-                                final speaker = seats[i];
-                                return GestureDetector(
-                                  onTap: speaker.isEmptySeat
-                                      ? () => _raiseHand(me)
-                                      : () => showRoomProfileSheet(
-                                          context,
-                                          speaker,
-                                          roomId: widget.room.id,
-                                          canModerate: me?.canModerate ?? false,
-                                          isHost: _isHost,
-                                        ),
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      speaker.isEmptySeat
-                                          ? Container(
-                                              width: 56,
-                                              height: 56,
-                                              decoration: BoxDecoration(
-                                                color: (me?.handRaised ?? false)
-                                                    ? const Color(
-                                                        0xFFE8A23C,
-                                                      ).withValues(alpha: 0.22)
-                                                    : Colors.white12,
-                                                shape: BoxShape.circle,
-                                                border: Border.all(
-                                                  color:
-                                                      (me?.handRaised ?? false)
-                                                      ? const Color(0xFFE8A23C)
-                                                      : Colors.white38,
-                                                  width: 1,
-                                                ),
-                                              ),
-                                              // Amber once the signed-in user has
-                                              // raised their own hand — a plain
-                                              // "you're in the queue" indicator,
-                                              // not something every empty seat
-                                              // shows (only ever reflects the
-                                              // viewer's own state; the grid has
-                                              // no per-seat "who raised" concept).
-                                              child: Icon(
-                                                Icons.front_hand_rounded,
-                                                color: (me?.handRaised ?? false)
-                                                    ? const Color(0xFFE8A23C)
-                                                    : Colors.white38,
-                                                size: 22,
-                                              ),
-                                            )
-                                          : Stack(
-                                              clipBehavior: Clip.none,
-                                              children: [
-                                                // A soft pulsing glow blooms just
-                                                // outside the (always-static) unmuted
-                                                // ring below, but only while LiveKit's
-                                                // own voice-activity detection says this
-                                                // person is actually making sound right
-                                                // now (VoiceRoomAudioService.speakingUids
-                                                // — distinct from speaker.isSpeaking,
-                                                // which only reflects mic-on/off state
-                                                // and drives the ring itself). Sits
-                                                // underneath the ring in the Stack so it
-                                                // reads as emanating from behind it
-                                                // rather than competing with it.
-                                                Positioned(
-                                                  left: -8,
-                                                  top: -8,
-                                                  right: -8,
-                                                  bottom: -8,
-                                                  child: IgnorePointer(
-                                                    child: _TalkingGlow(
-                                                      key: ValueKey(
-                                                        'talk_${speaker.uid}',
-                                                      ),
-                                                      talking:
-                                                          VoiceRoomAudioService
-                                                              .instance
-                                                              .speakingUids
-                                                              .contains(
-                                                                speaker.uid,
-                                                              ),
+                                  itemCount: seats.length,
+                                  itemBuilder: (context, i) {
+                                    final speaker = seats[i];
+                                    return GestureDetector(
+                                      onTap: speaker.isEmptySeat
+                                          ? () => _raiseHand(me)
+                                          : () => showRoomProfileSheet(
+                                              context,
+                                              speaker,
+                                              roomId: widget.room.id,
+                                              canModerate:
+                                                  me?.canModerate ?? false,
+                                              isHost: _isHost,
+                                            ),
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          speaker.isEmptySeat
+                                              ? Container(
+                                                  width: 56,
+                                                  height: 56,
+                                                  decoration: BoxDecoration(
+                                                    color:
+                                                        (me?.handRaised ??
+                                                            false)
+                                                        ? const Color(
+                                                            0xFFE8A23C,
+                                                          ).withValues(
+                                                            alpha: 0.22,
+                                                          )
+                                                        : Colors.white12,
+                                                    shape: BoxShape.circle,
+                                                    border: Border.all(
+                                                      color:
+                                                          (me?.handRaised ??
+                                                              false)
+                                                          ? const Color(
+                                                              0xFFE8A23C,
+                                                            )
+                                                          : Colors.white38,
+                                                      width: 1,
                                                     ),
                                                   ),
-                                                ),
-                                                // While unmuted a plain, static red
-                                                // ring is drawn just OUTSIDE the avatar
-                                                // — this is a mic-state indicator (see
-                                                // speaker.isSpeaking), not a live
-                                                // "talking right now" signal; that's
-                                                // the glow above.
-                                                if (speaker.isSpeaking)
-                                                  Positioned(
-                                                    left: -4,
-                                                    top: -4,
-                                                    right: -4,
-                                                    bottom: -4,
-                                                    child: IgnorePointer(
-                                                      child: Container(
-                                                        decoration: BoxDecoration(
-                                                          shape:
-                                                              BoxShape.circle,
-                                                          border: Border.all(
-                                                            color: const Color(
-                                                              0xFFFF3B47,
-                                                            ),
-                                                            width: 2.5,
+                                                  // Amber once the signed-in user has
+                                                  // raised their own hand — a plain
+                                                  // "you're in the queue" indicator,
+                                                  // not something every empty seat
+                                                  // shows (only ever reflects the
+                                                  // viewer's own state; the grid has
+                                                  // no per-seat "who raised" concept).
+                                                  child: Icon(
+                                                    Icons.front_hand_rounded,
+                                                    color:
+                                                        (me?.handRaised ??
+                                                            false)
+                                                        ? const Color(
+                                                            0xFFE8A23C,
+                                                          )
+                                                        : Colors.white38,
+                                                    size: 22,
+                                                  ),
+                                                )
+                                              : Stack(
+                                                  clipBehavior: Clip.none,
+                                                  children: [
+                                                    // A soft pulsing glow blooms just
+                                                    // outside the (always-static) unmuted
+                                                    // ring below, but only while LiveKit's
+                                                    // own voice-activity detection says this
+                                                    // person is actually making sound right
+                                                    // now (VoiceRoomAudioService.speakingUids
+                                                    // — distinct from speaker.isSpeaking,
+                                                    // which only reflects mic-on/off state
+                                                    // and drives the ring itself). Sits
+                                                    // underneath the ring in the Stack so it
+                                                    // reads as emanating from behind it
+                                                    // rather than competing with it.
+                                                    Positioned(
+                                                      left: -8,
+                                                      top: -8,
+                                                      right: -8,
+                                                      bottom: -8,
+                                                      child: IgnorePointer(
+                                                        child: _TalkingGlow(
+                                                          key: ValueKey(
+                                                            'talk_${speaker.uid}',
                                                           ),
-                                                          boxShadow: [
-                                                            BoxShadow(
-                                                              color:
-                                                                  const Color(
-                                                                    0xFFFF3B47,
-                                                                  ).withValues(
-                                                                    alpha: 0.45,
+                                                          talking:
+                                                              VoiceRoomAudioService
+                                                                  .instance
+                                                                  .speakingUids
+                                                                  .contains(
+                                                                    speaker.uid,
                                                                   ),
-                                                              blurRadius: 8,
-                                                            ),
-                                                          ],
                                                         ),
                                                       ),
                                                     ),
-                                                  ),
-                                                AppAvatar(
-                                                  seed: speaker.uid.isNotEmpty
-                                                      ? speaker.uid
-                                                      : '${speaker.name}$i',
-                                                  size: 56,
-                                                  showFlag: true,
-                                                  flag: speaker.flag,
-                                                  imageUrl: speaker.avatarUrl,
-                                                ),
-                                                // Muted badge — a small mic-off
-                                                // circle centered over the middle
-                                                // of the avatar, but only a
-                                                // fraction of its size — not the
-                                                // full-circle overlay this used
-                                                // to be (which hid the photo/
-                                                // initial entirely while muted),
-                                                // and not pinned to the edge
-                                                // either. Only shown when the
-                                                // seat is occupied AND the
-                                                // participant is muted.
-                                                if (!speaker.isSpeaking)
-                                                  Positioned.fill(
-                                                    child: Center(
-                                                      child: Container(
-                                                        width: 28,
-                                                        height: 28,
-                                                        decoration:
-                                                            BoxDecoration(
-                                                              color: Colors
-                                                                  .black
-                                                                  .withValues(
-                                                                    alpha: 0.4,
-                                                                  ),
+                                                    // While unmuted a plain, static red
+                                                    // ring is drawn just OUTSIDE the avatar
+                                                    // — this is a mic-state indicator (see
+                                                    // speaker.isSpeaking), not a live
+                                                    // "talking right now" signal; that's
+                                                    // the glow above.
+                                                    if (speaker.isSpeaking)
+                                                      Positioned(
+                                                        left: -4,
+                                                        top: -4,
+                                                        right: -4,
+                                                        bottom: -4,
+                                                        child: IgnorePointer(
+                                                          child: Container(
+                                                            decoration: BoxDecoration(
                                                               shape: BoxShape
                                                                   .circle,
+                                                              border: Border.all(
+                                                                color:
+                                                                    const Color(
+                                                                      0xFFFF3B47,
+                                                                    ),
+                                                                width: 2.5,
+                                                              ),
+                                                              boxShadow: [
+                                                                BoxShadow(
+                                                                  color:
+                                                                      const Color(
+                                                                        0xFFFF3B47,
+                                                                      ).withValues(
+                                                                        alpha:
+                                                                            0.45,
+                                                                      ),
+                                                                  blurRadius: 8,
+                                                                ),
+                                                              ],
                                                             ),
-                                                        child: const Icon(
-                                                          Icons.mic_off_rounded,
-                                                          color: Colors.white,
-                                                          size: 17,
+                                                          ),
                                                         ),
                                                       ),
+                                                    AppAvatar(
+                                                      seed:
+                                                          speaker.uid.isNotEmpty
+                                                          ? speaker.uid
+                                                          : '${speaker.name}$i',
+                                                      size: 56,
+                                                      showFlag: true,
+                                                      flag: speaker.flag,
+                                                      imageUrl:
+                                                          speaker.avatarUrl,
+                                                    ),
+                                                    // Muted badge — a small mic-off
+                                                    // circle centered over the middle
+                                                    // of the avatar, but only a
+                                                    // fraction of its size — not the
+                                                    // full-circle overlay this used
+                                                    // to be (which hid the photo/
+                                                    // initial entirely while muted),
+                                                    // and not pinned to the edge
+                                                    // either. Only shown when the
+                                                    // seat is occupied AND the
+                                                    // participant is muted.
+                                                    if (!speaker.isSpeaking)
+                                                      Positioned.fill(
+                                                        child: Center(
+                                                          child: Container(
+                                                            width: 28,
+                                                            height: 28,
+                                                            decoration:
+                                                                BoxDecoration(
+                                                                  color: Colors
+                                                                      .black
+                                                                      .withValues(
+                                                                        alpha:
+                                                                            0.4,
+                                                                      ),
+                                                                  shape: BoxShape
+                                                                      .circle,
+                                                                ),
+                                                            child: const Icon(
+                                                              Icons
+                                                                  .mic_off_rounded,
+                                                              color:
+                                                                  Colors.white,
+                                                              size: 17,
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    // When unmuted/speaking the red ring
+                                                    // above is the sole visual indicator —
+                                                    // no extra badge needed.
+                                                  ],
+                                                ),
+                                          const SizedBox(height: 4),
+                                          // Name row — prefixed with a host/moderator
+                                          // role icon so rank is readable without
+                                          // blocking the profile picture.
+                                          if (speaker.isEmptySeat)
+                                            Text(
+                                              '${i + 1}',
+                                              style: const TextStyle(
+                                                color: Colors.white54,
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            )
+                                          else
+                                            Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.center,
+                                              children: [
+                                                if (speaker.isHost)
+                                                  const Padding(
+                                                    padding: EdgeInsets.only(
+                                                      right: 3,
+                                                    ),
+                                                    child: Icon(
+                                                      Icons.star_rounded,
+                                                      color: Color(0xFFE8A23C),
+                                                      size: 11,
+                                                    ),
+                                                  )
+                                                else if (speaker.isModerator)
+                                                  const Padding(
+                                                    padding: EdgeInsets.only(
+                                                      right: 3,
+                                                    ),
+                                                    child: Icon(
+                                                      Icons.shield_rounded,
+                                                      color: Color(0xFF7B68F4),
+                                                      size: 11,
                                                     ),
                                                   ),
-                                                // When unmuted/speaking the red ring
-                                                // above is the sole visual indicator —
-                                                // no extra badge needed.
+                                                Flexible(
+                                                  child: Text(
+                                                    speaker.name,
+                                                    style: const TextStyle(
+                                                      color: Colors.white54,
+                                                      fontSize: 12,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                    ),
+                                                    maxLines: 1,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                  ),
+                                                ),
                                               ],
                                             ),
-                                      const SizedBox(height: 4),
-                                      // Name row — prefixed with a host/moderator
-                                      // role icon so rank is readable without
-                                      // blocking the profile picture.
-                                      if (speaker.isEmptySeat)
-                                        Text(
-                                          '${i + 1}',
-                                          style: const TextStyle(
-                                            color: Colors.white54,
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        )
-                                      else
-                                        Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.center,
+                                        ],
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            SizedBox(
+                              height: 44,
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                ),
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    border: Border.all(
+                                      color: Colors.white24,
+                                      width: 1.4,
+                                    ),
+                                    borderRadius: BorderRadius.circular(22),
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                  ),
+                                  child: Builder(
+                                    builder: (context) {
+                                      const previewCount = 7;
+                                      final preview = listeners
+                                          .take(previewCount)
+                                          .toList();
+                                      final remaining =
+                                          listeners.length - preview.length;
+                                      if (preview.isEmpty) {
+                                        return const Row(
                                           children: [
-                                            if (speaker.isHost)
-                                              const Padding(
-                                                padding: EdgeInsets.only(
-                                                  right: 3,
-                                                ),
-                                                child: Icon(
-                                                  Icons.star_rounded,
-                                                  color: Color(0xFFE8A23C),
-                                                  size: 11,
-                                                ),
-                                              )
-                                            else if (speaker.isModerator)
-                                              const Padding(
-                                                padding: EdgeInsets.only(
-                                                  right: 3,
-                                                ),
-                                                child: Icon(
-                                                  Icons.shield_rounded,
-                                                  color: Color(0xFF7B68F4),
-                                                  size: 11,
-                                                ),
-                                              ),
-                                            Flexible(
-                                              child: Text(
-                                                speaker.name,
-                                                style: const TextStyle(
-                                                  color: Colors.white54,
-                                                  fontSize: 12,
-                                                  fontWeight: FontWeight.w600,
-                                                ),
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
+                                            Text(
+                                              'No one in the audience yet',
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                color: Colors.white38,
                                               ),
                                             ),
                                           ],
-                                        ),
-                                    ],
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        SizedBox(
-                          height: 44,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 12),
-                            child: Container(
-                              decoration: BoxDecoration(
-                                border: Border.all(
-                                  color: Colors.white24,
-                                  width: 1.4,
-                                ),
-                                borderRadius: BorderRadius.circular(22),
-                              ),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                              ),
-                              child: Builder(
-                                builder: (context) {
-                                  const previewCount = 7;
-                                  final preview = listeners
-                                      .take(previewCount)
-                                      .toList();
-                                  final remaining =
-                                      listeners.length - preview.length;
-                                  if (preview.isEmpty) {
-                                    return const Row(
-                                      children: [
-                                        Text(
-                                          'No one in the audience yet',
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            color: Colors.white38,
-                                          ),
-                                        ),
-                                      ],
-                                    );
-                                  }
-                                  return Row(
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      for (final listener in preview)
-                                        GestureDetector(
-                                          onTap: () => showRoomProfileSheet(
-                                            context,
-                                            listener,
-                                            roomId: widget.room.id,
-                                            canModerate:
-                                                me?.canModerate ?? false,
-                                            isHost: _isHost,
-                                          ),
-                                          child: AppAvatar(
-                                            seed: listener.uid.isNotEmpty
-                                                ? listener.uid
-                                                : listener.name,
-                                            size: 32,
-                                            imageUrl: listener.avatarUrl,
-                                          ),
-                                        ),
-                                      if (remaining > 0)
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 9,
-                                            vertical: 8,
-                                          ),
-                                          decoration: const BoxDecoration(
-                                            color: Colors.white12,
-                                            shape: BoxShape.circle,
-                                          ),
-                                          child: Text(
-                                            '+$remaining',
-                                            style: const TextStyle(
-                                              fontSize: 11,
-                                              color: Colors.white70,
-                                              fontWeight: FontWeight.w700,
+                                        );
+                                      }
+                                      return Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          for (final listener in preview)
+                                            GestureDetector(
+                                              onTap: () => showRoomProfileSheet(
+                                                context,
+                                                listener,
+                                                roomId: widget.room.id,
+                                                canModerate:
+                                                    me?.canModerate ?? false,
+                                                isHost: _isHost,
+                                              ),
+                                              child: AppAvatar(
+                                                seed: listener.uid.isNotEmpty
+                                                    ? listener.uid
+                                                    : listener.name,
+                                                size: 32,
+                                                imageUrl: listener.avatarUrl,
+                                              ),
                                             ),
-                                          ),
+                                          if (remaining > 0)
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 9,
+                                                    vertical: 8,
+                                                  ),
+                                              decoration: const BoxDecoration(
+                                                color: Colors.white12,
+                                                shape: BoxShape.circle,
+                                              ),
+                                              child: Text(
+                                                '+$remaining',
+                                                style: const TextStyle(
+                                                  fontSize: 11,
+                                                  color: Colors.white70,
+                                                  fontWeight: FontWeight.w700,
+                                                ),
+                                              ),
+                                            ),
+                                        ],
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(12, 2, 12, 2),
+                              child: StreamBuilder<List<BoardComment>>(
+                                stream: _commentsStream,
+                                builder: (context, commentsSnap) {
+                                  final comments =
+                                      commentsSnap.data ??
+                                      const <BoardComment>[];
+                                  if (comments.isEmpty)
+                                    return const SizedBox.shrink();
+
+                                  // Auto-scroll to the newest comment whenever
+                                  // the list grows. Post-frame so the ListView
+                                  // has already laid out the new item before we
+                                  // try to jump to its end.
+                                  WidgetsBinding.instance.addPostFrameCallback((
+                                    _,
+                                  ) {
+                                    if (_commentScrollController.hasClients) {
+                                      _commentScrollController.animateTo(
+                                        _commentScrollController
+                                            .position
+                                            .maxScrollExtent,
+                                        duration: const Duration(
+                                          milliseconds: 250,
                                         ),
-                                    ],
+                                        curve: Curves.easeOut,
+                                      );
+                                    }
+                                  });
+
+                                  // Height is fluid: up to ~4 comment rows
+                                  // (~88 px) on any screen width — scales down
+                                  // naturally on small phones because every
+                                  // row uses Flexible/Expanded internally.
+                                  // BouncingScrollPhysics gives a native iOS
+                                  // feel; ClampingScrollPhysics would be fine
+                                  // for Android-only, but both platforms are
+                                  // in scope here.
+                                  return ConstrainedBox(
+                                    constraints: const BoxConstraints(
+                                      maxHeight: 88,
+                                    ),
+                                    child: ListView.builder(
+                                      controller: _commentScrollController,
+                                      shrinkWrap: true,
+                                      physics: const BouncingScrollPhysics(),
+                                      padding: EdgeInsets.zero,
+                                      itemCount: comments.length,
+                                      itemBuilder: (context, index) =>
+                                          _CommentLine(
+                                            comment: comments[index],
+                                          ),
+                                    ),
                                   );
                                 },
                               ),
                             ),
-                          ),
+                          ],
                         ),
-                        const SizedBox(height: 4),
-                        // Directly underneath the audience section, per the
-                        // HelloTalk-style layout this mirrors — collapses to
-                        // nothing when subtitles are off (see _Composer's new
-                        // CC toggle) so it never eats space it isn't using.
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          child: _SubtitleCaptionsPanel(
-                            visible: _subtitlesOn,
-                            stream: _subtitlesStream,
-                            scrollController: _subtitlesScrollController,
-                          ),
+                      ),
+                      // Persistent — not a transient snackbar — for as long as a
+                      // hand stays raised and unanswered: the seat grid's own
+                      // amber empty-seat highlight and the composer's amber
+                      // raise-hand button are both easy to miss/forget the
+                      // meaning of, especially on a screen that's otherwise
+                      // scrolled away from them. Disappears the moment
+                      // handRaised flips back to false, whichever way that
+                      // happens — accepted (isSeated becomes true too), declined
+                      // (_showHandDeclinedNotice fires alongside), or lowered by
+                      // hand.
+                      if ((me?.handRaised ?? false) && !(me?.isSeated ?? false))
+                        _HandRaisedWaitingBanner(
+                          onLowerHand: () => _raiseHand(me),
                         ),
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(12, 2, 12, 2),
-                          child: StreamBuilder<List<BoardComment>>(
-                            stream: _commentsStream,
-                            builder: (context, commentsSnap) {
-                              final comments =
-                                  commentsSnap.data ?? const <BoardComment>[];
-                              if (comments.isEmpty)
-                                return const SizedBox.shrink();
-
-                              // Auto-scroll to the newest comment whenever
-                              // the list grows. Post-frame so the ListView
-                              // has already laid out the new item before we
-                              // try to jump to its end.
-                              WidgetsBinding.instance.addPostFrameCallback((_) {
-                                if (_commentScrollController.hasClients) {
-                                  _commentScrollController.animateTo(
-                                    _commentScrollController
-                                        .position
-                                        .maxScrollExtent,
-                                    duration: const Duration(milliseconds: 250),
-                                    curve: Curves.easeOut,
-                                  );
-                                }
-                              });
-
-                              // Height is fluid: up to ~4 comment rows
-                              // (~88 px) on any screen width — scales down
-                              // naturally on small phones because every
-                              // row uses Flexible/Expanded internally.
-                              // BouncingScrollPhysics gives a native iOS
-                              // feel; ClampingScrollPhysics would be fine
-                              // for Android-only, but both platforms are
-                              // in scope here.
-                              return ConstrainedBox(
-                                constraints: const BoxConstraints(
-                                  maxHeight: 88,
-                                ),
-                                child: ListView.builder(
-                                  controller: _commentScrollController,
-                                  shrinkWrap: true,
-                                  physics: const BouncingScrollPhysics(),
-                                  padding: EdgeInsets.zero,
-                                  itemCount: comments.length,
-                                  itemBuilder: (context, index) =>
-                                      _CommentLine(comment: comments[index]),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
+                      _Composer(
+                        controller: _controller,
+                        me: me,
+                        onSend: _sendComment,
+                        onToggleMic: () => _toggleMic(me),
+                        onRaiseHand: () => _raiseHand(me),
+                        onSendReaction: _sendReaction,
+                        // Only host/moderator get the Raised Hands badge in place
+                        // of their own (otherwise-inert, since they're always
+                        // seated already) raise-hand button — see _Composer's own
+                        // doc comment for why this slot specifically.
+                        raisedHandsStream: (me?.canModerate ?? false)
+                            ? RoomParticipantService.streamRaisedHands(
+                                widget.room.id,
+                              )
+                            : null,
+                        onOpenRaisedHands: _openRaisedHandsSheet,
+                      ),
+                    ],
                   ),
-                  // Persistent — not a transient snackbar — for as long as a
-                  // hand stays raised and unanswered: the seat grid's own
-                  // amber empty-seat highlight and the composer's amber
-                  // raise-hand button are both easy to miss/forget the
-                  // meaning of, especially on a screen that's otherwise
-                  // scrolled away from them. Disappears the moment
-                  // handRaised flips back to false, whichever way that
-                  // happens — accepted (isSeated becomes true too), declined
-                  // (_showHandDeclinedNotice fires alongside), or lowered by
-                  // hand.
-                  if ((me?.handRaised ?? false) && !(me?.isSeated ?? false))
-                    _HandRaisedWaitingBanner(onLowerHand: () => _raiseHand(me)),
-                  _Composer(
-                    controller: _controller,
-                    me: me,
-                    onSend: _sendComment,
-                    onToggleMic: () => _toggleMic(me),
-                    onRaiseHand: () => _raiseHand(me),
-                    subtitlesOn: _subtitlesOn,
-                    onToggleSubtitles: () =>
-                        setState(() => _subtitlesOn = !_subtitlesOn),
-                    // Only host/moderator get the Raised Hands badge in place
-                    // of their own (otherwise-inert, since they're always
-                    // seated already) raise-hand button — see _Composer's own
-                    // doc comment for why this slot specifically.
-                    raisedHandsStream: (me?.canModerate ?? false)
-                        ? RoomParticipantService.streamRaisedHands(
-                            widget.room.id,
-                          )
-                        : null,
-                    onOpenRaisedHands: _openRaisedHandsSheet,
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: _ReactionOverlay(stream: _reactionsStream),
+                    ),
                   ),
                 ],
               );
@@ -2803,113 +2850,101 @@ class _AddModeratorDialogState extends State<_AddModeratorDialog> {
   }
 }
 
-/// The dedicated captions panel directly under the audience section (see
-/// _Composer's CC toggle, which drives [visible]). Collapses to nothing
-/// when subtitles are off; otherwise streams
-/// RoomParticipantService.streamSubtitles and grows with content up to a
-/// cap, then scrolls — same shape as the comment feed just below it.
-///
-/// No speech-to-text/translation pipeline exists yet, so [stream] is
-/// typically empty; the panel shows a muted "Listening for captions…"
-/// placeholder in that case rather than looking broken, and will start
-/// rendering real lines the moment something writes to that subcollection
-/// (RoomParticipantService.addSubtitleLine) — no UI change needed then.
-class _SubtitleCaptionsPanel extends StatelessWidget {
-  final bool visible;
-  final Stream<List<SubtitleLine>> stream;
-  final ScrollController scrollController;
+/// Owns the currently-animating floating reaction bursts (see
+/// RoomParticipantService.streamNewReactions) and renders them as
+/// _FloatingEmoji widgets over the whole screen — subscribes once in
+/// initState so it survives the parent StreamBuilder's own rebuilds, same
+/// reasoning as _participantsStream/_commentsStream being `late final`.
+class _ReactionOverlay extends StatefulWidget {
+  final Stream<String> stream;
+  const _ReactionOverlay({required this.stream});
 
-  const _SubtitleCaptionsPanel({
-    required this.visible,
-    required this.stream,
-    required this.scrollController,
-  });
+  @override
+  State<_ReactionOverlay> createState() => _ReactionOverlayState();
+}
+
+class _ReactionOverlayState extends State<_ReactionOverlay> {
+  StreamSubscription<String>? _sub;
+  final List<({int id, String emoji})> _active = [];
+  int _nextId = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _sub = widget.stream.listen((emoji) {
+      if (!mounted) return;
+      setState(() => _active.add((id: _nextId++, emoji: emoji)));
+    });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
+  void _remove(int id) {
+    if (!mounted) return;
+    setState(() => _active.removeWhere((r) => r.id == id));
+  }
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedSize(
-      duration: const Duration(milliseconds: 200),
-      curve: Curves.easeOut,
-      alignment: Alignment.topCenter,
-      child: !visible
-          ? const SizedBox(width: double.infinity)
-          : Container(
-              width: double.infinity,
-              margin: const EdgeInsets.only(bottom: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.28),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-              ),
-              child: StreamBuilder<List<SubtitleLine>>(
-                stream: stream,
-                builder: (context, snapshot) {
-                  final lines = snapshot.data ?? const <SubtitleLine>[];
-                  if (lines.isEmpty) {
-                    return const Text(
-                      'Listening for captions…',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.white38,
-                        fontStyle: FontStyle.italic,
-                      ),
-                    );
-                  }
-
-                  // Auto-scroll to the newest line, same pattern as the
-                  // comment feed's own post-frame callback below.
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (scrollController.hasClients) {
-                      scrollController.animateTo(
-                        scrollController.position.maxScrollExtent,
-                        duration: const Duration(milliseconds: 250),
-                        curve: Curves.easeOut,
-                      );
-                    }
-                  });
-
-                  return ConstrainedBox(
-                    constraints: const BoxConstraints(maxHeight: 90),
-                    child: ListView.builder(
-                      controller: scrollController,
-                      shrinkWrap: true,
-                      physics: const BouncingScrollPhysics(),
-                      padding: EdgeInsets.zero,
-                      itemCount: lines.length,
-                      itemBuilder: (context, index) {
-                        final line = lines[index];
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 2),
-                          child: RichText(
-                            text: TextSpan(
-                              children: [
-                                TextSpan(
-                                  text: '${line.speakerName}: ',
-                                  style: const TextStyle(
-                                    fontSize: 12.5,
-                                    color: Colors.white54,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                TextSpan(
-                                  text: line.text,
-                                  style: const TextStyle(
-                                    fontSize: 12.5,
-                                    color: Colors.white,
-                                    height: 1.3,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  );
-                },
-              ),
+    return Stack(
+      clipBehavior: Clip.none,
+      children: _active
+          .map(
+            (r) => _FloatingEmoji(
+              key: ValueKey(r.id),
+              emoji: r.emoji,
+              onDone: () => _remove(r.id),
             ),
+          )
+          .toList(),
+    );
+  }
+}
+
+/// One emoji's rise-and-fade animation — self-removing via [onDone] once it
+/// finishes, so _ReactionOverlayState's list never grows unbounded. Starting
+/// position and horizontal drift are randomized per instance so a burst of
+/// several reactions in a row doesn't all stack on exactly the same path.
+class _FloatingEmoji extends StatelessWidget {
+  final String emoji;
+  final VoidCallback onDone;
+
+  _FloatingEmoji({super.key, required this.emoji, required this.onDone});
+
+  final double _startLeftFraction = 0.12 + Random().nextDouble() * 0.66;
+  final double _drift = (Random().nextDouble() - 0.5) * 70;
+
+  @override
+  Widget build(BuildContext context) {
+    final width = MediaQuery.of(context).size.width;
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 2200),
+      curve: Curves.easeOut,
+      onEnd: onDone,
+      builder: (context, t, child) {
+        // Quick pop-in over the first 20% of the animation, then holds at
+        // full size for the rest of the rise.
+        final scale = t < 0.2 ? 0.6 + 0.4 * (t / 0.2) : 1.0;
+        return Positioned(
+          left: (width * _startLeftFraction + _drift * t).clamp(
+            0.0,
+            width - 32,
+          ),
+          bottom: 72 + 260 * t,
+          child: Opacity(
+            opacity: (1 - t).clamp(0.0, 1.0),
+            child: Transform.scale(
+              scale: scale,
+              child: Text(emoji, style: const TextStyle(fontSize: 30)),
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -3035,8 +3070,7 @@ class _Composer extends StatelessWidget {
   final VoidCallback onSend;
   final VoidCallback onToggleMic;
   final VoidCallback onRaiseHand;
-  final bool subtitlesOn;
-  final VoidCallback onToggleSubtitles;
+  final ValueChanged<String> onSendReaction;
   // Non-null only for a host/moderator, who's always seated already and so
   // has no use for the self raise-hand button below — this repurposes that
   // exact slot into the Raised Hands notification badge instead, rather
@@ -3053,8 +3087,7 @@ class _Composer extends StatelessWidget {
     required this.onSend,
     required this.onToggleMic,
     required this.onRaiseHand,
-    required this.subtitlesOn,
-    required this.onToggleSubtitles,
+    required this.onSendReaction,
     this.raisedHandsStream,
     this.onOpenRaisedHands,
   });
@@ -3129,6 +3162,39 @@ class _Composer extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 6),
+          // Replaces the old CC/subtitles toggle — floating emoji reactions
+          // anyone in the room (not just the stage) can send. Wrapped in a
+          // Builder purely to get a BuildContext scoped to this button's own
+          // Container, so showReactionPicker can anchor itself to exactly
+          // where it was tapped without needing a persistent GlobalKey on a
+          // widget that's rebuilt fresh on every parent StreamBuilder tick.
+          Builder(
+            builder: (btnContext) => GestureDetector(
+              onTap: () {
+                final box = btnContext.findRenderObject() as RenderBox;
+                final anchor = box.localToGlobal(box.size.center(Offset.zero));
+                showReactionPicker(
+                  btnContext,
+                  anchor: anchor,
+                  onSelect: onSendReaction,
+                );
+              },
+              child: Container(
+                width: 36,
+                height: 36,
+                decoration: const BoxDecoration(
+                  color: Colors.white24,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.emoji_emotions_outlined,
+                  size: 18,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
           GestureDetector(
             onTap: onToggleMic,
             child: Container(
@@ -3142,27 +3208,6 @@ class _Composer extends StatelessWidget {
               ),
               child: Icon(
                 isUnmuted ? Icons.mic_rounded : Icons.mic_off_rounded,
-                size: 18,
-                color: Colors.white,
-              ),
-            ),
-          ),
-          const SizedBox(width: 6),
-          // Toggles the captions panel above the comment feed — a personal
-          // viewing preference, not tied to seat/mic state, so unlike the
-          // two buttons around it this one is always tappable regardless of
-          // role.
-          GestureDetector(
-            onTap: onToggleSubtitles,
-            child: Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: subtitlesOn ? const Color(0xFF7B68F4) : Colors.white24,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.closed_caption_rounded,
                 size: 18,
                 color: Colors.white,
               ),

@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
+import '../config/api_config.dart';
 import '../models/chat_message.dart';
 import '../models/user.dart';
 import '../models/voiceroom.dart';
@@ -296,16 +297,19 @@ class ChatService {
     return hidden != null && hidden.contains(uid);
   }
 
-  /// Swipe-to-delete on a chat list row (chat_list_screen.dart). Only hides
-  /// the thread from the caller's own list (see streamChatPreviews' doc
+  /// Swipe-to-delete on a chat list row (chat_list_screen.dart) — takes the
+  /// thread's own id directly (ChatPreview.id) rather than deriving it,
+  /// since a group thread's id isn't a function of its members the way a
+  /// 1:1 thread's is; works for either shape unchanged. Only hides the
+  /// thread from the caller's own list (see streamChatPreviews' doc
   /// comment) — firestore.rules blocks deleting a chats/{chatId} doc
-  /// outright (`allow delete: if false`) since it's shared with the other
+  /// outright (`allow delete: if false`) since it's shared with every other
   /// participant, who'd otherwise lose their own copy of the conversation
   /// the moment this user "deleted" it. No-op if the thread doesn't exist.
-  static Future<void> hideChat(String otherUid) async {
+  static Future<void> hideChat(String chatId) async {
     final uid = _uid();
     try {
-      await _chats.doc(chatIdFor(otherUid)).update({
+      await _chats.doc(chatId).update({
         'hiddenFor': FieldValue.arrayUnion([uid]),
       });
     } catch (_) {
@@ -366,6 +370,371 @@ class ChatService {
     );
   }
 
+  // ------------------------------------------------------------------
+  // Group chats — chats/{chatId} with isGroup: true, a plain Firestore
+  // auto-id (not chatIdFor's deterministic 2-person id), adminId (the
+  // creator; see leaveGroup for what happens if they leave), and the same
+  // participants/participantInfo/unread shape 1:1 threads already use —
+  // see ChatThread, which chat_detail_screen.dart's group header and
+  // group_info_screen.dart's member list both stream from here rather than
+  // each re-deriving it independently.
+  // ------------------------------------------------------------------
+
+  // Keep in sync with firestore.rules' own hardcoded 8 in the chats create
+  // and admin-roster update branches — rules can't reference a Dart
+  // constant, so both sides just have to agree on the same number.
+  static const int maxGroupMembers = 8;
+
+  static Stream<ChatThread?> streamGroupThread(String chatId) {
+    if (chatId.isEmpty) return Stream.value(null);
+    return _chats
+        .doc(chatId)
+        .snapshots()
+        .map((doc) => doc.exists ? ChatThread.fromDoc(doc.id, doc.data()!) : null)
+        .withFallback(() => null);
+  }
+
+  /// Creates a new group with [members] (not including the caller, who's
+  /// added automatically as the admin) — "Create Group Chat" in
+  /// add_contact_screen.dart, via choose_group_members_screen.dart's
+  /// following-based picker. Returns the new chatId.
+  static Future<String> createGroup({
+    required String name,
+    required List<AppUser> members,
+  }) async {
+    final uid = _uid();
+    final me = AuthService.instance.currentUser;
+    if (me == null) throw StateError('Not signed in.');
+    if (members.length + 1 > maxGroupMembers) {
+      throw StateError('A group can have at most $maxGroupMembers members.');
+    }
+    final cleanName = name.trim().isEmpty ? 'New Group' : name.trim();
+
+    final chatRef = _chats.doc();
+    final participantIds = [uid, ...members.map((m) => m.id)];
+    final participantInfo = <String, dynamic>{uid: _infoFor(me)};
+    for (final m in members) {
+      participantInfo[m.id] = _infoFor(m);
+    }
+    final unread = <String, dynamic>{for (final id in participantIds) id: 0};
+
+    await chatRef.set({
+      'isGroup': true,
+      'groupName': cleanName,
+      'groupAvatar': '',
+      'adminId': uid,
+      'participants': participantIds,
+      'participantInfo': participantInfo,
+      'unread': unread,
+      'lastMessage': '${me.name} created the group',
+      'lastMessageAt': FieldValue.serverTimestamp(),
+      'lastMessageSenderId': uid,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+
+    // A system line so the thread never opens empty — same spirit as a 1:1
+    // thread's very first message, just not attributable to any one
+    // "first message" since the group itself is the event.
+    await chatRef.collection('messages').add({
+      'senderId': uid,
+      'type': 'system',
+      'text': '${me.name} created the group',
+      'createdAt': FieldValue.serverTimestamp(),
+      'participants': participantIds,
+    });
+
+    for (final m in members) {
+      // ignore: discarded_futures
+      NotificationApiService.sendPush(
+        recipientUid: m.id,
+        title: cleanName,
+        body: '${me.name} added you to the group',
+        data: {'type': 'chat', 'chatId': chatRef.id, 'senderId': uid},
+      );
+    }
+
+    return chatRef.id;
+  }
+
+  /// Admin-only: adds [newMembers] to [chatId]. [currentMemberIds] is the
+  /// group's live member list (the caller — group_info_screen.dart — is
+  /// already streaming [ChatThread], so this avoids a second read just to
+  /// know who to write the system message's `participants` snapshot for;
+  /// see firestore.rules' matching isGroup update branch, which enforces
+  /// the admin-only part server-side too).
+  static Future<void> addGroupMembers({
+    required String chatId,
+    required List<String> currentMemberIds,
+    required List<AppUser> newMembers,
+  }) async {
+    if (newMembers.isEmpty) return;
+    if (currentMemberIds.length + newMembers.length > maxGroupMembers) {
+      throw StateError('A group can have at most $maxGroupMembers members.');
+    }
+    final uid = _uid();
+    final me = AuthService.instance.currentUser;
+    final chatRef = _chats.doc(chatId);
+    final newIds = newMembers.map((m) => m.id).toList();
+    final allIds = [...currentMemberIds, ...newIds];
+
+    final updates = <String, dynamic>{
+      'participants': FieldValue.arrayUnion(newIds),
+    };
+    for (final m in newMembers) {
+      updates['participantInfo.${m.id}'] = _infoFor(m);
+      updates['unread.${m.id}'] = 0;
+    }
+    await chatRef.update(updates);
+
+    final names = newMembers.map((m) => m.name).join(', ');
+    await chatRef.collection('messages').add({
+      'senderId': uid,
+      'type': 'system',
+      'text': '${me?.name ?? 'Someone'} added $names',
+      'createdAt': FieldValue.serverTimestamp(),
+      'participants': allIds,
+    });
+
+    for (final m in newMembers) {
+      // ignore: discarded_futures
+      NotificationApiService.sendPush(
+        recipientUid: m.id,
+        title: 'Added to a group',
+        body: '${me?.name ?? 'Someone'} added you to a group',
+        data: {'type': 'chat', 'chatId': chatId, 'senderId': uid},
+      );
+    }
+  }
+
+  /// Admin-only: removes [memberId] from [chatId] — see firestore.rules'
+  /// isGroup update branch for the server-side admin check. The removed
+  /// member's own participantInfo/unread entries are left in place rather
+  /// than deleted: harmless once they're out of `participants` (nothing
+  /// reads them for a non-member), and deleting by dynamic map key here
+  /// would need its own FieldValue.delete() per field for no real benefit.
+  static Future<void> removeGroupMember({
+    required String chatId,
+    required List<String> currentMemberIds,
+    required String memberId,
+    required String memberName,
+  }) async {
+    final uid = _uid();
+    final me = AuthService.instance.currentUser;
+    final chatRef = _chats.doc(chatId);
+    final remainingIds = currentMemberIds.where((id) => id != memberId).toList();
+
+    await chatRef.update({
+      'participants': FieldValue.arrayRemove([memberId]),
+    });
+
+    await chatRef.collection('messages').add({
+      'senderId': uid,
+      'type': 'system',
+      'text': '${me?.name ?? 'Someone'} removed $memberName',
+      'createdAt': FieldValue.serverTimestamp(),
+      // The removed member no longer needs (or should keep) read access to
+      // this or any later message — only who's left can read it.
+      'participants': remainingIds,
+    });
+  }
+
+  /// Self-removal — the group_info_screen.dart "Leave Group" action,
+  /// available to any member including the admin. If the admin leaves and
+  /// others remain, admin passes to the next member in [currentMemberIds]
+  /// (its existing join order) rather than leaving the group permanently
+  /// unmanageable; firestore.rules' isGroup leave branch enforces that this
+  /// can only ever happen as part of the leaver's own removal, never an
+  /// arbitrary admin handoff.
+  static Future<void> leaveGroup({
+    required String chatId,
+    required List<String> currentMemberIds,
+    required String currentAdminId,
+  }) async {
+    final uid = _uid();
+    final me = AuthService.instance.currentUser;
+    final chatRef = _chats.doc(chatId);
+    final remainingIds = currentMemberIds.where((id) => id != uid).toList();
+
+    final updates = <String, dynamic>{
+      'participants': FieldValue.arrayRemove([uid]),
+    };
+    if (currentAdminId == uid && remainingIds.isNotEmpty) {
+      updates['adminId'] = remainingIds.first;
+    }
+    await chatRef.update(updates);
+
+    if (remainingIds.isNotEmpty) {
+      await chatRef.collection('messages').add({
+        'senderId': uid,
+        'type': 'system',
+        'text': '${me?.name ?? 'Someone'} left the group',
+        'createdAt': FieldValue.serverTimestamp(),
+        // Includes the leaver, not just remainingIds — firestore.rules'
+        // messages create rule requires the sender be in their own
+        // message's participants list, and there's no real reason to hide
+        // someone's own "I left" announcement from them anyway.
+        'participants': currentMemberIds,
+      });
+    }
+  }
+
+  /// Admin-only: sets the group's display photo — group_info_screen.dart's
+  /// avatar tap. [avatarUrl] is already uploaded (see MediaService.
+  /// uploadGroupAvatarBytes) before this is called. firestore.rules'
+  /// isGroup update branches only let the admin touch this field; everyone
+  /// else's writes to a group doc are restricted to leaving it or the
+  /// ordinary per-message fields (lastMessage/unread/hiddenFor), which
+  /// never include groupAvatar.
+  static Future<void> updateGroupAvatar({
+    required String chatId,
+    required String avatarUrl,
+  }) async {
+    await _chats.doc(chatId).update({'groupAvatar': avatarUrl});
+  }
+
+  /// Admin-only: "Delete Group" — group_info_screen.dart. Not a real
+  /// Firestore delete (chats/{chatId} blocks that outright — see its own
+  /// `allow delete: if false` and doc comment); instead empties
+  /// `participants`, which removes the thread from every member's chat
+  /// list (streamChatPreviews' `arrayContains` query stops matching for
+  /// everyone at once) without leaving the `messages` subcollection
+  /// dangling under a now-deleted parent, and without needing a cascading
+  /// delete this project has no Cloud Functions to run anyway.
+  static Future<void> deleteGroup({
+    required String chatId,
+    required List<String> currentMemberIds,
+  }) async {
+    final uid = _uid();
+    final me = AuthService.instance.currentUser;
+    final chatRef = _chats.doc(chatId);
+
+    // Written BEFORE participants is cleared — everyone still listed in
+    // currentMemberIds (including the admin themself) can still read this
+    // closing line; see firestore.rules' messages create rule, which reads
+    // live membership off the parent doc at write time.
+    await chatRef.collection('messages').add({
+      'senderId': uid,
+      'type': 'system',
+      'text': '${me?.name ?? 'Someone'} deleted the group',
+      'createdAt': FieldValue.serverTimestamp(),
+      'participants': currentMemberIds,
+    });
+
+    await chatRef.update({'participants': <String>[]});
+  }
+
+  /// Sends into an EXISTING group [chatId] — unlike [_send] (1:1), the
+  /// thread doc and its participantInfo already exist (see [createGroup]/
+  /// [addGroupMembers]) and aren't rewritten on every message; this only
+  /// touches the per-message fields 1:1 sends also touch. [recipientUids]
+  /// (every OTHER current member) drives the unread fan-out and pushes —
+  /// the caller already has this live from [streamGroupThread].
+  static Future<void> _sendToGroup({
+    required String chatId,
+    required List<String> recipientUids,
+    required String previewText,
+    required Map<String, dynamic> fields,
+    String? pushBody,
+  }) async {
+    final uid = _uid();
+    final chatRef = _chats.doc(chatId);
+    final batch = FirebaseFirestore.instance.batch();
+
+    batch.update(chatRef, {
+      'lastMessage': previewText,
+      'lastMessageAt': FieldValue.serverTimestamp(),
+      'lastMessageSenderId': uid,
+      'unread.$uid': 0,
+      for (final r in recipientUids) 'unread.$r': FieldValue.increment(1),
+    });
+
+    final msgRef = chatRef.collection('messages').doc();
+    batch.set(msgRef, {
+      'senderId': uid,
+      'createdAt': FieldValue.serverTimestamp(),
+      'participants': [uid, ...recipientUids],
+      ...fields,
+    });
+
+    await batch.commit();
+
+    for (final r in recipientUids) {
+      // ignore: discarded_futures
+      NotificationApiService.sendPush(
+        recipientUid: r,
+        title: AuthService.instance.currentUser?.name ?? 'New message',
+        body: pushBody ?? previewText,
+        data: {'type': 'chat', 'chatId': chatId, 'senderId': uid},
+      );
+    }
+  }
+
+  static Future<void> sendGroupMessage({
+    required String chatId,
+    required List<String> recipientUids,
+    required String text,
+  }) {
+    return _sendToGroup(
+      chatId: chatId,
+      recipientUids: recipientUids,
+      previewText: text,
+      fields: {'text': text, 'type': 'text'},
+    );
+  }
+
+  static Future<void> sendGroupImageMessage({
+    required String chatId,
+    required List<String> recipientUids,
+    required String imageUrl,
+  }) {
+    return _sendToGroup(
+      chatId: chatId,
+      recipientUids: recipientUids,
+      previewText: '📷 Photo',
+      fields: {'text': '', 'type': 'image', 'mediaUrl': imageUrl},
+    );
+  }
+
+  static Future<void> sendGroupVoiceMessage({
+    required String chatId,
+    required List<String> recipientUids,
+    required String audioUrl,
+    required int seconds,
+  }) {
+    return _sendToGroup(
+      chatId: chatId,
+      recipientUids: recipientUids,
+      previewText: '🎤 Voice message',
+      fields: {
+        'text': '',
+        'type': 'voice',
+        'mediaUrl': audioUrl,
+        'voiceSeconds': seconds,
+      },
+    );
+  }
+
+  static Future<void> sendGroupFileMessage({
+    required String chatId,
+    required List<String> recipientUids,
+    required String fileUrl,
+    required String fileName,
+    required int fileSize,
+  }) {
+    return _sendToGroup(
+      chatId: chatId,
+      recipientUids: recipientUids,
+      previewText: '📎 $fileName',
+      fields: {
+        'text': '',
+        'type': 'file',
+        'mediaUrl': fileUrl,
+        'fileName': fileName,
+        'fileSize': fileSize,
+      },
+    );
+  }
+
   static Map<String, dynamic> _infoFor(AppUser? user) {
     return {
       'name': user?.name ?? '',
@@ -383,6 +752,30 @@ class ChatService {
     final participants = List<String>.from(
       data['participants'] as List? ?? const [],
     );
+    final ts = data['lastMessageAt'];
+    final dt = ts is Timestamp ? ts.toDate() : null;
+    final unread = ((data['unread'] as Map?)?[uid] as num?)?.toInt() ?? 0;
+
+    if (data['isGroup'] == true) {
+      final groupInfo = (data['participantInfo'] as Map?) ?? const {};
+      return ChatPreview(
+        id: doc.id,
+        isGroup: true,
+        groupName: data['groupName']?.toString() ?? 'Group',
+        groupAvatar: ApiConfig.resolveUrl(data['groupAvatar']?.toString() ?? ''),
+        memberCount: participants.length,
+        // GroupAvatar._maxInRing caps the ring at 6 anyway, matched here
+        // so this preview carries exactly what it'll actually use.
+        members: participants
+            .take(6)
+            .map((id) => (uid: id, name: (groupInfo[id] as Map?)?['name']?.toString() ?? ''))
+            .toList(),
+        lastMessage: data['lastMessage']?.toString() ?? '',
+        time: dt != null ? formatChatTime(dt) : '',
+        unreadCount: unread,
+      );
+    }
+
     final otherUid = participants.firstWhere(
       (id) => id != uid,
       orElse: () => '',
@@ -400,11 +793,8 @@ class ChatService {
       learningLang: '',
     );
 
-    final ts = data['lastMessageAt'];
-    final dt = ts is Timestamp ? ts.toDate() : null;
-    final unread = ((data['unread'] as Map?)?[uid] as num?)?.toInt() ?? 0;
-
     return ChatPreview(
+      id: doc.id,
       user: otherUser,
       lastMessage: data['lastMessage']?.toString() ?? '',
       time: dt != null ? formatChatTime(dt) : '',

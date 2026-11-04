@@ -5,6 +5,7 @@ import '../models/media_library_item.dart';
 import '../models/whiteboard_library_folder.dart';
 import '../models/whiteboard_library_item.dart';
 import '../services/media_library_service.dart';
+import '../services/screenshot_guard.dart';
 
 const _bgColor = Color(0xFF1B1B3A);
 const _cardColor = Color(0xFF242449);
@@ -87,6 +88,22 @@ class _WhiteboardLibrarySheetState extends State<WhiteboardLibrarySheet> {
   void _back() {
     if (_atRoot) return;
     setState(() => _stack.removeLast());
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // The whole sheet, not just the Library folder specifically — these
+    // are licensed exam-prep images, and a screenshot taken one tap before
+    // actually opening the folder is just as much a capture of this
+    // content as one taken after.
+    ScreenshotGuard.enable(context);
+  }
+
+  @override
+  void dispose() {
+    ScreenshotGuard.disable();
+    super.dispose();
   }
 
   void _showError(String message) {

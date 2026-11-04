@@ -12,6 +12,7 @@ import '../../widgets/follow_button.dart';
 import '../connect/partner_profile_screen.dart';
 import '../friends/my_qr_code_screen.dart';
 import '../friends/scan_qr_screen.dart';
+import 'choose_group_members_screen.dart';
 
 /// Modal screen that slides up smoothly from bottom to top.
 class AddContactScreen extends StatefulWidget {
@@ -310,7 +311,13 @@ class _AddContactScreenState extends State<AddContactScreen> {
                         _ActionTile(
                           icon: Icons.group_add_outlined,
                           label: 'Create Group Chat',
-                          onTap: () {},
+                          onTap: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => const ChooseGroupMembersScreen(mode: GroupMemberPickerMode.create),
+                              ),
+                            );
+                          },
                         ),
                         const Divider(
                           height: 1,
