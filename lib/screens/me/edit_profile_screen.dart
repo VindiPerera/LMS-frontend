@@ -43,6 +43,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     'French',
     'German',
     'Chinese',
+    'Hindi',
+    'Korean',
+    'Nepali',
+    'Tamil',
+    'Indonesian',
   ];
 
   bool get _isTeacher => widget.user.role == 'teacher';

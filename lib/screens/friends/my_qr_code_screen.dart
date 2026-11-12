@@ -51,8 +51,16 @@ class _MyQRCodeScreenState extends State<MyQRCodeScreen> {
     });
   }
 
+  // Shared across every share channel below — the app's own description
+  // (what FaceTalk is, for someone who's never heard of it) rather than a
+  // bare "add me" nudge, so a link opened cold by a stranger explains
+  // itself before they're asked to tap it.
+  static const _shareBlurb =
+      'Facetalk is an English-speaking app where you can meet people from '
+      'other countries and practice speaking English with them.';
+
   Future<void> _shareWhatsApp() async {
-    final text = 'Add me on FaceTalk: $_friendLink';
+    final text = '$_shareBlurb $_friendLink';
     final url = Uri.parse('https://wa.me/?text=${Uri.encodeComponent(text)}');
     if (await canLaunchUrl(url)) {
       await launchUrl(url, mode: LaunchMode.externalApplication);
@@ -63,7 +71,7 @@ class _MyQRCodeScreenState extends State<MyQRCodeScreen> {
 
   Future<void> _shareTelegram() async {
     final encodedUrl = Uri.encodeComponent(_friendLink);
-    final encodedText = Uri.encodeComponent('Add me on FaceTalk!');
+    final encodedText = Uri.encodeComponent(_shareBlurb);
     final url = Uri.parse('https://t.me/share/url?url=$encodedUrl&text=$encodedText');
     if (await canLaunchUrl(url)) {
       await launchUrl(url, mode: LaunchMode.externalApplication);
@@ -92,7 +100,7 @@ class _MyQRCodeScreenState extends State<MyQRCodeScreen> {
   }
 
   void _shareMore() {
-    Share.share('Add me on FaceTalk: $_friendLink');
+    Share.share('$_shareBlurb $_friendLink');
   }
 
   @override

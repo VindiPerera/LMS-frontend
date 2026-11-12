@@ -43,8 +43,12 @@ class FriendLinkService {
   Future<String> generateFriendLink(AppUser user) async {
     if (user.id.isEmpty) return '';
     try {
+      // Always mints against the production backend — this code has to be
+      // resolvable from a link shared to someone else's device, which can
+      // never reach ApiConfig.baseUrl's debug-mode local/LAN address (see
+      // ApiConfig.shareBaseUrl).
       final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/api/deep-links'),
+        Uri.parse('${ApiConfig.shareBaseUrl}/api/deep-links'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'type': 'add_friend',
@@ -59,7 +63,7 @@ class FriendLinkService {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         final code = data['deepLink']?['code'] as String?;
         if (code != null && code.isNotEmpty) {
-          return '${ApiConfig.baseUrl}/u/$code';
+          return '${ApiConfig.shareBaseUrl}/u/$code';
         }
       }
     } catch (_) {
@@ -70,7 +74,7 @@ class FriendLinkService {
     // a short code) — but if it's unreachable, still hand back *something*
     // scannable/shareable rather than an empty QR code. scan_qr_screen.dart
     // understands this shape too (see [resolveCode]).
-    return '${ApiConfig.baseUrl}/add-friend?friendId=${user.id}';
+    return '${ApiConfig.shareBaseUrl}/add-friend?friendId=${user.id}';
   }
 
   /// Resolves a scanned/tapped QR/link back to the user it points at.
@@ -104,8 +108,11 @@ class FriendLinkService {
   /// Referrer, which both hand over the bare code directly.
   Future<ResolvedDeepLink?> resolveDeepLinkCode(String code) async {
     try {
+      // Matches generateFriendLink's shareBaseUrl: every code was minted
+      // against the production backend, so that's the only place it can be
+      // looked up too.
       final response = await http.get(
-        Uri.parse('${ApiConfig.baseUrl}/api/deep-links/$code'),
+        Uri.parse('${ApiConfig.shareBaseUrl}/api/deep-links/$code'),
       );
       if (response.statusCode != 200) return null;
 

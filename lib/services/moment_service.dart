@@ -471,14 +471,19 @@ class MomentService {
   /// Updates the denormalized `user.name`/`user.avatarUrl` snapshot on
   /// every non-deleted moment [uid] has posted — called from
   /// AuthService.updateProfile() right after a successful name/avatar
-  /// change, so old posts don't keep showing a stale name/photo. (This was
+  /// change, so old posts don't keep showing a stale name/photo. Also
+  /// called as a self-heal on every app launch (see AuthService.init()),
+  /// since posts created before this fan-out existed (or from before a
+  /// user's last edit) would otherwise stay stale forever. (This was
   /// previously a Cloud Function, functions/index.js's onUserProfileUpdate;
   /// doing it client-side instead since this project stays on the free
   /// Spark plan. The owner-only branch of firestore.rules' moments update
   /// rule permits this — user.id/createdAt/isDeleted all stay unchanged.)
   ///
-  /// Best-effort: a failure here (offline, a huge post history) shouldn't
-  /// block the profile edit itself from succeeding.
+  /// Only touches docs whose stored name/avatar actually differ, so a
+  /// no-op run (the common case for the launch self-heal) issues zero
+  /// writes. Best-effort: a failure here (offline, a huge post history)
+  /// shouldn't block the profile edit/app launch itself from succeeding.
   static Future<void> updateAuthorInfoAcrossMoments({
     required String uid,
     required String name,
@@ -487,10 +492,13 @@ class MomentService {
     if (uid.isEmpty) return;
     try {
       final snap = await _moments.where('user.id', isEqualTo: uid).get();
-      if (snap.docs.isEmpty) return;
+      final docs = snap.docs.where((doc) {
+        final user = doc.data()['user'] as Map<String, dynamic>? ?? const {};
+        return user['name'] != name || user['avatarUrl'] != avatarUrl;
+      }).toList();
+      if (docs.isEmpty) return;
 
       // Firestore batches cap at 500 writes; chunk defensively.
-      final docs = snap.docs;
       for (var i = 0; i < docs.length; i += 500) {
         final batch = FirebaseFirestore.instance.batch();
         for (final doc in docs.skip(i).take(500)) {

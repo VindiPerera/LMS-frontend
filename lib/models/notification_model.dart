@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:timeago/timeago.dart' as timeago;
 
+import '../config/api_config.dart';
+
 enum NotificationType {
   like,
   comment,
@@ -80,7 +82,7 @@ class NotificationModel {
       type: NotificationType.fromStorage(json['type']),
       actorId: json['actorId']?.toString() ?? '',
       actorName: json['actorName']?.toString() ?? 'Someone',
-      actorAvatar: json['actorAvatar']?.toString() ?? '',
+      actorAvatar: ApiConfig.resolveUrl(json['actorAvatar']?.toString() ?? ''),
       postId: json['postId']?.toString() ?? '',
       isRead: json['isRead'] == true,
       createdAt: json['createdAt'] is Timestamp

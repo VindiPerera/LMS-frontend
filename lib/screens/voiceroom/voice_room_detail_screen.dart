@@ -13,6 +13,7 @@ import '../../models/whiteboard_item.dart';
 import '../../models/whiteboard_library_item.dart';
 import '../../services/media_service.dart';
 import '../../services/room_participant_service.dart';
+import '../../services/screenshot_guard.dart';
 import '../../services/storage_service.dart';
 import '../../services/voice_room_service.dart';
 import '../../services/voice_room_audio_service.dart';
@@ -111,6 +112,14 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
   // top/bottom zIndex) without an extra Firestore read of their own.
   List<WhiteboardItem> _whiteboardItems = const [];
   StreamSubscription<List<WhiteboardItem>>? _whiteboardSub;
+  // Mirrors expanded_whiteboard_screen.dart's own guard: library/topic
+  // images placed on this room's board are licensed exam-prep content, so
+  // screenshots are blocked for as long as at least one is visible here too
+  // (not just once the board is opened full-screen). Toggled, not just
+  // enabled once, since the board's contents change live for everyone
+  // watching. See ScreenshotGuard's doc comment for the ref-counting that
+  // keeps this safe alongside the expanded view's own enable/disable.
+  bool _screenshotGuardOn = false;
 
   // Watches the signed-in user's own role so a listener who gets seated by
   // the host/moderator — RoomParticipantService.acceptRaisedHand (they
@@ -242,6 +251,7 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
         // the moment it gets re-mounted after the user scrolls away and back.
         if (mounted) {
           setState(() => _whiteboardItems = items);
+          _syncScreenshotGuard(items);
         } else {
           _whiteboardItems = items;
         }
@@ -346,6 +356,19 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
     }
   }
 
+  /// Switches the screenshot guard on/off as library images come and go
+  /// from this room's board — see [_screenshotGuardOn]'s doc comment.
+  void _syncScreenshotGuard(List<WhiteboardItem> items) {
+    final shouldGuard = items.any((item) => item.isImage);
+    if (shouldGuard == _screenshotGuardOn) return;
+    _screenshotGuardOn = shouldGuard;
+    if (shouldGuard) {
+      ScreenshotGuard.enable(context);
+    } else {
+      ScreenshotGuard.disable();
+    }
+  }
+
   @override
   void dispose() {
     _controller.dispose();
@@ -358,6 +381,7 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
     _roleWatchSub?.cancel();
     _moderatorInviteSub?.cancel();
     _stageInviteSub?.cancel();
+    if (_screenshotGuardOn) ScreenshotGuard.disable();
     if (widget.room.id.isNotEmpty && !_minimizedHandoff) {
       // Fire-and-forget: the screen is already closing, nothing left to
       // await into. RoomParticipantService.leave swallows its own errors,
@@ -1964,6 +1988,10 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                                   itemCount: seats.length,
                                   itemBuilder: (context, i) {
                                     final speaker = seats[i];
+                                    final talking = VoiceRoomAudioService
+                                        .instance
+                                        .speakingUids
+                                        .contains(speaker.uid);
                                     return GestureDetector(
                                       onTap: speaker.isEmptySeat
                                           ? () => _raiseHand(me)
@@ -2027,17 +2055,14 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                                                   clipBehavior: Clip.none,
                                                   children: [
                                                     // A soft pulsing glow blooms just
-                                                    // outside the (always-static) unmuted
-                                                    // ring below, but only while LiveKit's
-                                                    // own voice-activity detection says this
-                                                    // person is actually making sound right
-                                                    // now (VoiceRoomAudioService.speakingUids
-                                                    // — distinct from speaker.isSpeaking,
-                                                    // which only reflects mic-on/off state
-                                                    // and drives the ring itself). Sits
-                                                    // underneath the ring in the Stack so it
-                                                    // reads as emanating from behind it
-                                                    // rather than competing with it.
+                                                    // outside the avatar, but only while
+                                                    // LiveKit's own voice-activity detection
+                                                    // says this person is actually making
+                                                    // sound right now (VoiceRoomAudioService.
+                                                    // speakingUids) — not merely unmuted. No
+                                                    // static ring for the plain unmuted state
+                                                    // any more; this glow is the sole
+                                                    // "speaking" indicator.
                                                     Positioned(
                                                       left: -8,
                                                       top: -8,
@@ -2048,56 +2073,10 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                                                           key: ValueKey(
                                                             'talk_${speaker.uid}',
                                                           ),
-                                                          talking:
-                                                              VoiceRoomAudioService
-                                                                  .instance
-                                                                  .speakingUids
-                                                                  .contains(
-                                                                    speaker.uid,
-                                                                  ),
+                                                          talking: talking,
                                                         ),
                                                       ),
                                                     ),
-                                                    // While unmuted a plain, static red
-                                                    // ring is drawn just OUTSIDE the avatar
-                                                    // — this is a mic-state indicator (see
-                                                    // speaker.isSpeaking), not a live
-                                                    // "talking right now" signal; that's
-                                                    // the glow above.
-                                                    if (speaker.isSpeaking)
-                                                      Positioned(
-                                                        left: -4,
-                                                        top: -4,
-                                                        right: -4,
-                                                        bottom: -4,
-                                                        child: IgnorePointer(
-                                                          child: Container(
-                                                            decoration: BoxDecoration(
-                                                              shape: BoxShape
-                                                                  .circle,
-                                                              border: Border.all(
-                                                                color:
-                                                                    const Color(
-                                                                      0xFFFF3B47,
-                                                                    ),
-                                                                width: 2.5,
-                                                              ),
-                                                              boxShadow: [
-                                                                BoxShadow(
-                                                                  color:
-                                                                      const Color(
-                                                                        0xFFFF3B47,
-                                                                      ).withValues(
-                                                                        alpha:
-                                                                            0.45,
-                                                                      ),
-                                                                  blurRadius: 8,
-                                                                ),
-                                                              ],
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      ),
                                                     AppAvatar(
                                                       seed:
                                                           speaker.uid.isNotEmpty
@@ -2147,9 +2126,10 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                                                           ),
                                                         ),
                                                       ),
-                                                    // When unmuted/speaking the red ring
-                                                    // above is the sole visual indicator —
-                                                    // no extra badge needed.
+                                                    // While unmuted (whether or not actually
+                                                    // talking right now) the glow above is the
+                                                    // sole visual indicator — no extra badge
+                                                    // needed.
                                                   ],
                                                 ),
                                           const SizedBox(height: 4),
@@ -2313,8 +2293,9 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                                   final comments =
                                       commentsSnap.data ??
                                       const <BoardComment>[];
-                                  if (comments.isEmpty)
+                                  if (comments.isEmpty) {
                                     return const SizedBox.shrink();
+                                  }
 
                                   // Auto-scroll to the newest comment whenever
                                   // the list grows. Post-frame so the ListView
@@ -3162,6 +3143,25 @@ class _Composer extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 6),
+          GestureDetector(
+            onTap: onToggleMic,
+            child: Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: isUnmuted
+                    ? const Color(0xFF3DDC97)
+                    : const Color(0xFF4FA8FF),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                isUnmuted ? Icons.mic_rounded : Icons.mic_off_rounded,
+                size: 18,
+                color: Colors.white,
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
           // Replaces the old CC/subtitles toggle — floating emoji reactions
           // anyone in the room (not just the stage) can send. Wrapped in a
           // Builder purely to get a BuildContext scoped to this button's own
@@ -3191,25 +3191,6 @@ class _Composer extends StatelessWidget {
                   size: 18,
                   color: Colors.white,
                 ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 6),
-          GestureDetector(
-            onTap: onToggleMic,
-            child: Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: isUnmuted
-                    ? const Color(0xFF3DDC97)
-                    : const Color(0xFF4FA8FF),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                isUnmuted ? Icons.mic_rounded : Icons.mic_off_rounded,
-                size: 18,
-                color: Colors.white,
               ),
             ),
           ),
@@ -3252,10 +3233,11 @@ class _Composer extends StatelessWidget {
 
 /// The speaker grid's "this person is talking right now" effect — a soft,
 /// looping glow (no border of its own, purely a pulsing [BoxShadow]) that
-/// blooms just outside the avatar's always-static unmuted ring, separate
-/// from it so the two never get confused: the ring means "mic is on," this
-/// glow means "and LiveKit can actually hear them right now." Owns its own
-/// [AnimationController] and only runs the ticker while [talking] is
+/// blooms just outside the avatar. The sole mic-state indicator in the
+/// grid now — there's no separate static ring for plain unmuted-but-silent,
+/// so a seat only lights up red while LiveKit's own voice-activity
+/// detection says this person is actually making sound right now. Owns its
+/// own [AnimationController] and only runs the ticker while [talking] is
 /// actually true, so the seven other (usually silent) seats in the grid
 /// cost nothing. See its one call site in _buildSeats' speaker grid for what
 /// [talking] is computed from — real LiveKit voice-activity detection

@@ -69,4 +69,25 @@ class NotificationApiService {
       debugPrint('NotificationApiService.sendPush($recipientUid) failed (non-fatal): $e');
     }
   }
+
+  /// Repairs actorAvatar/actorName on every already-existing notification
+  /// item [uid] is the actor of — see NotificationController::
+  /// backfillActorAvatar's doc for why this has to go through the backend
+  /// (the client has no Firestore write path into another user's
+  /// notifications feed at all). Called fire-and-forget from
+  /// AuthService.init(), alongside the moments/voice-room self-heal.
+  static Future<void> backfillActorAvatar({required String uid}) async {
+    if (uid.isEmpty) return;
+    try {
+      await http
+          .post(
+            Uri.parse('${ApiConfig.baseUrl}/api/notifications/backfill-actor-avatar'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'uid': uid}),
+          )
+          .timeout(const Duration(seconds: 10));
+    } catch (e) {
+      debugPrint('NotificationApiService.backfillActorAvatar($uid) failed (non-fatal): $e');
+    }
+  }
 }

@@ -228,7 +228,6 @@ class _VipMembershipBanner extends StatelessWidget {
     'Unlimited Talk Time for 01 Month',
     'White Board JPG uploading',
     'White Board Text typing',
-    'Subtitles on and read',
   ];
 
   @override

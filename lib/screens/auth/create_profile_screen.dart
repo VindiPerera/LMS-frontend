@@ -117,6 +117,11 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
     'French',
     'German',
     'Chinese',
+    'Hindi',
+    'Korean',
+    'Nepali',
+    'Tamil',
+    'Indonesian',
   ];
 
   @override

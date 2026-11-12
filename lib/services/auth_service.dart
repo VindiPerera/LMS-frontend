@@ -7,6 +7,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import '../models/user.dart';
 import 'deep_link_service.dart';
 import 'moment_service.dart';
+import 'notification_api_service.dart';
 import 'push_notification_service.dart';
 import 'voice_room_service.dart';
 
@@ -66,7 +67,35 @@ class AuthService {
     // Moments push-notification setup; register/login already do this via
     // _afterSignIn() for a brand-new sign-in.
     _afterSignIn();
-    return refreshCurrentUser();
+    final current = await refreshCurrentUser();
+
+    // Self-heal: fixes posts that predate the updateProfile() fan-out below
+    // (or predate the user's last edit) without requiring them to re-save
+    // their profile — see MomentService.updateAuthorInfoAcrossMoments's doc
+    // comment. Fire-and-forget and a no-op write-wise once everything's
+    // already in sync, so this is cheap on every ordinary launch.
+    if (current != null) {
+      // ignore: discarded_futures
+      MomentService.updateAuthorInfoAcrossMoments(
+        uid: current.id,
+        name: current.name,
+        avatarUrl: current.avatarUrl,
+      );
+      // ignore: discarded_futures
+      VoiceRoomService.updateHostInfoAcrossRooms(
+        uid: current.id,
+        name: current.name,
+        avatarUrl: current.avatarUrl,
+      );
+      // Notifications live under their RECIPIENT's uid, not this user's own
+      // — firestore.rules blocks a write there from anyone else, so this
+      // one has to go through the backend instead of a direct Firestore
+      // batch (see NotificationApiService.backfillActorAvatar's doc).
+      // ignore: discarded_futures
+      NotificationApiService.backfillActorAvatar(uid: current.id);
+    }
+
+    return current;
   }
 
   /// Re-fetches the current user's profile from Firestore — used by
@@ -243,6 +272,14 @@ class AuthService {
         name: updated.name,
         avatarUrl: updated.avatarUrl,
       );
+      // Past notifications where this user is the actor embed the same kind
+      // of snapshot, but live under their RECIPIENT's uid — firestore.rules
+      // blocks a direct write there, so this goes through the backend
+      // instead of a client-side Firestore batch (see init()'s equivalent
+      // call and NotificationApiService.backfillActorAvatar's doc). Without
+      // this, a photo change only reached past notifications on next launch.
+      // ignore: discarded_futures
+      NotificationApiService.backfillActorAvatar(uid: uid);
     }
 
     return updated;

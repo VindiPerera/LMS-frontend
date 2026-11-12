@@ -15,7 +15,18 @@ class ApiConfig {
   /// verification). No trailing slash: every call site below concatenates
   /// this directly as '$baseUrl/api/...', so one here would produce a
   /// double slash.
-  static const String? _prodBaseUrl = 'https://www.facetalkenglish.com';
+  static const String _prodBaseUrl = 'https://www.facetalkenglish.com';
+
+  /// The one fixed, publicly-reachable host — unlike [baseUrl], which
+  /// deliberately points at whatever backend this running instance talks to
+  /// (localhost/LAN/emulator-alias in debug), this never changes with build
+  /// mode or environment. Anything handed to a device that isn't this one —
+  /// a QR code, a WhatsApp-shared link — has to resolve on its own, so it
+  /// must always point here, never at [baseUrl]. See [FriendLinkService]
+  /// (friend_link_service.dart), which used to share [baseUrl] links and
+  /// produced `http://127.0.0.1:8000/u/...` links nobody else's device
+  /// could ever open.
+  static const String shareBaseUrl = _prodBaseUrl;
 
   /// [baseUrl] and [candidateUploadUrls] both need this exact same
   /// "unset production URL" guard in their `kReleaseMode` branch — shared

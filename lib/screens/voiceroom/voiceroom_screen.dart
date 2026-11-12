@@ -59,9 +59,15 @@ class _VoiceroomScreenState extends State<VoiceroomScreen>
     }).toList();
   }
 
+  static const _levelTags = [
+    'Beginner Level',
+    'Intermediate Level',
+    'Advanced Level',
+  ];
+
   void _openCreateRoomSheet() {
     final titleController = TextEditingController();
-    final tagController = TextEditingController();
+    String? selectedTag;
     // 'EN'/'KO' — matches VoiceRoom.category and _filteredRooms' matching
     // (see that method's doc comment) so a room created here lands in the
     // right All/English/Korean tab immediately, not just by title/tag
@@ -119,13 +125,17 @@ class _VoiceroomScreenState extends State<VoiceroomScreen>
                     ),
                   ),
                   const SizedBox(height: 12),
-                  TextField(
-                    controller: tagController,
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedTag,
                     decoration: const InputDecoration(
                       labelText: 'Tag (Optional)',
-                      hintText: 'Beginner Level English',
                       border: OutlineInputBorder(),
                     ),
+                    hint: const Text('Select a level'),
+                    items: _levelTags
+                        .map((level) => DropdownMenuItem(value: level, child: Text(level)))
+                        .toList(),
+                    onChanged: (value) => setSheetState(() => selectedTag = value),
                   ),
                   const SizedBox(height: 14),
                   const Text(
@@ -166,9 +176,7 @@ class _VoiceroomScreenState extends State<VoiceroomScreen>
                     onPressed: () async {
                       final title = titleController.text.trim();
                       if (title.isEmpty) return;
-                      final tag = tagController.text.trim().isEmpty
-                          ? 'General'
-                          : tagController.text.trim();
+                      final tag = selectedTag ?? 'General';
                       final sheetContext = context;
                       try {
                         final newRoom = await VoiceRoomService.createRoom(
