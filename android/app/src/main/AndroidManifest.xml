@@ -8,6 +8,17 @@
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+    <!-- Voice rooms: a microphone foreground service (flutter_foreground_task,
+         started by VoiceRoomAudioService while connected) so Android keeps
+         the mic, audio and network alive with the screen off or the app in
+         the background, instead of freezing the app and cutting voice. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
+    <!-- Fallback type for listeners who never granted RECORD_AUDIO: Android
+         14+ refuses a microphone-type service without it, but they still
+         need playback kept alive. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
 
     <!-- Add Friend via QR Code: camera access for scan_qr_screen.dart's
          mobile_scanner view. Also covers create_moment_screen.dart's
@@ -82,6 +93,13 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <!-- Voice room keep-alive (see the FOREGROUND_SERVICE_MICROPHONE
+             permission above). -->
+        <service
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+            android:foregroundServiceType="microphone|mediaPlayback"
+            android:exported="false" />
 
         <!-- Fallback channel for any FCM push that somehow arrives without
              an explicit android.notification.channel_id (functions/
