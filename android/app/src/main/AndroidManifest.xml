@@ -77,6 +77,20 @@
                 <data android:scheme="https" android:host="hellotalk.jaan.lk" android:pathPrefix="/u/"/>
             </intent-filter>
 
+            <!-- The live invite domain (ApiConfig.shareBaseUrl). Its own
+                 filter on purpose: Android 11 and older verify every host
+                 in one autoVerify filter together, so a failing old host
+                 above can't block these. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https"/>
+                <data android:host="www.facetalkenglish.com"/>
+                <data android:host="facetalkenglish.com"/>
+                <data android:pathPrefix="/u/"/>
+            </intent-filter>
+
             <!-- Custom-scheme backup for the same links — mainly a manual
                  testing aid (`adb shell am start -a android.intent.action.VIEW
                  -d "facetalk://u/CODE"`) that works with no domain
