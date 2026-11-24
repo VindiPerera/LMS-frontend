@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart' as fgt;
 import 'package:http/http.dart' as http;
 import 'package:livekit_client/livekit_client.dart';
 
@@ -48,14 +49,51 @@ class VoiceRoomAudioService extends ChangeNotifier {
   Set<String> _speakingUids = const {};
   String? _error;
 
+  // Auto-reconnect. A connection LiveKit couldn't resume on its own (network
+  // drop, Wi-Fi <-> mobile data switch, server restart) used to stay dead
+  // for the rest of the room — and since [connect] is idempotent per room,
+  // even reopening the screen couldn't revive it. Now a lost connection is
+  // re-established with a fresh token, backing off up to [_maxRetryDelay].
+  static const _maxRetryDelay = Duration(seconds: 15);
+  Timer? _retryTimer;
+  int _retryAttempt = 0;
+  bool _reconnecting = false;
+  // Set when the server says this user may not have voice here at all (room
+  // ended, removed/banned) — retrying can't help, so stop.
+  bool _tokenRefused = false;
+
   String? get roomId => _roomId;
   bool get isConnected => _room?.connectionState == ConnectionState.connected;
+
+  /// True while voice dropped and is being re-established — for a
+  /// "Reconnecting…" hint.
+  bool get isReconnecting => _reconnecting;
 
   /// uids LiveKit currently hears talking — for a speaking indicator.
   Set<String> get speakingUids => _speakingUids;
 
   /// Human-readable reason voice isn't working, or null.
   String? get error => _error;
+
+  bool _needsAudioUnlock = false;
+
+  /// True when the browser's autoplay policy is blocking remote voices (web
+  /// only — Chrome won't play audio until the user taps something). The
+  /// screen offers a button that calls [unlockAudio] from that tap.
+  bool get needsAudioUnlock => _needsAudioUnlock;
+
+  /// Must be called from a user gesture (a tap) to satisfy the browser.
+  Future<void> unlockAudio() async {
+    final room = _room;
+    if (room == null) return;
+    try {
+      await room.startAudio();
+    } catch (e) {
+      debugPrint('VoiceRoomAudioService: startAudio failed: $e');
+    }
+    _needsAudioUnlock = !room.canPlaybackAudio;
+    notifyListeners();
+  }
 
   /// Joins [roomId]'s audio session. Call after RoomParticipantService.join
   /// has landed (the server refuses a token for someone with no participant
@@ -68,11 +106,22 @@ class VoiceRoomAudioService extends ChangeNotifier {
       await _teardown();
       _roomId = roomId;
       _watchSelf(roomId);
+      await _startKeepAlive();
       await _connectRoom(roomId);
     });
   }
 
-  Future<void> disconnect() => _enqueue(_teardown);
+  /// Leaves [roomId]'s audio session — a no-op if the service has meanwhile
+  /// moved on to a different room. Scoped (and checked inside the queue, not
+  /// at call time) because the caller is often a room that is going away
+  /// *after* the user already entered the next one: a minimized room ending
+  /// in the background, or the previous VoiceRoomDetailScreen disposing only
+  /// once its route transition finishes. Unscoped, that late cleanup tore
+  /// down the new room's connection, leaving it silent.
+  Future<void> disconnect(String roomId) => _enqueue(() async {
+        if (_roomId != roomId) return;
+        await _teardown();
+      });
 
   Future<void> _enqueue(Future<void> Function() task) {
     final next = _queue.then((_) => task()).catchError((Object e) {
@@ -83,6 +132,12 @@ class VoiceRoomAudioService extends ChangeNotifier {
   }
 
   Future<void> _teardown() async {
+    _retryTimer?.cancel();
+    _retryTimer = null;
+    _retryAttempt = 0;
+    _reconnecting = false;
+    _tokenRefused = false;
+    await _stopKeepAlive();
     await _selfSub?.cancel();
     _selfSub = null;
     await _events?.dispose();
@@ -93,6 +148,7 @@ class VoiceRoomAudioService extends ChangeNotifier {
     _canPublish = false;
     _wantMic = false;
     _error = null;
+    _needsAudioUnlock = false;
     _speakingUids = const {};
     if (room != null) {
       try {
@@ -165,7 +221,13 @@ class VoiceRoomAudioService extends ChangeNotifier {
     }
 
     final grant = await _fetchToken(roomId);
-    if (grant == null || _roomId != roomId) return;
+    if (_roomId != roomId) return;
+    if (grant == null) {
+      // Network error / server hiccup -> try again shortly. A refusal (room
+      // ended, removed from the room) is final; the screen handles leaving.
+      if (!_tokenRefused) _scheduleReconnect(roomId);
+      return;
+    }
 
     final room = Room(
       roomOptions: const RoomOptions(
@@ -181,6 +243,7 @@ class VoiceRoomAudioService extends ChangeNotifier {
       await room.dispose();
       _error = 'Could not connect to voice.';
       notifyListeners();
+      _scheduleReconnect(roomId);
       return;
     }
     if (_roomId != roomId) {
@@ -192,20 +255,150 @@ class VoiceRoomAudioService extends ChangeNotifier {
     _room = room;
     _canPublish = grant.canPublish;
     _error = null;
+    _reconnecting = false;
+    _retryAttempt = 0;
+    // A seat change can reconnect while a retry is still pending — that
+    // retry is now redundant.
+    _retryTimer?.cancel();
+    _retryTimer = null;
     _events = room.createListener()
       ..on<ActiveSpeakersChangedEvent>((e) {
         _speakingUids = {for (final p in e.speakers) p.identity};
         notifyListeners();
       })
-      ..on<RoomDisconnectedEvent>((_) {
+      // LiveKit's own quick resume attempts — surface them as
+      // "Reconnecting…" too.
+      ..on<RoomReconnectingEvent>((_) {
+        _reconnecting = true;
+        notifyListeners();
+      })
+      ..on<RoomReconnectedEvent>((_) {
+        _reconnecting = false;
+        notifyListeners();
+      })
+      ..on<RoomDisconnectedEvent>((e) {
         _speakingUids = const {};
+        // Only react if this is still the live connection — _connectRoom /
+        // _teardown dispose the listener before disconnecting on purpose,
+        // but be defensive about late events from a replaced Room.
+        if (!identical(_room, room) || _roomId != roomId) {
+          notifyListeners();
+          return;
+        }
+        switch (e.reason) {
+          // Deliberate ends — reconnecting would be wrong: we left, the
+          // room was closed, a moderator removed us, or this account
+          // joined from another device (retrying would ping-pong with it).
+          case DisconnectReason.clientInitiated:
+          case DisconnectReason.roomDeleted:
+          case DisconnectReason.participantRemoved:
+          case DisconnectReason.duplicateIdentity:
+            notifyListeners();
+          // Everything else (network loss, server restart, failed resume…)
+          // — get a fresh token and rejoin.
+          default:
+            _reconnecting = true;
+            notifyListeners();
+            _scheduleReconnect(roomId);
+        }
+      })
+      ..on<AudioPlaybackStatusChanged>((_) {
+        _needsAudioUnlock = !room.canPlaybackAudio;
         notifyListeners();
       });
+    _needsAudioUnlock = !room.canPlaybackAudio;
     notifyListeners();
     await _syncMic();
   }
 
+  /// Queues a fresh-token rejoin of [roomId] after a backoff of 1, 2, 4, 8,
+  /// then 15s (repeating) — runs for as long as the user stays in the room,
+  /// so voice comes back by itself once the network does. Cancelled by
+  /// [_teardown] (leave / switch rooms).
+  void _scheduleReconnect(String roomId) {
+    if (_roomId != roomId || _retryTimer != null) return;
+    _reconnecting = true;
+    final seconds = 1 << _retryAttempt.clamp(0, 4);
+    final delay = Duration(seconds: seconds) > _maxRetryDelay
+        ? _maxRetryDelay
+        : Duration(seconds: seconds);
+    _retryAttempt++;
+    debugPrint('VoiceRoomAudioService: reconnecting in ${delay.inSeconds}s '
+        '(attempt $_retryAttempt)');
+    _retryTimer = Timer(delay, () {
+      _retryTimer = null;
+      _enqueue(() async {
+        if (_roomId != roomId) return;
+        await _connectRoom(roomId);
+      });
+    });
+  }
+
+  /// Android: a foreground service ("Voice room active" notification) for
+  /// the whole time the user is in a room. Without it Android freezes the
+  /// app soon after the screen locks or the user switches apps — mic and
+  /// audio stop, heartbeats stop, and after 90s other clients sweep the
+  /// user out of the room. No-op on web/iOS.
+  static bool _keepAliveInitialized = false;
+
+  Future<void> _startKeepAlive() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    try {
+      if (!_keepAliveInitialized) {
+        fgt.FlutterForegroundTask.init(
+          androidNotificationOptions: fgt.AndroidNotificationOptions(
+            channelId: 'voice_room_channel',
+            channelName: 'Voice room',
+            channelDescription: 'Keeps voice running while you are in a room.',
+            onlyAlertOnce: true,
+          ),
+          iosNotificationOptions: const fgt.IOSNotificationOptions(
+            showNotification: false,
+          ),
+          foregroundTaskOptions: fgt.ForegroundTaskOptions(
+            eventAction: fgt.ForegroundTaskEventAction.nothing(),
+            allowWakeLock: true,
+            allowWifiLock: true,
+          ),
+        );
+        _keepAliveInitialized = true;
+      }
+      if (await fgt.FlutterForegroundTask.isRunningService) return;
+
+      // Microphone type needs RECORD_AUDIO already granted on Android 14+;
+      // a listener who never granted it falls back to playback-only.
+      for (final types in const [
+        [fgt.ForegroundServiceTypes.microphone, fgt.ForegroundServiceTypes.mediaPlayback],
+        [fgt.ForegroundServiceTypes.mediaPlayback],
+      ]) {
+        final result = await fgt.FlutterForegroundTask.startService(
+          serviceId: 4711,
+          serviceTypes: types,
+          notificationTitle: 'Voice room active',
+          notificationText: 'Tap to return to the room',
+        );
+        if (result is fgt.ServiceRequestSuccess) return;
+        debugPrint('VoiceRoomAudioService: keep-alive start failed ($types): '
+            '${(result as fgt.ServiceRequestFailure).error}');
+      }
+    } catch (e) {
+      debugPrint('VoiceRoomAudioService: keep-alive unavailable: $e');
+    }
+  }
+
+  Future<void> _stopKeepAlive() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    try {
+      if (await fgt.FlutterForegroundTask.isRunningService) {
+        await fgt.FlutterForegroundTask.stopService();
+      }
+    } catch (e) {
+      debugPrint('VoiceRoomAudioService: keep-alive stop failed: $e');
+    }
+  }
+
   Future<_Grant?> _fetchToken(String roomId) async {
+    _tokenRefused = false;
     try {
       final idToken = await FirebaseAuth.instance.currentUser?.getIdToken();
       if (idToken == null) return null;
@@ -220,6 +413,10 @@ class VoiceRoomAudioService extends ChangeNotifier {
           .timeout(const Duration(seconds: 15));
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       if (res.statusCode != 200 || body['success'] != true) {
+        // 401 bad Firebase token / 403 not (or no longer) in the room /
+        // 404 room ended — permanent for this session, don't retry. 5xx
+        // stays retryable.
+        _tokenRefused = res.statusCode >= 400 && res.statusCode < 500;
         _error = (body['message'] as String?) ?? 'Could not start voice.';
         notifyListeners();
         return null;

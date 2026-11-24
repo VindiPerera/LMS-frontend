@@ -114,6 +114,7 @@ dependencies:
   # Blocks screenshots/recording of licensed whiteboard Library content —
   # see lib/services/screenshot_guard.dart.
   screen_protector: ^1.5.3
+  flutter_foreground_task: ^11.0.3
 
 dev_dependencies:
   flutter_test:

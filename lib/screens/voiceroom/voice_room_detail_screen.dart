@@ -182,6 +182,8 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
   @override
   void initState() {
     super.initState();
+    _releaseMinimizedRoom();
+    VoiceRoomAudioService.instance.addListener(_onAudioChanged);
     if (widget.room.id.isNotEmpty) {
       RoomParticipantService.join(
             roomId: widget.room.id,
@@ -359,7 +361,9 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
   /// Switches the screenshot guard on/off as library images come and go
   /// from this room's board — see [_screenshotGuardOn]'s doc comment.
   void _syncScreenshotGuard(List<WhiteboardItem> items) {
-    final shouldGuard = items.any((item) => item.isImage);
+    // Only the built-in licensed Library cards — a user's own shared photo
+    // must stay recordable (see WhiteboardItem.protected).
+    final shouldGuard = items.any((item) => item.isProtectedImage);
     if (shouldGuard == _screenshotGuardOn) return;
     _screenshotGuardOn = shouldGuard;
     if (shouldGuard) {
@@ -369,8 +373,86 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
     }
   }
 
+  /// Entering any room ends whatever room the user had minimized, so they're
+  /// never in two rooms at once. Without this, a room left via the Back
+  /// button (which minimizes) kept its heartbeat and room-ended watcher
+  /// running in the background while the user created/joined another one —
+  /// and when that old room later ended, its cleanup cut the new room's
+  /// audio. Covers every entry point (room creation pushes this screen
+  /// directly, bypassing openVoiceRoom). Post-frame because clearing
+  /// notifies VoiceRoomMiniWindow, which must not rebuild mid-build; this
+  /// runs inside initState, so a frame is already in progress and the
+  /// callback fires right after it.
+  void _releaseMinimizedRoom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final session = VoiceRoomSessionController.instance;
+      final minimized = session.minimizedRoom;
+      if (minimized == null) return;
+      // Same room (reopened from an invite/notification rather than the mini
+      // window): this screen's own join() reclaims the participant doc, so
+      // just stop the controller's duplicate heartbeat. Different room:
+      // actually leave it.
+      session.clear(leaveRoom: minimized.id != widget.room.id);
+    });
+  }
+
+  String? _lastAudioError;
+  bool _unlockPromptShown = false;
+  ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? _reconnectBar;
+
+  /// Surfaces VoiceRoomAudioService failures (token/connect/mic permission),
+  /// which used to fail silently — the room looked joined but had no sound.
+  /// Also offers the tap browsers require before they'll play remote voices,
+  /// and shows "Reconnecting voice…" while a dropped connection recovers.
+  void _onAudioChanged() {
+    final audio = VoiceRoomAudioService.instance;
+    final ours = audio.roomId == widget.room.id;
+    final reconnecting = ours && audio.isReconnecting;
+    if (reconnecting && _reconnectBar == null && mounted) {
+      _reconnectBar = ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Connection lost — reconnecting voice…'),
+          duration: Duration(days: 1),
+        ),
+      );
+    } else if (!reconnecting && _reconnectBar != null) {
+      _reconnectBar!.close();
+      _reconnectBar = null;
+    }
+
+    // Retry failures are expected while reconnecting — the banner above
+    // already says so, no need for an error popup per attempt.
+    final error = ours && !reconnecting ? audio.error : null;
+    if (error != null && error != _lastAudioError && mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error)));
+    }
+    _lastAudioError = error;
+
+    final needsUnlock = ours && audio.needsAudioUnlock;
+    if (needsUnlock && !_unlockPromptShown && mounted) {
+      _unlockPromptShown = true;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Your browser blocked the room\'s sound.'),
+          duration: const Duration(days: 1),
+          action: SnackBarAction(
+            label: 'Enable sound',
+            onPressed: () => VoiceRoomAudioService.instance.unlockAudio(),
+          ),
+        ),
+      );
+    } else if (!needsUnlock && _unlockPromptShown) {
+      _unlockPromptShown = false;
+      if (mounted) ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    }
+  }
+
   @override
   void dispose() {
+    VoiceRoomAudioService.instance.removeListener(_onAudioChanged);
+    _reconnectBar?.close();
     _controller.dispose();
     _toolbarScrollController.dispose();
     _commentScrollController.dispose();
@@ -390,7 +472,7 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
       // minimized — VoiceRoomSessionController now owns this session's
       // presence instead of it ending here.
       RoomParticipantService.leave(widget.room.id, _sessionId);
-      VoiceRoomAudioService.instance.disconnect();
+      VoiceRoomAudioService.instance.disconnect(widget.room.id);
     }
     super.dispose();
   }
@@ -1194,6 +1276,8 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
         imageUrl: imageUrl,
         aspectRatio: aspectRatio > 0 ? aspectRatio : item.aspectRatio,
         existingItems: _whiteboardItems,
+        // Built-in licensed card — blocks screen capture while shown.
+        protected: true,
       );
     } catch (e) {
       if (!mounted) return;
@@ -2235,26 +2319,37 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
                                           ],
                                         );
                                       }
+                                      // Packed from the left in join order
+                                      // (streamParticipants sorts by
+                                      // joinedAt): 1st joiner leftmost, each
+                                      // newcomer right beside the previous.
                                       return Row(
                                         mainAxisAlignment:
-                                            MainAxisAlignment.spaceBetween,
+                                            MainAxisAlignment.start,
                                         children: [
                                           for (final listener in preview)
-                                            GestureDetector(
-                                              onTap: () => showRoomProfileSheet(
-                                                context,
-                                                listener,
-                                                roomId: widget.room.id,
-                                                canModerate:
-                                                    me?.canModerate ?? false,
-                                                isHost: _isHost,
+                                            Padding(
+                                              padding: const EdgeInsets.only(
+                                                right: 8,
                                               ),
-                                              child: AppAvatar(
-                                                seed: listener.uid.isNotEmpty
-                                                    ? listener.uid
-                                                    : listener.name,
-                                                size: 32,
-                                                imageUrl: listener.avatarUrl,
+                                              child: GestureDetector(
+                                                onTap: () =>
+                                                    showRoomProfileSheet(
+                                                      context,
+                                                      listener,
+                                                      roomId: widget.room.id,
+                                                      canModerate:
+                                                          me?.canModerate ??
+                                                          false,
+                                                      isHost: _isHost,
+                                                    ),
+                                                child: AppAvatar(
+                                                  seed: listener.uid.isNotEmpty
+                                                      ? listener.uid
+                                                      : listener.name,
+                                                  size: 32,
+                                                  imageUrl: listener.avatarUrl,
+                                                ),
                                               ),
                                             ),
                                           if (remaining > 0)
@@ -3304,6 +3399,16 @@ class _TalkingGlowState extends State<_TalkingGlow>
                   blurRadius: 10 + t * 8,
                 ),
               ],
+            ),
+            // Solid red ring hugging the avatar (56px avatar inside this
+            // 72px box → 4px inset leaves a ~2px gap before the ring), shown
+            // together with the glow only while this person is talking.
+            padding: const EdgeInsets.all(4),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: const Color(0xFFFF3B47), width: 2.5),
+              ),
             ),
           );
         },

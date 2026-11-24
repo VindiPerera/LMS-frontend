@@ -68,6 +68,9 @@ class WhiteboardService {
     required String imageUrl,
     required double aspectRatio,
     List<WhiteboardItem> existingItems = const [],
+    // True only for the built-in licensed Library cards — see
+    // WhiteboardItem.protected.
+    bool protected = false,
   }) async {
     final uid = _uid;
     final user = AuthService.instance.currentUser;
@@ -112,6 +115,7 @@ class WhiteboardService {
       'rotation': 0,
       'zIndex': _nextZIndex(remainingItems),
       'aspectRatio': aspectRatio,
+      'protected': protected,
     });
     await batch.commit();
   }
