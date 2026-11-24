@@ -46,6 +46,15 @@ class WhiteboardItem {
   // this existed (their resize handle falls back to free resizing).
   final double? aspectRatio;
 
+  // Image only — true for the app's built-in Library topic cards (licensed
+  // exam-prep images, see WhiteboardLibraryItem.presets), which block
+  // screenshots/screen recording while on the board (see
+  // VoiceRoomDetailScreen._syncScreenshotGuard). A user's own photo —
+  // uploaded from the gallery or from their own library folders — is
+  // false, so recording keeps working while sharing it. Absent (older
+  // items) reads as false.
+  final bool protected;
+
   const WhiteboardItem({
     this.id = '',
     required this.type,
@@ -65,10 +74,12 @@ class WhiteboardItem {
     this.bold = false,
     this.textAlign = 'left',
     this.aspectRatio,
+    this.protected = false,
   });
 
   bool get isImage => type == 'image';
   bool get isText => type == 'text';
+  bool get isProtectedImage => isImage && protected;
 
   factory WhiteboardItem.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? {};
@@ -91,6 +102,7 @@ class WhiteboardItem {
       bold: data['bold'] == true,
       textAlign: (data['textAlign']?.toString().isNotEmpty ?? false) ? data['textAlign'].toString() : 'left',
       aspectRatio: data['aspectRatio'] is num ? (data['aspectRatio'] as num).toDouble() : null,
+      protected: data['protected'] == true,
     );
   }
 
@@ -131,6 +143,7 @@ class WhiteboardItem {
       bold: bold ?? this.bold,
       textAlign: textAlign ?? this.textAlign,
       aspectRatio: aspectRatio,
+      protected: protected,
     );
   }
 }

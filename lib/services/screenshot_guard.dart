@@ -13,10 +13,12 @@ import 'package:screen_protector/screen_protector.dart';
 /// one closes first switch protection off while the other is still
 /// visible.
 ///
-/// Used by whiteboard_library_sheet.dart (picking a library image) and
-/// expanded_whiteboard_screen.dart (viewing the board full-screen) — both
-/// can show licensed exam-prep images this app has no redistribution
-/// rights for.
+/// Used only for the built-in licensed exam-prep Library cards this app has
+/// no redistribution rights for: whiteboard_library_sheet.dart (while the
+/// Library folder is open) and voice_room_detail_screen.dart (while such a
+/// card — WhiteboardItem.protected — is on the board). A user's own
+/// photos never trigger it, so screen recording keeps working while
+/// sharing them.
 class ScreenshotGuard {
   ScreenshotGuard._();
 

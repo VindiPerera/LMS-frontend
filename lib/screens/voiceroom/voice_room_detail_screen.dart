@@ -361,7 +361,9 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
   /// Switches the screenshot guard on/off as library images come and go
   /// from this room's board — see [_screenshotGuardOn]'s doc comment.
   void _syncScreenshotGuard(List<WhiteboardItem> items) {
-    final shouldGuard = items.any((item) => item.isImage);
+    // Only the built-in licensed Library cards — a user's own shared photo
+    // must stay recordable (see WhiteboardItem.protected).
+    final shouldGuard = items.any((item) => item.isProtectedImage);
     if (shouldGuard == _screenshotGuardOn) return;
     _screenshotGuardOn = shouldGuard;
     if (shouldGuard) {
@@ -1274,6 +1276,8 @@ class _VoiceRoomDetailScreenState extends State<VoiceRoomDetailScreen> {
         imageUrl: imageUrl,
         aspectRatio: aspectRatio > 0 ? aspectRatio : item.aspectRatio,
         existingItems: _whiteboardItems,
+        // Built-in licensed card — blocks screen capture while shown.
+        protected: true,
       );
     } catch (e) {
       if (!mounted) return;

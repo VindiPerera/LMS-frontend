@@ -83,26 +83,37 @@ class _WhiteboardLibrarySheetState extends State<WhiteboardLibrarySheet> {
   // among others) and not inside some other folder.
   bool get _inLibraryFolder => _currentId == MediaLibraryService.libraryFolderId;
 
-  void _open(String? id, String name) => setState(() => _stack.add(_FolderStackEntry(id, name)));
+  void _open(String? id, String name) {
+    setState(() => _stack.add(_FolderStackEntry(id, name)));
+    _syncGuard();
+  }
 
   void _back() {
     if (_atRoot) return;
     setState(() => _stack.removeLast());
+    _syncGuard();
   }
 
-  @override
-  void initState() {
-    super.initState();
-    // The whole sheet, not just the Library folder specifically — these
-    // are licensed exam-prep images, and a screenshot taken one tap before
-    // actually opening the folder is just as much a capture of this
-    // content as one taken after.
-    ScreenshotGuard.enable(context);
+  // Screen capture is blocked only while the built-in Library folder (the
+  // licensed exam-prep cards) is actually open — the root view, the user's
+  // own folders and "Upload from Gallery" stay recordable, so someone
+  // screen-recording a session can still share their own photos.
+  bool _guardOn = false;
+
+  void _syncGuard() {
+    final want = _inLibraryFolder;
+    if (want == _guardOn) return;
+    _guardOn = want;
+    if (want) {
+      ScreenshotGuard.enable(context);
+    } else {
+      ScreenshotGuard.disable();
+    }
   }
 
   @override
   void dispose() {
-    ScreenshotGuard.disable();
+    if (_guardOn) ScreenshotGuard.disable();
     super.dispose();
   }
 
